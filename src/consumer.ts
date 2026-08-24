@@ -1,17 +1,40 @@
 import { getDriver } from "./native/index.ts";
 import type { NativeConsumer } from "./native/types.ts";
 import type {
-  ConsumerRunOptions, KafkaConfig, KafkaMessage, TopicPartition, Watermarks,
+  ClientOptions,
+  ConsumerRunOptions,
+  KafkaConfig,
+  KafkaMessage,
+  TopicPartition,
+  Watermarks,
 } from "./types.ts";
+import type { KafkaError } from "./errors.ts";
 
 export class Consumer implements AsyncIterable<KafkaMessage> {
   #n: NativeConsumer;
   #closed = false;
   #defaults: ConsumerRunOptions;
 
-  constructor(config: KafkaConfig = {}, defaults: ConsumerRunOptions = {}) {
-    this.#n = getDriver().consumer(config);
-    this.#defaults = defaults;
+  constructor(
+    config: KafkaConfig = {},
+    defaults: ConsumerRunOptions & ClientOptions = {},
+  ) {
+    const {
+      onDelivery,
+      onError,
+      onLog,
+      onRebalance,
+      autoRebalance,
+      ...runDefaults
+    } = defaults;
+    this.#n = getDriver().consumer(config, {
+      onDelivery,
+      onError,
+      onLog,
+      onRebalance,
+      autoRebalance,
+    });
+    this.#defaults = runDefaults;
   }
 
   subscribe(topics: string | string[]): void {
@@ -52,14 +75,13 @@ export class Consumer implements AsyncIterable<KafkaMessage> {
     return this.#n.poll(timeoutMs);
   }
 
-  /** Drain a batch of ready messages (one blocking wait, then non-blocking). */
   pollBatch(timeoutMs = 1000, max = 64): KafkaMessage[] {
     this.#e();
     return this.#n.pollBatch(timeoutMs, max);
   }
 
   messages(opts: ConsumerRunOptions = {}): AsyncGenerator<KafkaMessage, void, unknown> {
-    const o = { ...this.#defaults, ...opts };
+    const o = { copy: true, ...this.#defaults, ...opts };
     const timeoutMs = o.timeoutMs ?? 100;
     const batchSize = o.batchSize ?? 64;
     const self = this;
@@ -100,7 +122,7 @@ export class Consumer implements AsyncIterable<KafkaMessage> {
    * Messages are done() after the batch body returns.
    */
   batches(opts: ConsumerRunOptions = {}): AsyncGenerator<KafkaMessage[], void, unknown> {
-    const o = { ...this.#defaults, ...opts };
+    const o = { copy: true, ...this.#defaults, ...opts };
     const timeoutMs = o.timeoutMs ?? 100;
     const batchSize = o.batchSize ?? 512;
     const self = this;
@@ -134,7 +156,6 @@ export class Consumer implements AsyncIterable<KafkaMessage> {
   }
 
   #commitBatch(batch: KafkaMessage[]): void {
-    // last offset+1 per topic-partition
     const last = new Map<string, KafkaMessage>();
     for (const m of batch) last.set(m.topic + "\0" + m.partition, m);
     this.commit(
@@ -209,7 +230,12 @@ export class Consumer implements AsyncIterable<KafkaMessage> {
     return this.#n.memberId();
   }
 
-  async close(): Promise<void> {
+  fatalError(): KafkaError | null {
+    if (this.#closed) return null;
+    return this.#n.fatalError();
+  }
+
+  async close(_timeoutMs = 10_000): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
     this.#n.close();
@@ -217,5 +243,7 @@ export class Consumer implements AsyncIterable<KafkaMessage> {
 
   #e() {
     if (this.#closed) throw new Error("Consumer is closed");
+    const f = this.#n.fatalError();
+    if (f) throw f;
   }
 }

@@ -15,9 +15,15 @@ export interface KafkaMessage {
   topic: string;
   partition: number;
   offset: bigint;
-  /** Valid until done() — zero-copy view into librdkafka memory on FFI. */
+  /**
+   * Key bytes. Copied by default (safe). With `{ copy: false }` on FFI this may be
+   * a zero-copy view valid only until `done()`.
+   */
   key: Uint8Array | null;
-  /** Valid until done() — zero-copy view into librdkafka memory on FFI. */
+  /**
+   * Value bytes. Copied by default (safe). With `{ copy: false }` on FFI this may be
+   * a zero-copy view valid only until `done()`.
+   */
   value: Uint8Array | null;
   timestamp: bigint;
   timestampType: number;
@@ -34,6 +40,17 @@ export interface ProduceInput {
   partition?: number;
   timestamp?: number | bigint;
   headers?: MessageHeaders;
+  /** Opaque token returned in delivery reports (string/number only). */
+  opaque?: string | number;
+}
+
+export interface DeliveryReport {
+  topic: string;
+  partition: number;
+  offset: bigint;
+  errorCode: number;
+  errorMessage: string | null;
+  opaque?: string | number;
 }
 
 export interface ConsumerRunOptions {
@@ -45,6 +62,28 @@ export interface ConsumerRunOptions {
   eachBatchCommit?: boolean;
   stopOnEof?: boolean;
   throwOnError?: boolean;
+  /**
+   * Copy key/value out of librdkafka memory (default true).
+   * Set false on FFI for zero-copy; then buffers are invalid after done().
+   */
+  copy?: boolean;
+}
+
+export interface ClientOptions {
+  onDelivery?: (report: DeliveryReport) => void;
+  onError?: (err: import("./errors.ts").KafkaError) => void;
+  onLog?: (level: number, facility: string, message: string) => void;
+  onRebalance?: (event: {
+    kind: "assign" | "revoke" | "error";
+    partitions: TopicPartition[];
+    error?: import("./errors.ts").KafkaError;
+  }) => void;
+  /**
+   * Consumer only. If true (default), install librdkafka rebalance_cb that
+   * assign/unassigns automatically (eager + cooperative). Set false only if you
+   * fully handle assignment yourself.
+   */
+  autoRebalance?: boolean;
 }
 
 export interface Watermarks {

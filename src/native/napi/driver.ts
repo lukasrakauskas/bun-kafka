@@ -4,7 +4,9 @@ import { KafkaError } from "../../errors.ts";
 import type {
   ClusterMetadata, KafkaConfig, KafkaMessage, ProduceInput, TopicPartition, Watermarks,
 } from "../../types.ts";
-import type { NativeAdmin, NativeConsumer, NativeDriver, NativeProducer } from "../types.ts";
+import type {
+  ClientEventHandlers, NativeAdmin, NativeConsumer, NativeDriver, NativeProducer,
+} from "../types.ts";
 
 type Addon = {
   version(): { number: number; string: string };
@@ -35,6 +37,7 @@ type Addon = {
   memberId(h: unknown): string | null;
   assignmentLost(h: unknown): number;
   rebalanceProtocol(h: unknown): string;
+  fatalError?(h: unknown): { code: number; message: string } | null;
   messageDone(wrap: unknown): void;
   adminMetadata(h: unknown, allTopics: number, timeoutMs: number): ClusterMetadata;
   adminClusterId(h: unknown, timeoutMs: number): string | null;
@@ -55,6 +58,7 @@ function loadAddon(): Addon {
 function flatten(cfg: KafkaConfig): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(cfg)) {
+    if (k.startsWith("bun.kafka.")) continue;
     out[k] = typeof v === "boolean" ? (v ? "true" : "false") : String(v);
   }
   return out;
@@ -95,10 +99,20 @@ function A(): Addon {
   return (addon ??= loadAddon());
 }
 
+function readFatal(h: unknown): KafkaError | null {
+  const a = A();
+  if (!a.fatalError) return null;
+  const f = a.fatalError(h);
+  if (!f) return null;
+  return new KafkaError(f.code, f.message, { fatal: true });
+}
+
 class NapiProducer implements NativeProducer {
   #h: unknown;
   #closed = false;
-  constructor(cfg: KafkaConfig) {
+  constructor(cfg: KafkaConfig, _handlers: ClientEventHandlers = {}) {
+    // Delivery/error callbacks require C-side support; flush remains durability boundary.
+    // Handlers.onDelivery is reserved for a future NAPI callback bridge.
     try {
       this.#h = A().producerNew(flatten({
         "bootstrap.servers": "localhost:9092",
@@ -118,6 +132,7 @@ class NapiProducer implements NativeProducer {
   poll(t: number) { this.#e(); return A().producerPoll(this.#h, t); }
   flush(t: number) { this.#e(); try { A().producerFlush(this.#h, t); } catch (e) { mapErr(e); } }
   outQueueLength() { this.#e(); return A().producerOutq(this.#h); }
+  fatalError() { return this.#closed ? null : readFatal(this.#h); }
   close() { if (this.#closed) return; this.#closed = true; A().handleClose(this.#h, 0); }
   #e() { if (this.#closed) throw new Error("Producer is closed"); }
 }
@@ -125,7 +140,8 @@ class NapiProducer implements NativeProducer {
 class NapiConsumer implements NativeConsumer {
   #h: unknown;
   #closed = false;
-  constructor(cfg: KafkaConfig) {
+  constructor(cfg: KafkaConfig, _handlers: ClientEventHandlers = {}) {
+    // No custom rebalance_cb => librdkafka automatic assign/revoke (production default).
     try {
       this.#h = A().consumerNew(flatten({
         "bootstrap.servers": "localhost:9092",
@@ -156,7 +172,7 @@ class NapiConsumer implements NativeConsumer {
   }
   pollBatch(timeoutMs: number, max: number) {
     this.#e();
-    const out: import("../../types.ts").KafkaMessage[] = [];
+    const out: KafkaMessage[] = [];
     try {
       const first = A().consumerPoll(this.#h, timeoutMs);
       if (!first) return out;
@@ -189,6 +205,7 @@ class NapiConsumer implements NativeConsumer {
     this.#e(); try { return A().offsetsForTimes(this.#h, q, t); } catch (e) { mapErr(e); }
   }
   memberId() { this.#e(); return A().memberId(this.#h); }
+  fatalError() { return this.#closed ? null : readFatal(this.#h); }
   close() { if (this.#closed) return; this.#closed = true; A().handleClose(this.#h, 1); }
   #e() { if (this.#closed) throw new Error("Consumer is closed"); }
 }
@@ -196,7 +213,7 @@ class NapiConsumer implements NativeConsumer {
 class NapiAdmin implements NativeAdmin {
   #h: unknown;
   #closed = false;
-  constructor(cfg: KafkaConfig) {
+  constructor(cfg: KafkaConfig, _handlers: ClientEventHandlers = {}) {
     try {
       this.#h = A().producerNew(flatten({ "bootstrap.servers": "localhost:9092", ...cfg }));
     } catch (e) { mapErr(e); }
@@ -209,6 +226,7 @@ class NapiAdmin implements NativeAdmin {
     this.#e();
     return A().adminClusterId(this.#h, timeoutMs);
   }
+  fatalError() { return this.#closed ? null : readFatal(this.#h); }
   close() { if (this.#closed) return; this.#closed = true; A().handleClose(this.#h, 0); }
   #e() { if (this.#closed) throw new Error("Admin is closed"); }
 }
@@ -217,9 +235,9 @@ export const napiDriver: NativeDriver = {
   kind: "napi",
   version: () => A().version(),
   err2str: (c) => A().err2str(c),
-  producer: (c) => new NapiProducer(c),
-  consumer: (c) => new NapiConsumer(c),
-  admin: (c) => new NapiAdmin(c),
+  producer: (c, h) => new NapiProducer(c, h),
+  consumer: (c, h) => new NapiConsumer(c, h),
+  admin: (c, h) => new NapiAdmin(c, h),
 };
 
 export function napiAvailable(): boolean {

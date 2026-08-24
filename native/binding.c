@@ -573,6 +573,25 @@ static napi_value rebalance_protocol(napi_env env, napi_callback_info info) {
   return str_val(env, rd_kafka_rebalance_protocol(h->rk));
 }
 
+static napi_value fatal_error_js(napi_env env, napi_callback_info info) {
+  size_t argc=1; napi_value args[1];
+  napi_get_cb_info(env, info, &argc, args, NULL, NULL);
+  Handle *h = get_handle(env, args[0]);
+  char errstr[512];
+  rd_kafka_resp_err_t code = rd_kafka_fatal_error(h->rk, errstr, sizeof(errstr));
+  if (!code) { napi_value n; napi_get_null(env, &n); return n; }
+  napi_value o, c, m;
+  napi_create_object(env, &o);
+  napi_create_int32(env, (int)code, &c);
+  napi_set_named_property(env, o, "code", c);
+  napi_create_string_utf8(env, errstr, NAPI_AUTO_LENGTH, &m);
+  napi_set_named_property(env, o, "message", m);
+  return o;
+}
+
+/* Default rebalance: librdkafka handles it when no cb is set.
+ * For multi-member groups that is the production-safe default. */
+
 static napi_value admin_metadata(napi_env env, napi_callback_info info) {
   size_t argc=3; napi_value args[3];
   napi_get_cb_info(env, info, &argc, args, NULL, NULL);
@@ -653,6 +672,7 @@ static napi_value init(napi_env env, napi_value exports) {
   EXPORT("memberId", member_id);
   EXPORT("assignmentLost", assignment_lost);
   EXPORT("rebalanceProtocol", rebalance_protocol);
+  EXPORT("fatalError", fatal_error_js);
   EXPORT("messageDone", message_done);
   EXPORT("adminMetadata", admin_metadata);
   EXPORT("adminClusterId", admin_clusterid);

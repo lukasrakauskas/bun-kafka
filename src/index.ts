@@ -2,14 +2,31 @@ export { Producer } from "./producer.ts";
 export { Consumer } from "./consumer.ts";
 export { Admin } from "./admin.ts";
 export { KafkaError } from "./errors.ts";
-export { getDriver, setDriver, useNative, ffiDriver } from "./native/index.ts";
-export type { NativeDriver, NativeProducer, NativeConsumer, NativeAdmin } from "./native/types.ts";
+export { installShutdown } from "./shutdown.ts";
+export {
+  getDriver,
+  setDriver,
+  useNative,
+  useProductionNative,
+  ffiDriver,
+  napiBuilt,
+  defaultKind,
+} from "./native/index.ts";
+export type {
+  NativeDriver,
+  NativeProducer,
+  NativeConsumer,
+  NativeAdmin,
+  ClientEventHandlers,
+} from "./native/types.ts";
 export type {
   KafkaConfig,
   KafkaMessage,
   ProduceInput,
   TopicPartition,
   ConsumerRunOptions,
+  ClientOptions,
+  DeliveryReport,
   MessageHeaders,
   ClusterMetadata,
   Watermarks,

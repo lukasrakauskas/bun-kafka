@@ -5,7 +5,10 @@ import { KafkaError } from "../../errors.ts";
 import type {
   ClusterMetadata, KafkaConfig, KafkaMessage, ProduceInput, TopicPartition, Watermarks,
 } from "../../types.ts";
-import type { NativeAdmin, NativeConsumer, NativeDriver, NativeProducer } from "../types.ts";
+import type {
+  ClientEventHandlers, NativeAdmin, NativeConsumer, NativeDriver, NativeProducer,
+} from "../types.ts";
+import { JSCallback } from "./bindings.ts";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 
@@ -43,13 +46,26 @@ function confSet(conf: Pointer, cfg: KafkaConfig) {
   }
 }
 
-function newRk(type: number, cfg: KafkaConfig): Pointer {
+function newRk(
+  type: number,
+  cfg: KafkaConfig,
+  setupConf?: (conf: Pointer) => void,
+): Pointer {
   const conf = rk.rd_kafka_conf_new()!;
   confSet(conf, cfg);
+  setupConf?.(conf);
   const errbuf = new Uint8Array(512);
   const h = rk.rd_kafka_new(type, conf, ptr(errbuf), BigInt(errbuf.byteLength));
   if (!h) throw new Error(new TextDecoder().decode(errbuf).replace(/\0.*$/, "") || "rd_kafka_new failed");
   return h;
+}
+
+function fatalOf(handle: Pointer): import("../../errors.ts").KafkaError | null {
+  const buf = new Uint8Array(512);
+  const code = rk.rd_kafka_fatal_error(handle, ptr(buf), BigInt(buf.byteLength));
+  if (!code) return null;
+  const msg = new TextDecoder().decode(buf).replace(/\0.*$/, "");
+  return new KafkaError(code, msg || rk.rd_kafka_err2str(code), { fatal: true });
 }
 
 function makeList(parts: Array<string | TopicPartition>): Pointer {
@@ -87,11 +103,12 @@ function readList(list: Pointer): TopicPartition[] {
   return out;
 }
 
-function viewAt(p: any, len: any): Uint8Array | null {
+function viewAt(p: any, len: any, copy: boolean): Uint8Array | null {
   if (!p || !len) return null;
   const n = Number(len);
   if (n <= 0) return null;
-  return new Uint8Array(toArrayBuffer(p, 0, n));
+  const v = new Uint8Array(toArrayBuffer(p, 0, n));
+  return copy ? v.slice() : v;
 }
 
 // reusable header out-slots
@@ -116,7 +133,7 @@ function readHeaders(msg: Pointer): Record<string, Uint8Array | null> {
   return out;
 }
 
-function readMsg(msg: Pointer, withHeaders = false): KafkaMessage {
+function readMsg(msg: Pointer, copy = true): KafkaMessage {
   const err = read.i32(msg as any, C.MSG.err);
   if (err !== 0) {
     const estr = rk.rd_kafka_message_errstr(msg) || rk.rd_kafka_err2str(err);
@@ -126,19 +143,22 @@ function readMsg(msg: Pointer, withHeaders = false): KafkaMessage {
   const rkt = read.ptr(msg as any, C.MSG.rkt);
   const timestamp = rk.rd_kafka_message_timestamp(msg, ptr(tsTypeBuf));
   let freed = false;
-  let headers: Record<string, Uint8Array | null> | null = withHeaders ? readHeaders(msg) : null;
+  let headers: Record<string, Uint8Array | null> | null = null;
+  const key = viewAt(read.ptr(msg as any, C.MSG.key), read.u64(msg as any, C.MSG.key_len), copy);
+  const value = viewAt(read.ptr(msg as any, C.MSG.payload), read.u64(msg as any, C.MSG.len), copy);
+  // if copied, native payload no longer needed for key/value; still need msg for headers lazy + destroy
   return {
     topic: rkt ? (rk.rd_kafka_topic_name(rkt as any) ?? "") : "",
     partition: read.i32(msg as any, C.MSG.partition),
     offset: read.i64(msg as any, C.MSG.offset),
-    key: viewAt(read.ptr(msg as any, C.MSG.key), read.u64(msg as any, C.MSG.key_len)),
-    value: viewAt(read.ptr(msg as any, C.MSG.payload), read.u64(msg as any, C.MSG.len)),
+    key,
+    value,
     timestamp,
     timestampType: tsTypeBuf[0]!,
     get headers() {
       return (headers ??= readHeaders(msg));
     },
-    brokerId: -1, // filled lazily via getter below would need more; set on demand cheap enough
+    brokerId: -1,
     done() {
       if (!freed) {
         freed = true;
@@ -287,16 +307,58 @@ class FfiProducer implements NativeProducer {
   #rk: Pointer;
   #closed = false;
   #topics = new Map<string, Pointer>();
-  constructor(cfg: KafkaConfig) {
-    this.#rk = newRk(C.PRODUCER, {
-      "bootstrap.servers": "localhost:9092",
-      "allow.auto.create.topics": "true",
-      "linger.ms": 5,
-      "batch.num.messages": 10000,
-      "queue.buffering.max.messages": 100000,
-      "socket.nagle.disable": true,
-      ...cfg,
-    });
+  #cbs: JSCallback[] = [];
+  #handlers: ClientEventHandlers;
+  constructor(cfg: KafkaConfig, handlers: ClientEventHandlers = {}) {
+    this.#handlers = handlers;
+    this.#rk = newRk(
+      C.PRODUCER,
+      {
+        "bootstrap.servers": "localhost:9092",
+        "allow.auto.create.topics": "true",
+        "linger.ms": 5,
+        "batch.num.messages": 10000,
+        "queue.buffering.max.messages": 100000,
+        "socket.nagle.disable": true,
+        ...cfg,
+      },
+      (conf) => this.#installProducerCbs(conf),
+    );
+  }
+  #installProducerCbs(conf: Pointer) {
+    if (this.#handlers.onDelivery) {
+      const cb = new JSCallback(
+        (_rk: any, msg: any) => {
+          try {
+            const err = read.i32(msg, C.MSG.err);
+            const rkt = read.ptr(msg, C.MSG.rkt);
+            this.#handlers.onDelivery?.({
+              topic: rkt ? (rk.rd_kafka_topic_name(rkt as any) ?? "") : "",
+              partition: read.i32(msg, C.MSG.partition),
+              offset: read.i64(msg, C.MSG.offset),
+              errorCode: err,
+              errorMessage: err ? (rk.rd_kafka_message_errstr(msg) || rk.rd_kafka_err2str(err)) : null,
+            });
+          } catch {}
+        },
+        { args: ["ptr", "ptr"], returns: "void", threadsafe: false },
+      );
+      this.#cbs.push(cb);
+      rk.rd_kafka_conf_set_dr_msg_cb(conf, cb.ptr);
+    }
+    if (this.#handlers.onError) {
+      const cb = new JSCallback(
+        (_rk: any, err: number, reason: any) => {
+          try {
+            const msg = reason ? new CString(reason) : rk.rd_kafka_err2str(err);
+            this.#handlers.onError?.(new KafkaError(err, msg));
+          } catch {}
+        },
+        { args: ["ptr", "i32", "ptr"], returns: "void", threadsafe: false },
+      );
+      this.#cbs.push(cb);
+      rk.rd_kafka_conf_set_error_cb(conf, cb.ptr);
+    }
   }
   send(msg: ProduceInput) {
     this.#e();
@@ -314,12 +376,17 @@ class FfiProducer implements NativeProducer {
     this.#e();
     return rk.rd_kafka_outq_len(this.#rk);
   }
+  fatalError() {
+    return fatalOf(this.#rk);
+  }
   close() {
     if (this.#closed) return;
     this.#closed = true;
     for (const t of this.#topics.values()) rk.rd_kafka_topic_destroy(t);
     this.#topics.clear();
     rk.rd_kafka_destroy(this.#rk);
+    for (const c of this.#cbs) c.close();
+    this.#cbs = [];
   }
   #e() {
     if (this.#closed) throw new Error("Producer is closed");
@@ -329,19 +396,108 @@ class FfiProducer implements NativeProducer {
 class FfiConsumer implements NativeConsumer {
   #rk: Pointer;
   #closed = false;
-  constructor(cfg: KafkaConfig) {
-    this.#rk = newRk(C.CONSUMER, {
-      "bootstrap.servers": "localhost:9092",
-      "group.id": cfg["group.id"] ?? `bun-kafka-${crypto.randomUUID()}`,
-      "enable.auto.commit": cfg["enable.auto.commit"] ?? false,
-      "auto.offset.reset": cfg["auto.offset.reset"] ?? "earliest",
-      "allow.auto.create.topics": "true",
-      "fetch.wait.max.ms": cfg["fetch.wait.max.ms"] ?? 50,
-      "fetch.min.bytes": cfg["fetch.min.bytes"] ?? 1,
-      ...cfg,
-    });
+  #cbs: JSCallback[] = [];
+  #handlers: ClientEventHandlers;
+  #copy = true;
+  constructor(cfg: KafkaConfig, handlers: ClientEventHandlers = {}) {
+    this.#handlers = handlers;
+    const autoRebalance = (handlers as ClientEventHandlers & { autoRebalance?: boolean }).autoRebalance !== false;
+    // copy default true; consumers pass via poll options later — store on instance from cfg flag
+    if ((cfg as any)["bun.kafka.copy"] === false || (cfg as any)["bun.kafka.copy"] === "false") {
+      this.#copy = false;
+    }
+    const { ["bun.kafka.copy"]: _drop, ...rkCfg } = cfg as any;
+    this.#rk = newRk(
+      C.CONSUMER,
+      {
+        "bootstrap.servers": "localhost:9092",
+        "group.id": rkCfg["group.id"] ?? `bun-kafka-${crypto.randomUUID()}`,
+        "enable.auto.commit": rkCfg["enable.auto.commit"] ?? false,
+        "auto.offset.reset": rkCfg["auto.offset.reset"] ?? "earliest",
+        "allow.auto.create.topics": "true",
+        "fetch.wait.max.ms": rkCfg["fetch.wait.max.ms"] ?? 50,
+        "fetch.min.bytes": rkCfg["fetch.min.bytes"] ?? 1,
+        ...rkCfg,
+      },
+      (conf) => this.#installConsumerCbs(conf, autoRebalance),
+    );
     check(rk.rd_kafka_poll_set_consumer(this.#rk), "poll_set_consumer");
   }
+  #installConsumerCbs(conf: Pointer, autoRebalance: boolean) {
+    if (autoRebalance || this.#handlers.onRebalance) {
+      const self = this;
+      const cb = new JSCallback(
+        (rkHandle: any, err: number, partitions: any) => {
+          try {
+            const list = partitions as Pointer;
+            const parts = list ? readList(list) : [];
+            if (err === C.ASSIGN_PARTITIONS) {
+              self.#handlers.onRebalance?.({ kind: "assign", partitions: parts });
+              if (autoRebalance) {
+                const proto = rk.rd_kafka_rebalance_protocol(rkHandle) ?? "EAGER";
+                if (proto === "COOPERATIVE") {
+                  const e = rk.rd_kafka_incremental_assign(rkHandle, list);
+                  if (e) {
+                                        const code = rk.rd_kafka_error_code(e);
+                    const msg = rk.rd_kafka_error_string(e);
+                    rk.rd_kafka_error_destroy(e);
+                    self.#handlers.onError?.(new KafkaError(code, msg));
+                  }
+                } else {
+                  check(rk.rd_kafka_assign(rkHandle, list), "rebalance assign");
+                }
+              }
+            } else if (err === C.REVOKE_PARTITIONS) {
+              self.#handlers.onRebalance?.({ kind: "revoke", partitions: parts });
+              if (autoRebalance) {
+                const proto = rk.rd_kafka_rebalance_protocol(rkHandle) ?? "EAGER";
+                if (proto === "COOPERATIVE") {
+                  const e = rk.rd_kafka_incremental_unassign(rkHandle, list);
+                  if (e) {
+                    const code = rk.rd_kafka_error_code(e);
+                    const msg = rk.rd_kafka_error_string(e);
+                    rk.rd_kafka_error_destroy(e);
+                    self.#handlers.onError?.(new KafkaError(code, msg));
+                  }
+                } else {
+                  check(rk.rd_kafka_assign(rkHandle, null), "rebalance revoke");
+                }
+              }
+            } else {
+              const ke = new KafkaError(err, rk.rd_kafka_err2str(err));
+              self.#handlers.onRebalance?.({ kind: "error", partitions: parts, error: ke });
+              if (autoRebalance) {
+                try { rk.rd_kafka_assign(rkHandle, null); } catch {}
+              }
+            }
+          } catch (e) {
+            try {
+              self.#handlers.onError?.(
+                e instanceof KafkaError ? e : new KafkaError(-1, String(e)),
+              );
+            } catch {}
+          }
+        },
+        { args: ["ptr", "i32", "ptr"], returns: "void", threadsafe: false },
+      );
+      this.#cbs.push(cb);
+      rk.rd_kafka_conf_set_rebalance_cb(conf, cb.ptr);
+    }
+    if (this.#handlers.onError) {
+      const cb = new JSCallback(
+        (_rk: any, err: number, reason: any) => {
+          try {
+            const msg = reason ? new CString(reason) : rk.rd_kafka_err2str(err);
+            this.#handlers.onError?.(new KafkaError(err, msg));
+          } catch {}
+        },
+        { args: ["ptr", "i32", "ptr"], returns: "void", threadsafe: false },
+      );
+      this.#cbs.push(cb);
+      rk.rd_kafka_conf_set_error_cb(conf, cb.ptr);
+    }
+  }
+
   subscribe(topics: string[]) {
     this.#e();
     const list = makeList(topics);
@@ -393,7 +549,7 @@ class FfiConsumer implements NativeConsumer {
       }
       throw new KafkaError(err, estr);
     }
-    return readMsg(raw);
+    return readMsg(raw, this.#copy);
   }
 
   poll(timeoutMs: number): KafkaMessage | null {
@@ -486,18 +642,22 @@ class FfiConsumer implements NativeConsumer {
     rk.rd_kafka_mem_free(this.#rk, p as any);
     return s;
   }
+  fatalError() { return fatalOf(this.#rk); }
   close() {
     if (this.#closed) return;
     this.#closed = true;
     rk.rd_kafka_destroy(this.#rk);
+    for (const c of this.#cbs) c.close();
+    this.#cbs = [];
   }
   #e() { if (this.#closed) throw new Error("Consumer is closed"); }
 }
 
+
 class FfiAdmin implements NativeAdmin {
   #rk: Pointer;
   #closed = false;
-  constructor(cfg: KafkaConfig) {
+  constructor(cfg: KafkaConfig, _handlers: ClientEventHandlers = {}) {
     this.#rk = newRk(C.PRODUCER, { "bootstrap.servers": "localhost:9092", ...cfg });
   }
   metadata(allTopics: boolean, timeoutMs: number) {
@@ -511,10 +671,11 @@ class FfiAdmin implements NativeAdmin {
     this.#e();
     const p = rk.rd_kafka_clusterid(this.#rk, timeoutMs);
     if (!p) return null;
-    const s = new CString(p as any);
+    const str = new CString(p as any);
     rk.rd_kafka_mem_free(this.#rk, p as any);
-    return s;
+    return str;
   }
+  fatalError() { return fatalOf(this.#rk); }
   close() { if (this.#closed) return; this.#closed = true; rk.rd_kafka_destroy(this.#rk); }
   #e() { if (this.#closed) throw new Error("Admin is closed"); }
 }
@@ -523,7 +684,7 @@ export const ffiDriver: NativeDriver = {
   kind: "ffi",
   version: () => ({ number: rk.rd_kafka_version(), string: rk.rd_kafka_version_str() ?? "" }),
   err2str: (c) => rk.rd_kafka_err2str(c) ?? `err ${c}`,
-  producer: (c) => new FfiProducer(c),
-  consumer: (c) => new FfiConsumer(c),
-  admin: (c) => new FfiAdmin(c),
+  producer: (c, h) => new FfiProducer(c, h),
+  consumer: (c, h) => new FfiConsumer(c, h),
+  admin: (c, h) => new FfiAdmin(c, h),
 };

@@ -1,20 +1,35 @@
 import type {
   ClusterMetadata,
+  DeliveryReport,
   KafkaConfig,
   KafkaMessage,
   ProduceInput,
   TopicPartition,
   Watermarks,
 } from "../types.ts";
+import type { KafkaError } from "../errors.ts";
+
+export type ClientEventHandlers = {
+  onDelivery?: (report: DeliveryReport) => void;
+  onError?: (err: KafkaError) => void;
+  onLog?: (level: number, facility: string, message: string) => void;
+  onRebalance?: (event: {
+    kind: "assign" | "revoke" | "error";
+    partitions: TopicPartition[];
+    error?: KafkaError;
+  }) => void;
+  /** Default true: auto assign/revoke in rebalance_cb. */
+  autoRebalance?: boolean;
+};
 
 /** Low-level librdkafka backend. Core talks only to this. */
 export interface NativeDriver {
   readonly kind: "ffi" | "napi";
   version(): { number: number; string: string };
   err2str(code: number): string;
-  producer(config: KafkaConfig): NativeProducer;
-  consumer(config: KafkaConfig): NativeConsumer;
-  admin(config: KafkaConfig): NativeAdmin;
+  producer(config: KafkaConfig, handlers?: ClientEventHandlers): NativeProducer;
+  consumer(config: KafkaConfig, handlers?: ClientEventHandlers): NativeConsumer;
+  admin(config: KafkaConfig, handlers?: ClientEventHandlers): NativeAdmin;
 }
 
 export interface NativeProducer {
@@ -22,6 +37,7 @@ export interface NativeProducer {
   poll(timeoutMs: number): number;
   flush(timeoutMs: number): void;
   outQueueLength(): number;
+  fatalError(): KafkaError | null;
   close(): void;
 }
 
@@ -33,9 +49,7 @@ export interface NativeConsumer {
   assignment(): TopicPartition[];
   assignmentLost(): boolean;
   rebalanceProtocol(): string;
-  /** One message, null on idle/timeout/eof. */
   poll(timeoutMs: number): KafkaMessage | null;
-  /** Drain up to max messages with a single blocking wait, then non-blocking. */
   pollBatch(timeoutMs: number, max: number): KafkaMessage[];
   commit(offsets: TopicPartition[] | null, async: boolean): void;
   committed(partitions: TopicPartition[], timeoutMs: number): TopicPartition[];
@@ -48,11 +62,13 @@ export interface NativeConsumer {
   getWatermarkOffsets(topic: string, partition: number): Watermarks;
   offsetsForTimes(queries: TopicPartition[], timeoutMs: number): TopicPartition[];
   memberId(): string | null;
+  fatalError(): KafkaError | null;
   close(): void;
 }
 
 export interface NativeAdmin {
   metadata(allTopics: boolean, timeoutMs: number): ClusterMetadata;
   clusterId(timeoutMs: number): string | null;
+  fatalError(): KafkaError | null;
   close(): void;
 }

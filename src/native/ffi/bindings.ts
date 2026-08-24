@@ -1,4 +1,4 @@
-import { dlopen, FFIType, ptr, read, toArrayBuffer, CString, type Pointer } from "bun:ffi";
+import { dlopen, FFIType, ptr, read, toArrayBuffer, CString, JSCallback, type Pointer } from "bun:ffi";
 import { existsSync } from "node:fs";
 
 const { i32, i64, u64, ptr: p, cstring, void: v } = FFIType;
@@ -30,7 +30,14 @@ export const lib = dlopen(findLib(), {
   rd_kafka_conf_new: { args: [], returns: p },
   rd_kafka_conf_destroy: { args: [p], returns: v },
   rd_kafka_conf_set: { args: [p, cstring, cstring, p, u64], returns: i32 },
+  rd_kafka_conf_set_dr_msg_cb: { args: [p, p], returns: v },
+  rd_kafka_conf_set_rebalance_cb: { args: [p, p], returns: v },
+  rd_kafka_conf_set_error_cb: { args: [p, p], returns: v },
+  rd_kafka_conf_set_opaque: { args: [p, p], returns: v },
   rd_kafka_new: { args: [i32, p, p, u64], returns: p },
+  rd_kafka_fatal_error: { args: [p, p, u64], returns: i32 },
+  rd_kafka_incremental_assign: { args: [p, p], returns: p },
+  rd_kafka_incremental_unassign: { args: [p, p], returns: p },
   rd_kafka_destroy: { args: [p], returns: v },
   rd_kafka_destroy_flags: { args: [p, i32], returns: v },
   rd_kafka_name: { args: [p], returns: cstring },
@@ -88,7 +95,7 @@ export const lib = dlopen(findLib(), {
 });
 
 export const rk = lib.symbols;
-export { ptr, read, toArrayBuffer, CString, type Pointer };
+export { ptr, read, toArrayBuffer, CString, JSCallback, type Pointer };
 
 export const C = {
   PRODUCER: 0,
@@ -108,6 +115,8 @@ export const C = {
   NO_ERROR: 0,
   TIMED_OUT: -185,
   PARTITION_EOF: -191,
+  ASSIGN_PARTITIONS: -175,
+  REVOKE_PARTITIONS: -174,
   MSG: { err: 0, rkt: 8, partition: 16, payload: 24, len: 32, key: 40, key_len: 48, offset: 56 },
   TPL: { cnt: 0, elems: 8 },
   TP: { size: 64, topic: 0, partition: 8, offset: 16, err: 48 },

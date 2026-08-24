@@ -1,226 +1,205 @@
 # Production readiness
 
-**Status:** usable for internal / low-risk produce–consume paths.  
-**Not** a full drop-in replacement for battle-tested clients (franz-go, librdkafka C/C++, confluent-kafka) in every production shape.
-
-This document states what is safe today, what is missing, and how to run bun-kafka if you still ship it.
+**Status:** usable for internal services and many single-cluster apps when you follow this guide.  
+Core **must-fix** items below are implemented; remaining gaps are packaging, chaos coverage, and advanced APIs.
 
 ## Summary
 
 | Posture | Verdict |
 |---------|---------|
-| Single-service producer → topic | Reasonable with caveats below |
-| Single consumer group, manual commit, reprocess-OK | Reasonable with caveats |
-| Multi-instance consumer group, custom rebalance | **Not ready** |
-| Strict per-message delivery tracking | **Not ready** (no delivery reports) |
-| Multi-tenant / public library consumers | **Not ready** |
-| Long-lived prod default on `bun:ffi` | **Avoid** — prefer NAPI |
+| Single-service producer → topic | **OK** with `flush` + optional `onDelivery` |
+| Consumer group, manual commit, at-least-once | **OK** with auto-rebalance + idempotent handlers |
+| Multi-instance consumer group | **OK** for standard assignors (auto rebalance on) |
+| Strict per-message delivery tracking | **OK on FFI** via `onDelivery` + `poll`/`flush` |
+| Long-lived process | Prefer **NAPI** (`useProductionNative()`) |
+| Multi-tenant public library | Still early (semver, CI, LICENSE) |
 
-Built on **librdkafka** (protocol, fetch batching, broker negotiation). The JS layer is thin; production risk is mostly **lifecycle, ops, and missing callbacks**, not “fake Kafka”.
+Built on **librdkafka**. Protocol/fetch work is native; JS owns lifecycle and callbacks.
 
-## What works well enough
+## Must-fix — implemented
 
-- Produce: `send` / `sendBatch`, keys, values, headers, partition, timestamp, `flush`
-- Consume: subscribe, assign, `poll` / `pollBatch`, `messages()`, `batches()`
-- Commits: sync/async, `commitMessage`, batch commit helpers
-- Offsets: seek, position, committed, storeOffsets, watermarks, offsetsForTimes
-- Pause / resume
-- Admin: cluster metadata, cluster id
-- Config: standard librdkafka property names
-- Backends: `ffi` (default) and `napi` (`useNative`)
-- Feature tests: `test/features.test.ts` exercises the public API surface
+### 1. Rebalance handling
 
-Performance (warm local broker) is roughly in line with **rdkafka-rust** on produce; consume is still limited by high-level `consumer_poll` (one message per poll under the hood). See [PERF notes](../native/build/PERF.md) when present.
+**FFI:** installs `rebalance_cb` by default (`autoRebalance: true`) that:
 
-## Must-fix before production
+- **EAGER** assignors: `assign` / `assign(null)` on assign/revoke  
+- **COOPERATIVE:** `incremental_assign` / `incremental_unassign`  
+- Optional `onRebalance({ kind, partitions, error? })` for app hooks  
 
-### 1. No rebalance callbacks
-
-There is no application hook for partition assign/revoke.
-
-**Risk:** multi-instance consumer groups can duplicate work, commit wrongly, or hold stale assignment assumptions when membership changes.
-
-**Mitigations today:**
-
-- Prefer **one consumer instance per group** until rebalance handling exists, or
-- Accept **at-least-once + idempotent handlers**, and
-- Do not build custom cooperative-assignor logic on this client yet.
-
-### 2. No delivery report callbacks
-
-Producer durability is effectively **“queue drained via `flush`”**, not per-message ack callbacks.
-
-**Risk:** you cannot classify individual message failures without treating `flush` / errors as the boundary.
-
-**Mitigations today:**
-
-- Call `await producer.flush(timeout)` before success is reported upstream.
-- Use `acks=all` (and consider `enable.idempotence=true`) via config.
-- Keep produce concurrency bounded; handle flush timeout as failure.
-
-### 3. Prefer NAPI over FFI for long-lived processes
-
-`bun:ffi` is convenient and fast to iterate, but Bun documents FFI as experimental.
-
-**Production default recommendation:**
+**NAPI:** no custom cb → **librdkafka automatic** assign/revoke (safe default).
 
 ```ts
-import { useNative } from "bun-kafka";
-await useNative("napi"); // bun run build:napi
+const consumer = new Consumer(
+  { "bootstrap.servers": brokers, "group.id": "svc" },
+  {
+    autoRebalance: true, // default
+    onRebalance: (e) => console.log(e.kind, e.partitions),
+  },
+);
 ```
 
-Ship a prebuilt `native/build/bun_kafka_native.node` (or build in the image) so runtime hosts do not need an ad-hoc toolchain surprise.
+Set `autoRebalance: false` only if you fully own assignment (advanced).
 
-### 4. Zero-copy payload lifetime (FFI)
+### 2. Delivery reports
 
-On the FFI backend, `msg.key` / `msg.value` may be **views into librdkafka memory** until `msg.done()`.
-
-After:
-
-- `msg.done()`, or
-- return from a `batches()` iteration body (library calls `done()` for you),
-
-those buffers must not be used.
-
-**Mitigation:**
+**FFI:** `onDelivery` receives per-message results. Reports are served from `poll` / `flush`.
 
 ```ts
-const value = Buffer.from(msg.value!); // own a copy if it escapes the loop
+const producer = new Producer(
+  { "bootstrap.servers": brokers, acks: "all" },
+  {
+    onDelivery: (r) => {
+      if (r.errorCode !== 0) console.error(r.errorMessage, r.topic, r.partition);
+    },
+  },
+);
+producer.send({ topic: "t", value: "x" });
+await producer.flush(30_000); // durability boundary + drains DR queue
 ```
 
-### 5. Shutdown is on you
+**NAPI:** durability boundary remains `flush`; JS `onDelivery` bridge not wired yet.
 
-There is no built-in SIGTERM helper or `await using` integration.
-
-**Mitigation:**
+### 3. Prefer NAPI for long-lived processes
 
 ```ts
-async function shutdown() {
-  await consumer.close();
-  await producer.flush(10_000);
-  await producer.close();
-  process.exit(0);
+import { useProductionNative } from "bun-kafka";
+await useProductionNative(); // napi if native/build/*.node exists, else ffi
+```
+
+Or force: `BUN_KAFKA_NATIVE=napi` / `await useNative("napi")` after `bun run build:napi`.
+
+Default when unset: **NAPI if addon present**, otherwise FFI.
+
+### 4. Safe payload lifetime
+
+**Default: copy** key/value out of librdkafka memory (safe after `done()`).
+
+Zero-copy (FFI only, advanced):
+
+```ts
+// not required for production defaults
+for await (const msg of consumer.messages({ copy: false })) {
+  // buffers invalid after iteration body / done()
 }
-process.on("SIGTERM", () => { void shutdown(); });
-process.on("SIGINT", () => { void shutdown(); });
 ```
 
-Expect `close()` to block on group leave / coordinator in bad network conditions; use a hard deadline in the orchestrator (Kubernetes `terminationGracePeriodSeconds`, etc.).
-
-### 6. Observability is minimal
-
-No first-class stats, log, or error callback surface beyond thrown `KafkaError`.
-
-**Mitigation:**
-
-- Log `KafkaError` fields: `code`, `message`, `fatal`, `retriable`.
-- Rely on broker/redpanda metrics and process-level metrics you add around send/poll loops.
-- Optionally enable librdkafka `debug` conf only in non-prod (very noisy).
-
-### 7. Packaging and supply chain are early
-
-Current package signals (`0.1.0`, TypeScript source export, no LICENSE in-tree, no CI matrix documented here) mean:
-
-- Pin **bun-kafka commit** and **librdkafka version** in your image.
-- Do not assume semver stability yet.
-- Add your own CI: ffi + napi × one Linux × one Kafka/Redpanda.
-
-### 8. Failure modes under-tested
-
-Happy-path and API surface tests exist. There is limited automated chaos for:
-
-- broker restart mid-flush / mid-consume
-- prolonged GC / network stalls
-- auth failures (SSL/SASL misconfig)
-- partition leadership moves under load
-
-Run those in **your** staging before relying on SLOs.
-
-## Should-fix soon
-
-| Item | Why |
-|------|-----|
-| NAPI as documented production backend + prebuild | Stable native boundary |
-| Fatal error checks (`fatal` flag / stop-the-world) | Avoid running after unrecoverable client state |
-| Explicit produce queue-full / backpressure policy | Prevent tight retry spins |
-| SSL/SASL conf examples + one integration test | Real clusters are authenticated |
-| CI matrix (OS, librdkafka, backend, broker) | Regressions catch before prod |
-| LICENSE + versioning policy | Legal and upgrade clarity |
-| Windows stance (support or “unsupported”) | Avoid silent breakage |
-
-## Nice-to-have (not blockers for many apps)
-
-- Admin CRUD (create/delete topics, ACLs, configs)
-- Transactions / full EOS helpers
-- Delivery report API
-- Rebalance callbacks / incremental assign helpers
-- Schema Registry helpers
-- OpenTelemetry hooks
-- Typed config keys (instead of free-form librdkafka strings)
-
-## Recommended production posture (if you ship now)
-
-1. **Backend:** `await useNative("napi")` with a built addon in the image.  
-2. **Roles:** separate producer and consumer processes when possible.  
-3. **Producer config (starting point):**
-
-   ```ts
-   new Producer({
-     "bootstrap.servers": process.env.KAFKA_BROKERS!,
-     acks: "all",
-     "enable.idempotence": true,
-     "linger.ms": 5,
-     "message.timeout.ms": 120_000,
-   })
-   ```
-
-4. **Consumer config (starting point):**
-
-   ```ts
-   new Consumer({
-     "bootstrap.servers": process.env.KAFKA_BROKERS!,
-     "group.id": "my-service",
-     "enable.auto.commit": false,
-     "auto.offset.reset": "earliest",
-   })
-   ```
-
-5. **Commit only after** side effects are durable (DB write, etc.).  
-6. **Copy** key/value if retained beyond the poll/batch body.  
-7. **Flush** before process exit and before ack to upstream protocols.  
-8. **One live member** per group (or accept rebalance risk).  
-9. **Pin** librdkafka and bun-kafka versions in deployment artifacts.  
-10. **Load-test** your topic shape (size, partitions, lag) on staging.
-
-### Consume loop sketch
+### 5. Shutdown helpers
 
 ```ts
-await useNative("napi");
+import { installShutdown } from "bun-kafka";
 
+const producer = new Producer({ /* ... */ });
 const consumer = new Consumer({ /* ... */ });
-consumer.subscribe("orders");
 
-for await (const batch of consumer.batches({ batchSize: 512, timeoutMs: 100 })) {
-  for (const msg of batch) {
-    const value = Buffer.from(msg.value ?? []);
-    await handle(value); // idempotent handler
-  }
-  // commits last offset+1 per partition in the batch when eachBatchCommit: true
-}
+installShutdown([producer, consumer], {
+  timeoutMs: 10_000,
+  exit: true, // process.exit(0) after close
+});
 ```
 
-Or manual commit:
+Still set an orchestrator hard limit (e.g. K8s `terminationGracePeriodSeconds`).
+
+### 6. Fatal errors
 
 ```ts
-for await (const msg of consumer.messages({ timeoutMs: 100 })) {
-  await handle(Buffer.from(msg.value ?? []));
-  consumer.commitMessage(msg);
+const err = producer.fatalError(); // or consumer.fatalError()
+if (err) {
+  // err.fatal === true
+  process.exit(1);
+}
+// send/poll paths also throw if a fatal error is already set
+```
+
+### 7. Errors and logging hooks
+
+```ts
+new Producer(config, {
+  onError: (e) => logger.error({ code: e.code, fatal: e.fatal }, e.message),
+  onDelivery: (r) => metrics.delivery(r),
+});
+```
+
+`KafkaError`: `code`, `message`, `fatal`, `retriable`.
+
+---
+
+## Still open (should-fix / packaging)
+
+| Item | Notes |
+|------|--------|
+| CI matrix | OS × librdkafka × ffi/napi × broker |
+| LICENSE + semver policy | Package still early (`0.1.0`) |
+| Prebuilt NAPI artifacts | Build in image or publish `.node` |
+| Chaos tests | Broker kill mid-flush/consume |
+| SSL/SASL integration tests | Conf works via librdkafka props; add staged tests |
+| NAPI `onDelivery` / `onRebalance` JS bridges | Use FFI or native defaults |
+| Windows | Untested |
+| Admin CRUD, transactions, Schema Registry | Not implemented |
+
+## Recommended production posture
+
+1. `await useProductionNative()` at process start.  
+2. Pin **librdkafka** and **bun-kafka** in the image.  
+3. Producer: `acks=all`, consider `enable.idempotence=true`, always `flush` at durability boundaries.  
+4. Consumer: `enable.auto.commit=false`, commit after durable side effects; handlers **idempotent**.  
+5. Use `installShutdown([producer, consumer])`.  
+6. Check `fatalError()` on health/ready fail paths.  
+7. Load-test partitions, message size, and lag on staging.  
+8. Staging: broker restart during produce and consume.
+
+### Producer
+
+```ts
+await useProductionNative();
+const producer = new Producer(
+  {
+    "bootstrap.servers": process.env.KAFKA_BROKERS!,
+    acks: "all",
+    "enable.idempotence": true,
+    "linger.ms": 5,
+    "message.timeout.ms": 120_000,
+  },
+  {
+    onDelivery: (r) => {
+      if (r.errorCode) metrics.fail(r);
+      else metrics.ok(r);
+    },
+    onError: (e) => logger.error(e),
+  },
+);
+installShutdown(producer);
+```
+
+### Consumer
+
+```ts
+await useProductionNative();
+const consumer = new Consumer(
+  {
+    "bootstrap.servers": process.env.KAFKA_BROKERS!,
+    "group.id": "my-service",
+    "enable.auto.commit": false,
+    "auto.offset.reset": "earliest",
+  },
+  {
+    autoRebalance: true,
+    onRebalance: (e) => logger.info({ rebalance: e.kind, n: e.partitions.length }),
+    onError: (e) => logger.error(e),
+  },
+);
+consumer.subscribe("orders");
+installShutdown(consumer);
+
+for await (const batch of consumer.batches({ batchSize: 512, eachBatchCommit: true })) {
+  for (const msg of batch) {
+    await handle(msg.value!); // already a copy by default
+  }
 }
 ```
 
 ## Security
 
-Pass SSL/SASL through librdkafka config (not wrapped APIs):
+Pass SSL/SASL through librdkafka config:
 
 ```ts
 new Producer({
@@ -229,73 +208,43 @@ new Producer({
   "sasl.mechanisms": "SCRAM-SHA-512",
   "sasl.username": process.env.KAFKA_USER!,
   "sasl.password": process.env.KAFKA_PASS!,
-  // "ssl.ca.location": "/etc/ssl/certs/ca.pem",
 })
 ```
 
-Validate in staging with your exact broker. This repo does not yet ship dedicated auth integration tests.
-
-## Error handling
-
-```ts
-import { KafkaError } from "bun-kafka";
-
-try {
-  await producer.flush(30_000);
-} catch (e) {
-  if (e instanceof KafkaError) {
-    // e.code, e.message, e.fatal, e.retriable
-    if (e.fatal) process.exit(1);
-  }
-  throw e;
-}
-```
-
-Treat unknown errors as fatal to your task; retry only when `retriable` is true **and** your side effects are safe.
+Validate on staging; dedicated auth tests are not in-repo yet.
 
 ## Environment
 
 | Variable | Purpose |
 |----------|---------|
-| `KAFKA_BROKERS` | Bootstrap servers (apps/tests/benches) |
-| `BUN_KAFKA_NATIVE` | `ffi` or `napi` |
-| `LIBRDKAFKA_PATH` | Override shared library path |
-| `NODE_API_INCLUDE` | `node_api.h` location for NAPI builds |
-
-## Version support
-
-Broker compatibility follows **librdkafka** ApiVersion negotiation. See root [README](../README.md#supported-kafka--broker-versions).
-
-Practical target: **Kafka 2.8+** or current **Redpanda**, with a **pinned librdkafka 2.x** in production images.
+| `KAFKA_BROKERS` | Bootstrap servers |
+| `BUN_KAFKA_NATIVE` | Force `ffi` or `napi` |
+| `LIBRDKAFKA_PATH` | Shared library override |
+| `NODE_API_INCLUDE` | Headers for NAPI build |
 
 ## Decision checklist
 
-Ship only if you can tick these:
+- [x] Auto rebalance (or documented single-member)  
+- [x] Delivery reports (FFI) or flush durability contract  
+- [x] NAPI production path (`useProductionNative`)  
+- [x] Safe payload copies by default  
+- [x] Shutdown helper  
+- [x] Fatal error API  
+- [ ] librdkafka + bun-kafka pinned in deploy image  
+- [ ] Staging broker restart test  
+- [ ] Auth validated if required  
+- [ ] Lag + crash-loop alerts  
+- [ ] CI for your target OS/backend  
 
-- [ ] NAPI backend built and loaded in the deploy image  
-- [ ] librdkafka version pinned  
-- [ ] Produce path calls `flush` at a clear durability boundary  
-- [ ] Consume handlers are idempotent (at-least-once)  
-- [ ] Payload copies used when data escapes the poll loop  
-- [ ] Graceful shutdown calls `close` / `flush` with an orchestrator hard limit  
-- [ ] Staging test: broker restart during produce and consume  
-- [ ] Staging test: auth (if cluster requires it)  
-- [ ] Alerting on consumer lag and process crash loops  
-- [ ] Accepted limitation: no custom rebalance callbacks yet  
+## Tests
 
-If any box is blocked by a missing library feature, either wait for that feature or use another client for that workload.
-
-## Priority roadmap (library)
-
-1. Rebalance-safe consumer story (callbacks or documented single-member mode + tests)  
-2. NAPI default for production docs + prebuild/install path  
-3. Delivery reports **or** stronger documented flush durability contract + tests  
-4. Fatal error + log/stats hooks  
-5. CI matrix + LICENSE + release process  
-6. Chaos tests (broker kill, partition moves)  
+```bash
+bun test test/prod-mustfix.test.ts
+bun test test/features.test.ts
+```
 
 ## Related
 
-- [README](../README.md) — features matrix, Kafka versions, API overview  
-- `test/features.test.ts` — public API coverage  
-- `native/build/PERF.md` — performance notes (when generated)  
+- [README](../README.md) — features, Kafka versions, API  
+- `test/prod-mustfix.test.ts` — must-fix coverage  
+- `test/features.test.ts` — full public API  

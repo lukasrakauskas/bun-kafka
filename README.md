@@ -148,14 +148,23 @@ Built against librdkafka **2.14.2** in this repo (`version()` reports the linked
 | Node.js as primary runtime | No |
 | Windows | Untested |
 
+### Production must-fix (implemented)
+
+- Delivery reports: `onDelivery` (FFI; call `poll`/`flush` to serve)
+- Auto rebalance assign/revoke (FFI callback; NAPI uses librdkafka default when no cb)
+- `fatalError()` on Producer/Consumer/Admin
+- Safe key/value **copies by default**
+- `installShutdown()` for SIGTERM/SIGINT
+- `useProductionNative()` — NAPI when addon built
+
 ### Not implemented yet
 
 - Admin CRUD (create/delete topics, alter configs, ACLs)
 - Transactions / EOS helpers
-- Delivery-report and rebalance **callbacks**
+- NAPI-side delivery/rebalance JS callbacks (use FFI or librdkafka defaults)
 - Schema Registry / Avro / Protobuf helpers
 - OAuth bearer helpers beyond raw librdkafka conf
-- Metrics/stats callback surface
+- Full metrics/stats callback surface
 
 ## Native backends
 

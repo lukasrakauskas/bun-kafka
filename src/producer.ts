@@ -1,13 +1,14 @@
 import { getDriver } from "./native/index.ts";
 import type { NativeProducer } from "./native/types.ts";
-import type { KafkaConfig, ProduceInput } from "./types.ts";
+import type { ClientOptions, KafkaConfig, ProduceInput } from "./types.ts";
+import type { KafkaError } from "./errors.ts";
 
 export class Producer {
   #n: NativeProducer;
   #closed = false;
 
-  constructor(config: KafkaConfig = {}) {
-    this.#n = getDriver().producer(config);
+  constructor(config: KafkaConfig = {}, options: ClientOptions = {}) {
+    this.#n = getDriver().producer(config, options);
   }
 
   send(msg: ProduceInput): void {
@@ -35,6 +36,12 @@ export class Producer {
     return this.#n.outQueueLength();
   }
 
+  /** Non-null if librdkafka raised a fatal error. */
+  fatalError(): KafkaError | null {
+    if (this.#closed) return null;
+    return this.#n.fatalError();
+  }
+
   async close(timeoutMs = 10_000): Promise<void> {
     if (this.#closed) return;
     try {
@@ -47,5 +54,7 @@ export class Producer {
 
   #e() {
     if (this.#closed) throw new Error("Producer is closed");
+    const f = this.#n.fatalError();
+    if (f) throw f;
   }
 }
