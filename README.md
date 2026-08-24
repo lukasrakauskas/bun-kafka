@@ -2,7 +2,7 @@
 
 A zero-dependency Kafka client for Bun. It implements the Kafka wire protocol in TypeScript and uses `Bun.connect()` for TCP and TLS.
 
-It does not load `librdkafka`, Node-API, `bun:ffi`, Node streams, or a socket package. It requires Bun 1.4 or newer.
+It has no runtime dependencies and requires Bun 1.4 or newer.
 
 ## Install
 
@@ -33,7 +33,7 @@ One `send()` call makes record batches by topic partition. Concurrent calls are 
 
 ## Consume
 
-This first native release uses manual partition assignment. It does not join a consumer group.
+This Bun-native release uses manual partition assignment. It does not join a consumer group.
 
 ```ts
 const consumer = kafka.consumer({ fromBeginning: true });
@@ -100,8 +100,6 @@ const kafka = new Kafka({
 | Admin topic changes | Not yet |
 
 The fixed API versions require Kafka 0.11 or newer. Use a current Kafka or Redpanda release.
-
-The old librdkafka client remains in the repository for comparison. It is not part of the root package export.
 
 ## Readiness documentation
 

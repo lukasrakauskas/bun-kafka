@@ -18,7 +18,6 @@ Use this document as a release snapshot. Other libraries can add or change featu
 - **Yes:** Public API and integration coverage exist.
 - **Partial:** A narrow form exists, or important production behavior is missing.
 - **No:** The native client does not implement the feature.
-- **Legacy only:** The optional librdkafka backend has the feature, but the Bun-native root export does not.
 
 ## Implemented Kafka protocol APIs
 

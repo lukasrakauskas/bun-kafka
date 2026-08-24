@@ -1,10 +1,9 @@
 # dependencies (bun install)
 node_modules
 
-# native builds / benches
+# native comparison benches
 native/build
 bench/rust/target
-*.node
 
 # output
 out

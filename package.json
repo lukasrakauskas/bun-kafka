@@ -7,18 +7,14 @@
   "type": "module",
   "packageManager": "bun@1.4.0",
   "exports": {
-    ".": "./index.ts",
-    "./legacy": "./src/index.ts"
+    ".": "./index.ts"
   },
   "scripts": {
     "test": "bun test test/bun-native.test.ts",
     "test:integration": "bun test test/bun-integration.test.ts",
     "typecheck": "bunx tsc --noEmit",
     "bench": "bun scripts/bench-bun.ts",
-    "bench:build": "bun scripts/build-benches.ts",
-    "build:napi": "bun run scripts/build-napi.ts",
-    "test:legacy": "bun test --timeout 120000 test/acceptance.test.ts test/admin.test.ts test/batches.test.ts test/consumer.test.ts test/features.test.ts test/native-backends.test.ts test/prod-mustfix.test.ts test/producer.test.ts test/version.test.ts",
-    "bench:legacy": "bun run scripts/bench.ts"
+    "bench:build": "bun run scripts/build-benches.ts"
   },
   "engines": {
     "bun": ">=1.4.0"

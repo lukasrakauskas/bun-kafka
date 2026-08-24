@@ -15,9 +15,3 @@ export class KafkaError extends Error {
     this.retriable = opts?.retriable ?? false;
   }
 }
-
-export function check(code: number, err2str: (c: number) => string, what?: string): void {
-  if (code === 0) return;
-  const base = err2str(code) || `kafka error ${code}`;
-  throw new KafkaError(code, what ? `${what}: ${base}` : base);
-}

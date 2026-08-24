@@ -1,43 +1,23 @@
-import { Producer, Consumer, Admin, useNative, type NativeKind } from "../src/index.ts";
+import { BunAdmin, BunConsumer, BunProducer, type KafkaOptions } from "../index.ts";
 
 export const BROKERS = process.env.KAFKA_BROKERS ?? "127.0.0.1:9092";
 
-export async function initNative(kind?: NativeKind) {
-  const k = kind ?? ((process.env.BUN_KAFKA_NATIVE as NativeKind) || "ffi");
-  await useNative(k);
-  return k;
-}
+const options = (): KafkaOptions => ({ brokers: BROKERS.split(",") });
 
 export function topic(prefix = "bun-kafka") {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function producer(extra: Record<string, string | number | boolean> = {}) {
-  return new Producer({
-    "bootstrap.servers": BROKERS,
-    "socket.timeout.ms": 10000,
-    "message.timeout.ms": 10000,
-    "allow.auto.create.topics": true,
-    acks: "all",
-    ...extra,
-  });
+export function producer() {
+  return new BunProducer(options());
 }
 
-export function consumer(extra: Record<string, string | number | boolean> = {}) {
-  return new Consumer({
-    "bootstrap.servers": BROKERS,
-    "group.id": `g-${crypto.randomUUID()}`,
-    "enable.auto.commit": false,
-    "auto.offset.reset": "earliest",
-    "socket.timeout.ms": 10000,
-    "session.timeout.ms": 10000,
-    "allow.auto.create.topics": true,
-    ...extra,
-  });
+export function consumer(extra: { fromBeginning?: boolean } = {}) {
+  return new BunConsumer(options(), extra);
 }
 
 export function admin() {
-  return new Admin({ "bootstrap.servers": BROKERS, "socket.timeout.ms": 10000 });
+  return new BunAdmin(options());
 }
 
 export async function waitFor<T>(
@@ -48,40 +28,39 @@ export async function waitFor<T>(
   let lastErr: unknown;
   while (Date.now() - start < timeoutMs) {
     try {
-      const v = await fn();
-      if (v) return v as T;
-    } catch (e) {
-      lastErr = e;
+      const value = await fn();
+      if (value) return value as T;
+    } catch (error) {
+      lastErr = error;
     }
     await Bun.sleep(intervalMs);
   }
   throw new Error(`waitFor timed out after ${timeoutMs}ms${lastErr ? `: ${lastErr}` : ""}`);
 }
 
-/** Wait until topic appears in metadata (after auto-create produce). */
 export async function waitTopic(name: string, timeoutMs = 15_000) {
-  const a = admin();
+  const client = admin();
   try {
-    await waitFor(() => {
-      try {
-        const m = a.metadata({ allTopics: true, timeoutMs: 5_000 });
-        return m.topics.find((t) => t.name === name && t.partitions.length > 0) ?? null;
-      } catch {
-        return null;
-      }
+    return await waitFor(async () => {
+      const metadata = await client.metadata([name]);
+      return metadata.topics.find((item) => item.name === name && item.partitions.length) ?? null;
     }, { timeoutMs, intervalMs: 150 });
   } finally {
-    try { await a.close(); } catch {}
+    await client.close();
   }
 }
 
-export async function produceN(p: Producer, t: string, n: number, prefix = "m") {
-  for (let i = 0; i < n; i++) {
-    p.send({ topic: t, key: `k-${i}`, value: `${prefix}-${i}`, headers: { i: String(i) } });
-  }
-  await p.flush(15_000);
+export async function produceN(p: BunProducer, name: string, count: number, prefix = "m") {
+  await p.send({
+    topic: name,
+    messages: Array.from({ length: count }, (_, i) => ({
+      key: `k-${i}`,
+      value: `${prefix}-${i}`,
+      headers: { i: String(i) },
+    })),
+  });
 }
 
-export function dec(u: Uint8Array | null | undefined) {
-  return u ? new TextDecoder().decode(u) : null;
+export function dec(value: Uint8Array | null | undefined) {
+  return value ? new TextDecoder().decode(value) : null;
 }
