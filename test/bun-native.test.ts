@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka, KafkaError } from "../index.ts";
-import { Reader, Writer, crc32c, decodeRecordSet, encodeRecordBatch, murmur2 } from "../src/bun/protocol.ts";
+import { Reader, RecordSetDecoder, Writer, crc32c, decodeRecordSet, encodeRecordBatch, murmur2 } from "../src/bun/protocol.ts";
 
 const decode = (value: Uint8Array | null) => value === null ? null : new TextDecoder().decode(value);
 
@@ -26,6 +26,28 @@ describe("Bun native Kafka protocol", () => {
   test("grows record batches beyond the initial writer buffer", () => {
     const records = Array.from({ length: 500 }, (_, i) => ({ key: String(i), value: new Uint8Array(100) }));
     expect(decodeRecordSet(encodeRecordBatch(records), "large", 0, 1)).toHaveLength(500);
+  });
+
+  test("decodes bounded zero-copy pages without losing records", () => {
+    const batch = encodeRecordBatch(Array.from({ length: 25 }, (_, i) => ({ value: `v-${i}` })));
+    const decoder = new RecordSetDecoder(batch, "paged", 0, 1);
+    const messages = [];
+    while (!decoder.done) messages.push(...decoder.read(7));
+    expect(messages).toHaveLength(25);
+    expect(messages.map((message) => message.offset)).toEqual(Array.from({ length: 25 }, (_, i) => BigInt(i)));
+    expect(messages[0]!.value!.buffer).toBe(batch.buffer);
+
+    const copied = new RecordSetDecoder(batch, "paged", 0, 1, { copy: true }).read(1);
+    expect(copied[0]!.value!.buffer).not.toBe(batch.buffer);
+  });
+
+  test("uses fast number varints and bigint varlongs", () => {
+    const writer = new Writer();
+    for (const value of [-2147483648, -1, 0, 1, 2147483647]) writer.varInt(value);
+    for (const value of [-9007199254740991n, -1n, 0n, 1n, 9007199254740991n]) writer.varLong(value);
+    const reader = new Reader(writer.result());
+    expect(Array.from({ length: 5 }, () => reader.varInt())).toEqual([-2147483648, -1, 0, 1, 2147483647]);
+    expect(Array.from({ length: 5 }, () => reader.varLong())).toEqual([-9007199254740991n, -1n, 0n, 1n, 9007199254740991n]);
   });
 
   test("CRC32C uses the Kafka polynomial and rejects corruption", () => {
@@ -79,6 +101,14 @@ describe("Bun native Kafka protocol", () => {
       await kafka.disconnect();
       listener.stop(true);
     }
+  });
+
+  test("rejects invalid batching and fetch limits", async () => {
+    const kafka = new Kafka({ brokers: ["127.0.0.1:1"] });
+    expect(() => kafka.producer({ lingerMs: -1 })).toThrow(RangeError);
+    const consumer = kafka.consumer();
+    await expect(consumer.fetch({ maxMessages: Number.NaN })).rejects.toBeInstanceOf(RangeError);
+    await kafka.disconnect();
   });
 
   test("reader rejects truncated input", () => {

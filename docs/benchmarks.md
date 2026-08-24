@@ -15,21 +15,21 @@ Each run starts a process, auto-creates a fresh one-partition topic, produces 5,
 
 | Client | Mean wall time [ms] | Relative to franz-go |
 |---|---:|---:|
-| franz-go | 211.3 ± 1.0 | 1.00 |
-| bun-kafka | 268.5 ± 1.5 | 1.27 |
-| rdkafka-rust | 718.1 ± 2.2 | 3.40 |
+| franz-go | 210.7 ± 0.7 | 1.00 |
+| bun-kafka | 239.5 ± 0.7 | 1.14 |
+| rdkafka-rust | 718.5 ± 1.6 | 3.41 |
 
-bun-kafka was 27% slower than franz-go and 2.67 times faster than this rdkafka-rust lane end to end.
+bun-kafka was 14% slower than franz-go and 3.00 times faster than this rdkafka-rust lane end to end. Bounded zero-copy decoding, fast varints, shared connections, and producer batching reduced its prior 268.5 ms baseline by 11%.
 
 Ten direct runs gave these median timed sections:
 
 | Client | Produce [msg/s] | Consume [msg/s] |
 |---|---:|---:|
 | franz-go | 24,543 | 2,196,377 |
-| bun-kafka | 20,958 | 270,752 |
+| bun-kafka | 22,691 | 621,956 |
 | rdkafka-rust | 24,486 | 9,923 |
 
-The produce section includes topic discovery and creation. The Rust lane uses `BaseConsumer::poll` one message at a time. The Go and Bun lanes drain fetched batches, so this measures these client implementations and APIs, not language speed alone.
+The Bun consume median improved from 270,752 to 621,956 msg/s. The produce section includes topic discovery and creation. The Rust lane uses `BaseConsumer::poll` one message at a time. The Go and Bun lanes drain fetched batches, so this measures these client implementations and APIs, not language speed alone.
 
 ## Codec comparison
 
@@ -37,7 +37,7 @@ Both lanes process 20,000 records through encode and decode.
 
 | Command | Mean [ms] | Min [ms] | Max [ms] |
 |---|---:|---:|---:|
-| One record per batch | 179.0 ± 4.7 | 171.4 | 188.3 |
-| 100 records per batch | 129.2 ± 1.6 | 126.9 | 131.7 |
+| One record per batch | 88.6 ± 3.2 | 83.7 | 94.1 |
+| 100 records per batch | 51.0 ± 1.4 | 48.3 | 53.5 |
 
-Batching 100 records was 1.39 times faster than one-record batches.
+Batching 100 records was 1.74 times faster than one-record batches.

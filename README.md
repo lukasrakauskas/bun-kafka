@@ -29,7 +29,7 @@ await producer.send({
 await kafka.disconnect();
 ```
 
-One `send()` call makes record batches by topic partition. Send many messages in one call for best throughput.
+One `send()` call makes record batches by topic partition. Concurrent calls are collected for 5 ms or 1,000 messages. Configure this with `kafka.producer({ lingerMs, batchMaxMessages })`.
 
 ## Consume
 
@@ -57,7 +57,7 @@ await consumer.subscribe({ topics: ["events"], fromBeginning: true });
 const batch = await consumer.fetch({ maxMessages: 500, maxWaitMs: 100 });
 ```
 
-`fetch()`, `seek()`, `pause()`, `resume()`, `assignment()`, `position()`, and `watermarks()` are available.
+`fetch()`, `seek()`, `pause()`, `resume()`, `assignment()`, `position()`, and `watermarks()` are available. Payloads are stable zero-copy views by default. Set `copy: true` on `fetch()` when you need separate buffers.
 
 ## Metadata
 
@@ -87,12 +87,12 @@ const kafka = new Kafka({
 |---|---|
 | Bun TCP and TLS | Yes |
 | Metadata API | Yes |
-| Produce with acks 1/all | Yes |
+| Produce with acks 1/all and automatic batching | Yes |
 | Kafka record batches (magic 2) | Yes |
 | Keys, values, timestamps, and headers | Yes |
 | CRC32C validation | Yes |
 | Kafka-compatible Murmur2 partitioning | Yes |
-| Manual consume and offset lookup | Yes |
+| Bounded, zero-copy manual consume and offset lookup | Yes |
 | Consumer groups and offset commits | Not yet |
 | SASL | Not yet |
 | Compression | Not yet |

@@ -16,13 +16,13 @@ export interface KafkaMessage {
   partition: number;
   offset: bigint;
   /**
-   * Key bytes. Bun-native messages own this copy. The legacy FFI backend can use
-   * a zero-copy view that is valid only until `done()`.
+   * Key bytes. Bun-native messages use a stable response-buffer view unless
+   * `copy: true` is set. Legacy FFI zero-copy views are valid only until `done()`.
    */
   key: Uint8Array | null;
   /**
-   * Value bytes. Bun-native messages own this copy. The legacy FFI backend can use
-   * a zero-copy view that is valid only until `done()`.
+   * Value bytes. Bun-native messages use a stable response-buffer view unless
+   * `copy: true` is set. Legacy FFI zero-copy views are valid only until `done()`.
    */
   value: Uint8Array | null;
   timestamp: bigint;

@@ -22,6 +22,10 @@ integration("Bun native Kafka integration", () => {
         })),
       });
       expect(sent[0]?.baseOffset).toBeGreaterThanOrEqual(0n);
+      await Promise.all(Array.from({ length: 25 }, (_, i) => producer.send({
+        topic,
+        messages: [{ partition: 0, value: `batched-${i}` }],
+      })));
 
       const admin = kafka.admin();
       const metadata = await admin.metadata([topic]);
@@ -32,16 +36,20 @@ integration("Bun native Kafka integration", () => {
       const consumer = kafka.consumer({ fromBeginning: true });
       await consumer.assign([{ topic, partition: 0, offset: "earliest" }]);
       const received = [];
-      while (received.length < 20) received.push(...await consumer.fetch({ maxWaitMs: 100, maxMessages: 20 }));
+      while (received.length < 20) received.push(...await consumer.fetch({ maxWaitMs: 100, maxMessages: Math.min(7, 20 - received.length) }));
 
       expect(received).toHaveLength(20);
       expect(decode(received[0]!.value)).toBe("value-0");
       expect(decode(received[19]!.headers.index!)).toBe("19");
+      const batched = [];
+      while (batched.length < 25) batched.push(...await consumer.fetch({ maxWaitMs: 100, maxMessages: Math.min(6, 25 - batched.length) }));
+      expect(decode(batched[0]!.value)).toBe("batched-0");
+      expect(decode(batched[24]!.value)).toBe("batched-24");
 
       consumer.seek({ topic, partition: 0, offset: 10n });
       const replay = await consumer.fetch({ maxWaitMs: 100, maxMessages: 1 });
       expect(replay[0]?.offset).toBe(10n);
-      expect((await consumer.watermarks(topic, 0)).high).toBeGreaterThanOrEqual(20n);
+      expect((await consumer.watermarks(topic, 0)).high).toBeGreaterThanOrEqual(45n);
     } finally {
       await kafka.disconnect();
     }

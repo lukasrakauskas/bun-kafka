@@ -33,7 +33,10 @@ export class Connection {
   #connecting?: Promise<Bun.Socket>;
   #pending = new Map<number, Pending>();
   #correlation = 0;
-  #incoming = new Uint8Array();
+  #header = new Uint8Array(4);
+  #headerOffset = 0;
+  #frame?: Uint8Array;
+  #frameOffset = 0;
   #closed = false;
 
   constructor(address: string, options: ConnectionOptions) {
@@ -94,38 +97,49 @@ export class Connection {
   }
 
   #onData(chunk: Uint8Array): void {
-    // ponytail: copying partial frames is simple; use a ring buffer if profiles show large fragmented responses.
-    const incoming = new Uint8Array(this.#incoming.byteLength + chunk.byteLength);
-    incoming.set(this.#incoming);
-    incoming.set(chunk, this.#incoming.byteLength);
-    this.#incoming = incoming;
+    let offset = 0;
+    while (offset < chunk.byteLength) {
+      if (!this.#frame) {
+        const count = Math.min(4 - this.#headerOffset, chunk.byteLength - offset);
+        this.#header.set(chunk.subarray(offset, offset + count), this.#headerOffset);
+        this.#headerOffset += count;
+        offset += count;
+        if (this.#headerOffset < 4) return;
+        const size = new DataView(this.#header.buffer).getInt32(0);
+        this.#headerOffset = 0;
+        if (size < 4 || size > this.#options.maxResponseBytes) {
+          this.#fail(new KafkaError(-1, `Invalid Kafka response size ${size}`));
+          return;
+        }
+        this.#frame = new Uint8Array(size);
+        this.#frameOffset = 0;
+      }
 
-    let consumed = 0;
-    while (this.#incoming.byteLength - consumed >= 4) {
-      const view = new DataView(this.#incoming.buffer, this.#incoming.byteOffset + consumed);
-      const size = view.getInt32(0);
-      if (size < 4 || size > this.#options.maxResponseBytes) {
-        this.#fail(new KafkaError(-1, `Invalid Kafka response size ${size}`));
-        return;
+      const count = Math.min(this.#frame.byteLength - this.#frameOffset, chunk.byteLength - offset);
+      this.#frame.set(chunk.subarray(offset, offset + count), this.#frameOffset);
+      this.#frameOffset += count;
+      offset += count;
+      if (this.#frameOffset === this.#frame.byteLength) {
+        const frame = this.#frame;
+        this.#frame = undefined;
+        this.#frameOffset = 0;
+        const correlation = new DataView(frame.buffer, frame.byteOffset, 4).getInt32(0);
+        const pending = this.#pending.get(correlation);
+        if (pending) {
+          clearTimeout(pending.timer);
+          this.#pending.delete(correlation);
+          pending.resolve(new Reader(frame.subarray(4)));
+        }
       }
-      if (this.#incoming.byteLength - consumed < size + 4) break;
-      const frame = this.#incoming.subarray(consumed + 4, consumed + 4 + size);
-      const correlation = new DataView(frame.buffer, frame.byteOffset, 4).getInt32(0);
-      const pending = this.#pending.get(correlation);
-      if (pending) {
-        clearTimeout(pending.timer);
-        this.#pending.delete(correlation);
-        pending.resolve(new Reader(frame.subarray(4)));
-      }
-      consumed += size + 4;
     }
-    if (consumed) this.#incoming = this.#incoming.slice(consumed);
   }
 
   #fail(error: Error): void {
     this.#socket = undefined;
     this.#connecting = undefined;
-    this.#incoming = new Uint8Array();
+    this.#headerOffset = 0;
+    this.#frame = undefined;
+    this.#frameOffset = 0;
     for (const pending of this.#pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(error);

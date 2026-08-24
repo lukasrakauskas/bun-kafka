@@ -5,7 +5,7 @@ import {
   Reader,
   Writer,
   asBytes,
-  decodeRecordSet,
+  RecordSetDecoder,
   encodeRecordBatch,
   murmur2,
   readMetadataResponse,
@@ -55,7 +55,7 @@ export interface KafkaOptions {
 
 type TopicMetadata = ClusterMetadata["topics"][number];
 
-class Cluster {
+export class Cluster {
   #bootstrap: string[];
   #options: ConnectionOptions;
   #connections = new Map<string, Connection>();
@@ -160,59 +160,130 @@ type PartitionRecords = {
   records: ProducerMessage[];
 };
 
+export interface ProducerOptions {
+  /** Time to collect concurrent sends into one Produce request. Default 5 ms. */
+  lingerMs?: number;
+  /** Flush immediately at this queued message count. Default 1,000. */
+  batchMaxMessages?: number;
+}
+
+type PendingSend = {
+  input: ProducerSend;
+  resolve: (results: ProduceResult[]) => void;
+  reject: (error: unknown) => void;
+};
+
 export class BunProducer {
   #cluster: Cluster;
   #roundRobin = new Map<string, number>();
   #closed = false;
+  #ownsCluster: boolean;
   #onClose: () => void;
+  #options: Required<ProducerOptions>;
+  #pending: PendingSend[] = [];
+  #queuedMessages = 0;
+  #timer?: ReturnType<typeof setTimeout>;
+  #flushing?: Promise<void>;
 
-  constructor(options: KafkaOptions, onClose = () => {}) {
-    this.#cluster = new Cluster(options);
+  constructor(options: KafkaOptions | Cluster, producerOptions: ProducerOptions = {}, onClose = () => {}) {
+    this.#ownsCluster = !(options instanceof Cluster);
+    this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : options as Cluster;
+    this.#options = { lingerMs: producerOptions.lingerMs ?? 5, batchMaxMessages: producerOptions.batchMaxMessages ?? 1_000 };
+    if (!Number.isFinite(this.#options.lingerMs) || this.#options.lingerMs < 0
+      || !Number.isSafeInteger(this.#options.batchMaxMessages) || this.#options.batchMaxMessages < 1) {
+      throw new RangeError("Invalid producer batching options");
+    }
     this.#onClose = onClose;
   }
 
-  async send(input: ProducerSend): Promise<ProduceResult[]> {
+  send(input: ProducerSend): Promise<ProduceResult[]> {
     this.#open();
     if (!input.topic) throw new TypeError("Kafka topic is required");
-    if (!input.messages.length) return [];
-
-    let metadata: TopicMetadata | undefined;
-    const deadline = Date.now() + (input.timeoutMs ?? 30_000);
-    while (Date.now() < deadline) {
-      metadata = await this.#cluster.topic(input.topic, !!metadata);
-      if (!metadata.err && metadata.partitions.length) break;
-      if (metadata.err !== 3 && metadata.err !== 5) throw kafkaError(metadata.err, input.topic);
-      await Bun.sleep(100);
-    }
-    if (!metadata?.partitions.length || metadata.err) throw kafkaError(metadata?.err ?? 3, input.topic);
-
-    const partitions = new Map<number, PartitionRecords>();
-    for (const message of input.messages) {
-      let partition = message.partition;
-      if (partition === undefined) {
-        const key = asBytes(message.key);
-        if (key) partition = (murmur2(key) & 0x7fffffff) % metadata.partitions.length;
-        else {
-          partition = this.#roundRobin.get(input.topic) ?? 0;
-          this.#roundRobin.set(input.topic, (partition + 1) % metadata.partitions.length);
-        }
+    if (!input.messages.length) return Promise.resolve([]);
+    return new Promise((resolve, reject) => {
+      this.#pending.push({ input, resolve, reject });
+      this.#queuedMessages += input.messages.length;
+      if (this.#queuedMessages >= this.#options.batchMaxMessages || this.#options.lingerMs === 0) {
+        queueMicrotask(() => void this.flush().catch(() => {}));
+      } else if (!this.#timer) {
+        this.#timer = setTimeout(() => void this.flush().catch(() => {}), this.#options.lingerMs);
       }
-      const partitionMetadata = metadata.partitions.find((item) => item.id === partition);
-      if (!partitionMetadata) throw new RangeError(`Partition ${partition} does not exist on ${input.topic}`);
-      if (partitionMetadata.err) throw kafkaError(partitionMetadata.err, `${input.topic}[${partition}]`);
-      let group = partitions.get(partition);
-      if (!group) {
-        group = { topic: input.topic, partition, leader: partitionMetadata.leader, records: [] };
-        partitions.set(partition, group);
-      }
-      group.records.push(message);
-    }
-    return this.#produce([...partitions.values()], input.acks === "all" ? -1 : 1, input.timeoutMs ?? 30_000);
+    });
   }
 
   async sendBatch(input: ProducerBatch): Promise<ProduceResult[]> {
-    const results = await Promise.all(input.topicMessages.map((batch) => this.send(batch)));
-    return results.flat();
+    return (await Promise.all(input.topicMessages.map((batch) => this.send(batch)))).flat();
+  }
+
+  async flush(): Promise<void> {
+    while (this.#flushing || this.#pending.length) {
+      if (this.#flushing) {
+        await this.#flushing;
+        continue;
+      }
+      if (this.#timer) clearTimeout(this.#timer);
+      this.#timer = undefined;
+      const pending = this.#pending.splice(0);
+      this.#queuedMessages = 0;
+      this.#flushing = this.#flushPending(pending).finally(() => { this.#flushing = undefined; });
+      await this.#flushing;
+    }
+  }
+
+  async #flushPending(pending: PendingSend[]): Promise<void> {
+    try {
+      const configs = Map.groupBy(pending, ({ input }) => `${input.acks ?? 1}\0${input.timeoutMs ?? 30_000}`);
+      for (const group of configs.values()) {
+        const topics = Map.groupBy(group, ({ input }) => input.topic);
+        const partitions = (await Promise.all([...topics].map(async ([topic, sends]) => {
+          const messages = sends.flatMap(({ input }) => input.messages);
+          return this.#route(topic, messages, sends[0]!.input.timeoutMs ?? 30_000);
+        }))).flat();
+        const first = group[0]!.input;
+        const results = await this.#produce(partitions, first.acks === "all" ? -1 : 1, first.timeoutMs ?? 30_000);
+        const byTopic = Map.groupBy(results, (result) => result.topic);
+        for (const item of group) item.resolve(byTopic.get(item.input.topic) ?? []);
+      }
+    } catch (error) {
+      for (const item of pending) item.reject(error);
+      throw error;
+    }
+  }
+
+  async #route(topic: string, messages: readonly ProducerMessage[], timeoutMs: number): Promise<PartitionRecords[]> {
+    let metadata: TopicMetadata | undefined;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      metadata = await this.#cluster.topic(topic, !!metadata);
+      if (!metadata.err && metadata.partitions.length) break;
+      if (metadata.err !== 3 && metadata.err !== 5) throw kafkaError(metadata.err, topic);
+      await Bun.sleep(10);
+    }
+    if (!metadata?.partitions.length || metadata.err) throw kafkaError(metadata?.err ?? 3, topic);
+
+    const partitionMetadata = new Map(metadata.partitions.map((partition) => [partition.id, partition]));
+    const partitions = new Map<number, PartitionRecords>();
+    for (const message of messages) {
+      const key = asBytes(message.key);
+      let partition = message.partition;
+      if (partition === undefined) {
+        if (key) partition = (murmur2(key) & 0x7fffffff) % metadata.partitions.length;
+        else {
+          partition = this.#roundRobin.get(topic) ?? 0;
+          this.#roundRobin.set(topic, (partition + 1) % metadata.partitions.length);
+        }
+      }
+      const meta = partitionMetadata.get(partition);
+      if (!meta) throw new RangeError(`Partition ${partition} does not exist on ${topic}`);
+      if (meta.err) throw kafkaError(meta.err, `${topic}[${partition}]`);
+      let group = partitions.get(partition);
+      if (!group) {
+        group = { topic, partition, leader: meta.leader, records: [] };
+        partitions.set(partition, group);
+      }
+      group.records.push(key && typeof message.key === "string" ? { ...message, key } : message);
+    }
+    return [...partitions.values()];
   }
 
   async #produce(partitions: PartitionRecords[], acks: number, timeoutMs: number): Promise<ProduceResult[]> {
@@ -244,8 +315,9 @@ export class BunProducer {
 
   async close(): Promise<void> {
     if (this.#closed) return;
+    await this.flush();
     this.#closed = true;
-    this.#cluster.close();
+    if (this.#ownsCluster) this.#cluster.close();
     this.#onClose();
   }
 
@@ -275,6 +347,8 @@ export interface FetchOptions {
   maxBytes?: number;
   maxPartitionBytes?: number;
   maxMessages?: number;
+  /** Copy payloads instead of returning stable views into the response buffer. */
+  copy?: boolean;
 }
 
 type Assigned = { topic: string; partition: number; leader: number };
@@ -285,12 +359,14 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
   #assigned = new Map<string, Assigned>();
   #positions = new Map<string, bigint>();
   #paused = new Set<string>();
-  #buffer: KafkaMessage[] = [];
+  #decoders: RecordSetDecoder[] = [];
   #closed = false;
+  #ownsCluster: boolean;
   #onClose: () => void;
 
-  constructor(options: KafkaOptions, consumerOptions: ConsumerOptions = {}, onClose = () => {}) {
-    this.#cluster = new Cluster(options);
+  constructor(options: KafkaOptions | Cluster, consumerOptions: ConsumerOptions = {}, onClose = () => {}) {
+    this.#ownsCluster = !(options instanceof Cluster);
+    this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : options as Cluster;
     this.#options = consumerOptions;
     this.#onClose = onClose;
   }
@@ -320,7 +396,7 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
     this.#assigned.clear();
     this.#positions.clear();
     this.#paused.clear();
-    this.#buffer = [];
+    this.#decoders = [];
     const unresolved: Array<Assigned & { which: "earliest" | "latest" }> = [];
     for (const assignment of assignments) {
       const metadata = await this.#cluster.topic(assignment.topic);
@@ -364,8 +440,8 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
   async fetch(options: FetchOptions = {}): Promise<KafkaMessage[]> {
     this.#open();
     const maxMessages = options.maxMessages ?? 500;
-    if (maxMessages < 1) throw new RangeError("maxMessages must be positive");
-    if (this.#buffer.length) return this.#take(maxMessages);
+    if (!Number.isSafeInteger(maxMessages) || maxMessages < 1) throw new RangeError("maxMessages must be a positive integer");
+    if (this.#decoders.length) return this.#drain(maxMessages);
     const active = [...this.#assigned].filter(([key]) => !this.#paused.has(key));
     if (!active.length) {
       await Bun.sleep(options.maxWaitMs ?? 500);
@@ -395,20 +471,30 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
           partitionReader.array((abortedReader) => ({ producerId: abortedReader.i64(), firstOffset: abortedReader.i64() }));
           const records = partitionReader.bytes();
           if (error) throw kafkaError(error, `${topic}[${partition}]`);
-          const offset = this.#positions.get(partitionKey(topic, partition)) ?? 0n;
-          return records
-            ? decodeRecordSet(records, topic, partition, leader).filter((message) => message.offset >= offset)
-            : [];
-        }).flat();
+          return records ? new RecordSetDecoder(records, topic, partition, leader, {
+            minOffset: this.#positions.get(partitionKey(topic, partition)) ?? 0n,
+            copy: options.copy,
+          }) : null;
+        }).filter((decoder): decoder is RecordSetDecoder => decoder !== null);
       }).flat();
     }));
-    this.#buffer.push(...batches.flat().sort((a, b) => a.topic.localeCompare(b.topic) || a.partition - b.partition || Number(a.offset - b.offset)));
-    for (const message of this.#buffer) this.#positions.set(partitionKey(message.topic, message.partition), message.offset + 1n);
-    return this.#take(maxMessages);
+    this.#decoders.push(...batches.flat());
+    return this.#drain(maxMessages);
   }
 
-  #take(max: number): KafkaMessage[] {
-    return this.#buffer.splice(0, max);
+  #drain(max: number): KafkaMessage[] {
+    const messages: KafkaMessage[] = [];
+    while (this.#decoders.length && messages.length < max) {
+      const decoder = this.#decoders[0]!;
+      const next = decoder.read(max - messages.length);
+      messages.push(...next);
+      if (next.length) {
+        const last = next[next.length - 1]!;
+        this.#positions.set(partitionKey(last.topic, last.partition), last.offset + 1n);
+      }
+      if (decoder.done) this.#decoders.shift();
+    }
+    return messages;
   }
 
   async *messages(options: FetchOptions = {}): AsyncGenerator<KafkaMessage, void, unknown> {
@@ -428,7 +514,7 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
     const key = partitionKey(assignment.topic, assignment.partition);
     if (!this.#assigned.has(key)) throw new Error(`${assignment.topic}[${assignment.partition}] is not assigned`);
     this.#positions.set(key, BigInt(assignment.offset));
-    this.#buffer = this.#buffer.filter((message) => partitionKey(message.topic, message.partition) !== key);
+    this.#decoders = this.#decoders.filter((decoder) => partitionKey(decoder.topic, decoder.partition) !== key);
   }
 
   pause(partitions: TopicPartition[]): void {
@@ -484,7 +570,7 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
-    this.#cluster.close();
+    if (this.#ownsCluster) this.#cluster.close();
     this.#onClose();
   }
 
@@ -495,10 +581,12 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
 export class BunAdmin {
   #cluster: Cluster;
   #closed = false;
+  #ownsCluster: boolean;
   #onClose: () => void;
 
-  constructor(options: KafkaOptions, onClose = () => {}) {
-    this.#cluster = new Cluster(options);
+  constructor(options: KafkaOptions | Cluster, onClose = () => {}) {
+    this.#ownsCluster = !(options instanceof Cluster);
+    this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : options as Cluster;
     this.#onClose = onClose;
   }
 
@@ -510,7 +598,7 @@ export class BunAdmin {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
-    this.#cluster.close();
+    if (this.#ownsCluster) this.#cluster.close();
     this.#onClose();
   }
 
@@ -518,35 +606,36 @@ export class BunAdmin {
 }
 
 export class Kafka {
-  #options: KafkaOptions;
+  #cluster: Cluster;
   #clients = new Set<{ close(): Promise<void> }>();
 
   constructor(options: KafkaOptions) {
-    this.#options = { ...options, brokers: [...options.brokers] };
+    this.#cluster = new Cluster({ ...options, brokers: [...options.brokers] });
   }
 
-  producer(): BunProducer {
+  producer(options: ProducerOptions = {}): BunProducer {
     let producer: BunProducer;
-    producer = new BunProducer(this.#options, () => this.#clients.delete(producer));
+    producer = new BunProducer(this.#cluster, options, () => this.#clients.delete(producer));
     this.#clients.add(producer);
     return producer;
   }
 
   consumer(options: ConsumerOptions = {}): BunConsumer {
     let consumer: BunConsumer;
-    consumer = new BunConsumer(this.#options, options, () => this.#clients.delete(consumer));
+    consumer = new BunConsumer(this.#cluster, options, () => this.#clients.delete(consumer));
     this.#clients.add(consumer);
     return consumer;
   }
 
   admin(): BunAdmin {
     let admin: BunAdmin;
-    admin = new BunAdmin(this.#options, () => this.#clients.delete(admin));
+    admin = new BunAdmin(this.#cluster, () => this.#clients.delete(admin));
     this.#clients.add(admin);
     return admin;
   }
 
   async disconnect(): Promise<void> {
     await Promise.all([...this.#clients].map((client) => client.close()));
+    this.#cluster.close();
   }
 }
