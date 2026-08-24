@@ -38,9 +38,11 @@ export interface ProduceInput {
 
 export interface ConsumerRunOptions {
   timeoutMs?: number;
-  /** Max messages to drain per native wait (default 64). */
+  /** Max messages to drain per native wait (default 64; batches() default 512). */
   batchSize?: number;
   eachMessageCommit?: boolean;
+  /** After each yielded batch, commit the last message per partition (batches() only). */
+  eachBatchCommit?: boolean;
   stopOnEof?: boolean;
   throwOnError?: boolean;
 }

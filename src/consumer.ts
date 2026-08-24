@@ -95,6 +95,57 @@ export class Consumer implements AsyncIterable<KafkaMessage> {
     })();
   }
 
+  /**
+   * Yield whole drained batches (one async suspend per pollBatch).
+   * Messages are done() after the batch body returns.
+   */
+  batches(opts: ConsumerRunOptions = {}): AsyncGenerator<KafkaMessage[], void, unknown> {
+    const o = { ...this.#defaults, ...opts };
+    const timeoutMs = o.timeoutMs ?? 100;
+    const batchSize = o.batchSize ?? 512;
+    const self = this;
+    return (async function* () {
+      while (!self.#closed) {
+        let batch: KafkaMessage[];
+        try {
+          batch = self.#n.pollBatch(timeoutMs, batchSize);
+        } catch (e) {
+          if (o.throwOnError === false) {
+            await Promise.resolve();
+            continue;
+          }
+          throw e;
+        }
+        if (!batch.length) {
+          await Promise.resolve();
+          continue;
+        }
+        try {
+          if (o.eachBatchCommit) self.#commitBatch(batch);
+          else if (o.eachMessageCommit) {
+            for (const m of batch) self.commitMessage(m);
+          }
+          yield batch;
+        } finally {
+          for (const m of batch) m.done();
+        }
+      }
+    })();
+  }
+
+  #commitBatch(batch: KafkaMessage[]): void {
+    // last offset+1 per topic-partition
+    const last = new Map<string, KafkaMessage>();
+    for (const m of batch) last.set(m.topic + "\0" + m.partition, m);
+    this.commit(
+      [...last.values()].map((m) => ({
+        topic: m.topic,
+        partition: m.partition,
+        offset: m.offset + 1n,
+      })),
+    );
+  }
+
   [Symbol.asyncIterator](): AsyncIterator<KafkaMessage> {
     return this.messages();
   }
