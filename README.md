@@ -40,6 +40,11 @@ for await (const batch of consumer.batches({ batchSize: 512 })) {
 }
 ```
 
+## Documentation
+
+- [Production readiness](docs/production.md) — what is safe to ship, gaps, and recommended posture
+- [Docs index](docs/README.md)
+
 ## Requirements
 
 - Bun 1.1+
