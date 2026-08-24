@@ -24,6 +24,9 @@ func main() {
 		kgo.SeedBrokers(brokers),
 		kgo.DefaultProduceTopic(topic),
 		kgo.AllowAutoTopicCreation(),
+		kgo.RequiredAcks(kgo.LeaderAck()),
+		kgo.DisableIdempotentWrite(),
+		kgo.ProducerLinger(5*time.Millisecond),
 	)
 	must(err)
 
@@ -39,9 +42,9 @@ func main() {
 
 	cl, err = kgo.NewClient(
 		kgo.SeedBrokers(brokers),
-		kgo.ConsumerGroup(fmt.Sprintf("bench-go-c-%d", time.Now().UnixNano())),
-		kgo.ConsumeTopics(topic),
-		kgo.ConsumeResetOffset(kgo.NewOffset().AtStart()),
+		kgo.ConsumePartitions(map[string]map[int32]kgo.Offset{
+			topic: {0: kgo.NewOffset().AtStart()},
+		}),
 	)
 	must(err)
 	defer cl.Close()

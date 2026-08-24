@@ -1,4 +1,6 @@
-# Production readiness
+# Legacy librdkafka production readiness
+
+> This guide is for the optional `bun-kafka/legacy` API. The root export now uses the Bun-native wire client.
 
 **Status:** usable for internal services and many single-cluster apps when you follow this guide.  
 Core **must-fix** items below are implemented; remaining gaps are packaging, chaos coverage, and advanced APIs.

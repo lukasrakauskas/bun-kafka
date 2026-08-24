@@ -1,23 +1,30 @@
 {
   "name": "bun-kafka",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "description": "Zero-dependency Kafka wire protocol client for Bun",
   "module": "index.ts",
+  "types": "index.ts",
   "type": "module",
+  "packageManager": "bun@1.4.0",
   "exports": {
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./legacy": "./src/index.ts"
   },
   "scripts": {
+    "test": "bun test test/bun-native.test.ts",
+    "test:integration": "bun test test/bun-integration.test.ts",
+    "typecheck": "bunx tsc --noEmit",
+    "bench": "bun scripts/bench-bun.ts",
+    "bench:build": "bun scripts/build-benches.ts",
     "build:napi": "bun run scripts/build-napi.ts",
-    "test": "bun test",
-    "test:ffi": "BUN_KAFKA_NATIVE=ffi bun test",
-    "test:napi": "BUN_KAFKA_NATIVE=napi bun test",
-    "bench:build": "bun run scripts/build-benches.ts",
-    "bench": "bun run scripts/bench.ts"
+    "test:legacy": "bun test --timeout 120000 test/acceptance.test.ts test/admin.test.ts test/batches.test.ts test/consumer.test.ts test/features.test.ts test/native-backends.test.ts test/prod-mustfix.test.ts test/producer.test.ts test/version.test.ts",
+    "bench:legacy": "bun run scripts/bench.ts"
+  },
+  "engines": {
+    "bun": ">=1.4.0"
   },
   "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+    "@types/bun": "^1.4.0",
+    "typescript": "^7.0.2"
   }
 }

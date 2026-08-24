@@ -16,20 +16,20 @@ export interface KafkaMessage {
   partition: number;
   offset: bigint;
   /**
-   * Key bytes. Copied by default (safe). With `{ copy: false }` on FFI this may be
-   * a zero-copy view valid only until `done()`.
+   * Key bytes. Bun-native messages own this copy. The legacy FFI backend can use
+   * a zero-copy view that is valid only until `done()`.
    */
   key: Uint8Array | null;
   /**
-   * Value bytes. Copied by default (safe). With `{ copy: false }` on FFI this may be
-   * a zero-copy view valid only until `done()`.
+   * Value bytes. Bun-native messages own this copy. The legacy FFI backend can use
+   * a zero-copy view that is valid only until `done()`.
    */
   value: Uint8Array | null;
   timestamp: bigint;
   timestampType: number;
   headers: Record<string, Uint8Array | null>;
   brokerId: number;
-  /** Release native message resources (idempotent). */
+  /** Release backend message resources (idempotent; a no-op for Bun-native messages). */
   done(): void;
 }
 

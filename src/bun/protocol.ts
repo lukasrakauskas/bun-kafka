@@ -1,0 +1,356 @@
+import { KafkaError } from "../errors.ts";
+import type { Bytes, ClusterMetadata, KafkaMessage, MessageHeaders } from "../types.ts";
+
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+export function asBytes(value: Bytes): Uint8Array | null {
+  if (value == null) return null;
+  if (typeof value === "string") return textEncoder.encode(value);
+  return value instanceof Uint8Array ? value : new Uint8Array(value);
+}
+
+export class Writer {
+  #buffer = new ArrayBuffer(256);
+  #view = new DataView(this.#buffer);
+  length = 0;
+
+  #reserve(size: number): number {
+    const at = this.length;
+    const needed = at + size;
+    if (needed > this.#buffer.byteLength) {
+      let capacity = this.#buffer.byteLength;
+      while (capacity < needed) capacity *= 2;
+      const next = new ArrayBuffer(capacity);
+      new Uint8Array(next).set(new Uint8Array(this.#buffer, 0, this.length));
+      this.#buffer = next;
+      this.#view = new DataView(next);
+    }
+    this.length = needed;
+    return at;
+  }
+
+  i8(value: number): this {
+    const at = this.#reserve(1);
+    this.#view.setInt8(at, value);
+    return this;
+  }
+
+  i16(value: number): this {
+    const at = this.#reserve(2);
+    this.#view.setInt16(at, value);
+    return this;
+  }
+
+  i32(value: number): this {
+    const at = this.#reserve(4);
+    this.#view.setInt32(at, value);
+    return this;
+  }
+
+  u32(value: number): this {
+    const at = this.#reserve(4);
+    this.#view.setUint32(at, value);
+    return this;
+  }
+
+  i64(value: number | bigint): this {
+    const at = this.#reserve(8);
+    this.#view.setBigInt64(at, BigInt(value));
+    return this;
+  }
+
+  bool(value: boolean): this {
+    return this.i8(value ? 1 : 0);
+  }
+
+  string(value: string | null): this {
+    if (value === null) return this.i16(-1);
+    const bytes = textEncoder.encode(value);
+    if (bytes.byteLength > 0x7fff) throw new RangeError("Kafka string is too long");
+    return this.i16(bytes.byteLength).raw(bytes);
+  }
+
+  bytes(value: Uint8Array | null): this {
+    return value === null ? this.i32(-1) : this.i32(value.byteLength).raw(value);
+  }
+
+  array<T>(values: readonly T[] | null, write: (writer: Writer, value: T) => void): this {
+    if (values === null) return this.i32(-1);
+    this.i32(values.length);
+    for (const value of values) write(this, value);
+    return this;
+  }
+
+  raw(value: Uint8Array): this {
+    const at = this.#reserve(value.byteLength);
+    new Uint8Array(this.#buffer, at, value.byteLength).set(value);
+    return this;
+  }
+
+  varInt(value: number | bigint): this {
+    let n = (BigInt(value) << 1n) ^ (BigInt(value) >> 63n);
+    while (n > 0x7fn) {
+      this.i8(Number(n & 0x7fn) | 0x80);
+      n >>= 7n;
+    }
+    return this.i8(Number(n));
+  }
+
+  patchI32(offset: number, value: number): this {
+    this.#view.setInt32(offset, value);
+    return this;
+  }
+
+  patchU32(offset: number, value: number): this {
+    this.#view.setUint32(offset, value);
+    return this;
+  }
+
+  result(): Uint8Array {
+    return new Uint8Array(this.#buffer.slice(0, this.length));
+  }
+}
+
+export class Reader {
+  readonly data: Uint8Array;
+  #view: DataView;
+  offset = 0;
+
+  constructor(data: Uint8Array) {
+    this.data = data;
+    this.#view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  }
+
+  get remaining(): number {
+    return this.data.byteLength - this.offset;
+  }
+
+  #take(size: number): number {
+    if (size < 0 || this.offset + size > this.data.byteLength) {
+      throw new KafkaError(-1, "Malformed Kafka response");
+    }
+    const at = this.offset;
+    this.offset += size;
+    return at;
+  }
+
+  i8(): number { return this.#view.getInt8(this.#take(1)); }
+  i16(): number { return this.#view.getInt16(this.#take(2)); }
+  i32(): number { return this.#view.getInt32(this.#take(4)); }
+  u32(): number { return this.#view.getUint32(this.#take(4)); }
+  i64(): bigint { return this.#view.getBigInt64(this.#take(8)); }
+  bool(): boolean { return this.i8() !== 0; }
+
+  string(): string | null {
+    const size = this.i16();
+    return size < 0 ? null : textDecoder.decode(this.raw(size));
+  }
+
+  bytes(): Uint8Array | null {
+    const size = this.i32();
+    return size < 0 ? null : this.raw(size);
+  }
+
+  array<T>(read: (reader: Reader) => T): T[] {
+    const size = this.i32();
+    if (size < 0) return [];
+    if (size > this.remaining) throw new KafkaError(-1, "Malformed Kafka array");
+    const values = new Array<T>(size);
+    for (let i = 0; i < size; i++) values[i] = read(this);
+    return values;
+  }
+
+  raw(size: number): Uint8Array {
+    const at = this.#take(size);
+    return this.data.subarray(at, at + size);
+  }
+
+  varInt(): number {
+    let value = 0n;
+    for (let shift = 0n; shift < 70n; shift += 7n) {
+      const byte = this.i8() & 0xff;
+      value |= BigInt(byte & 0x7f) << shift;
+      if (!(byte & 0x80)) return Number((value >> 1n) ^ -(value & 1n));
+    }
+    throw new KafkaError(-1, "Invalid Kafka varint");
+  }
+}
+
+let crcTable: Uint32Array | undefined;
+
+export function crc32c(bytes: Uint8Array): number {
+  if (!crcTable) {
+    crcTable = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let value = i;
+      for (let bit = 0; bit < 8; bit++) value = value & 1 ? 0x82f63b78 ^ (value >>> 1) : value >>> 1;
+      crcTable[i] = value >>> 0;
+    }
+  }
+  let crc = 0xffffffff;
+  for (const byte of bytes) crc = crcTable[(crc ^ byte) & 0xff]! ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+export function murmur2(bytes: Uint8Array): number {
+  const m = 0x5bd1e995;
+  let hash = (0x9747b28c ^ bytes.byteLength) | 0;
+  let offset = 0;
+  for (; offset + 4 <= bytes.byteLength; offset += 4) {
+    let k = bytes[offset]! | bytes[offset + 1]! << 8 | bytes[offset + 2]! << 16 | bytes[offset + 3]! << 24;
+    k = Math.imul(k, m);
+    k ^= k >>> 24;
+    hash = Math.imul(hash, m) ^ Math.imul(k, m);
+  }
+  const tail = bytes.byteLength - offset;
+  if (tail >= 3) hash ^= bytes[offset + 2]! << 16;
+  if (tail >= 2) hash ^= bytes[offset + 1]! << 8;
+  if (tail >= 1) {
+    hash ^= bytes[offset]!;
+    hash = Math.imul(hash, m);
+  }
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, m);
+  return (hash ^ hash >>> 15) >>> 0;
+}
+
+export type WireRecord = {
+  key?: Bytes;
+  value?: Bytes;
+  headers?: MessageHeaders;
+  timestamp?: number | bigint;
+};
+
+export function encodeRecordBatch(records: readonly WireRecord[], now = Date.now()): Uint8Array {
+  if (!records.length) throw new RangeError("A record batch cannot be empty");
+  const timestamps = records.map((record) => BigInt(record.timestamp ?? now));
+  const baseTimestamp = timestamps[0]!;
+  const maxTimestamp = timestamps.reduce((max, value) => value > max ? value : max);
+  const writer = new Writer();
+  writer.i64(0).i32(0).i32(-1).i8(2).u32(0).i16(0).i32(records.length - 1)
+    .i64(baseTimestamp).i64(maxTimestamp).i64(-1).i16(-1).i32(-1).i32(records.length);
+
+  for (let offset = 0; offset < records.length; offset++) {
+    const record = records[offset]!;
+    const body = new Writer();
+    const key = asBytes(record.key);
+    const value = asBytes(record.value);
+    const headers = Object.entries(record.headers ?? {});
+    body.i8(0).varInt(timestamps[offset]! - baseTimestamp).varInt(offset)
+      .varInt(key?.byteLength ?? -1);
+    if (key) body.raw(key);
+    body.varInt(value?.byteLength ?? -1);
+    if (value) body.raw(value);
+    body.varInt(headers.length);
+    for (const [name, raw] of headers) {
+      const nameBytes = textEncoder.encode(name);
+      const header = asBytes(raw);
+      body.varInt(nameBytes.byteLength).raw(nameBytes).varInt(header?.byteLength ?? -1);
+      if (header) body.raw(header);
+    }
+    const encoded = body.result();
+    writer.varInt(encoded.byteLength).raw(encoded);
+  }
+
+  writer.patchI32(8, writer.length - 12);
+  const bytes = writer.result();
+  writer.patchU32(17, crc32c(bytes.subarray(21)));
+  return writer.result();
+}
+
+export function decodeRecordSet(
+  bytes: Uint8Array,
+  topic: string,
+  partition: number,
+  brokerId: number,
+): KafkaMessage[] {
+  const reader = new Reader(bytes);
+  const messages: KafkaMessage[] = [];
+  while (reader.remaining >= 12) {
+    const baseOffset = reader.i64();
+    const batchLength = reader.i32();
+    if (batchLength < 9 || batchLength > reader.remaining) throw new KafkaError(-1, "Invalid Kafka record batch size");
+    const batchEnd = reader.offset + batchLength;
+    reader.i32();
+    const magic = reader.i8();
+    if (magic !== 2) throw new KafkaError(-1, `Unsupported Kafka record magic ${magic}`);
+    const expectedCrc = reader.u32();
+    const crcStart = reader.offset;
+    const attributes = reader.i16();
+    if ((attributes & 7) !== 0) throw new KafkaError(-1, "Compressed records are not supported");
+    reader.i32();
+    const baseTimestamp = reader.i64();
+    reader.i64();
+    reader.i64();
+    reader.i16();
+    reader.i32();
+    const count = reader.i32();
+    if (count < 0 || count > batchLength) throw new KafkaError(-1, "Invalid Kafka record count");
+    if (crc32c(bytes.subarray(crcStart, batchEnd)) !== expectedCrc) throw new KafkaError(-1, "Kafka record CRC mismatch");
+
+    for (let i = 0; i < count; i++) {
+      const recordLength = reader.varInt();
+      if (recordLength < 0 || recordLength > batchEnd - reader.offset) throw new KafkaError(-1, "Invalid Kafka record size");
+      const recordEnd = reader.offset + recordLength;
+      reader.i8();
+      const timestampDelta = reader.varInt();
+      const offsetDelta = reader.varInt();
+      const keyLength = reader.varInt();
+      if (keyLength < -1) throw new KafkaError(-1, "Invalid Kafka record key size");
+      const key = keyLength < 0 ? null : reader.raw(keyLength).slice();
+      const valueLength = reader.varInt();
+      if (valueLength < -1) throw new KafkaError(-1, "Invalid Kafka record value size");
+      const value = valueLength < 0 ? null : reader.raw(valueLength).slice();
+      const headers: Record<string, Uint8Array | null> = {};
+      const headerCount = reader.varInt();
+      if (headerCount < 0) throw new KafkaError(-1, "Invalid Kafka header count");
+      for (let header = 0; header < headerCount; header++) {
+        const nameLength = reader.varInt();
+        if (nameLength < 0) throw new KafkaError(-1, "Invalid Kafka header name");
+        const name = textDecoder.decode(reader.raw(nameLength));
+        const headerLength = reader.varInt();
+        if (headerLength < -1) throw new KafkaError(-1, "Invalid Kafka header size");
+        headers[name] = headerLength < 0 ? null : reader.raw(headerLength).slice();
+      }
+      if (reader.offset !== recordEnd) throw new KafkaError(-1, "Invalid Kafka record fields");
+      messages.push({
+        topic,
+        partition,
+        offset: baseOffset + BigInt(offsetDelta),
+        key,
+        value,
+        timestamp: baseTimestamp + BigInt(timestampDelta),
+        timestampType: attributes & 8 ? 2 : 1,
+        headers,
+        brokerId,
+        done() {},
+      });
+    }
+    reader.offset = batchEnd;
+  }
+  return messages;
+}
+
+export function readMetadataResponse(reader: Reader): ClusterMetadata & { controllerId: number } {
+  const brokers = reader.array((r) => {
+    const broker = { id: r.i32(), host: r.string() ?? "", port: r.i32() };
+    r.string(); // rack, added in Metadata v1
+    return broker;
+  });
+  const controllerId = reader.i32();
+  const topics = reader.array((r) => ({
+    err: r.i16(),
+    name: r.string() ?? "",
+    internal: r.bool(),
+    partitions: r.array((partitionReader) => {
+      const err = partitionReader.i16();
+      const id = partitionReader.i32();
+      const leader = partitionReader.i32();
+      partitionReader.array((x) => x.i32());
+      partitionReader.array((x) => x.i32());
+      return { err, id, leader };
+    }),
+  }));
+  return { brokers, topics, controllerId };
+}

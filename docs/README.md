@@ -1,6 +1,7 @@
 # bun-kafka docs
 
 | Doc | Description |
-|-----|-------------|
-| [Production readiness](production.md) | When it is safe to ship, gaps, config posture, checklist |
-| [Root README](../README.md) | Install, features, Kafka versions, API overview, benches |
+|---|---|
+| [Root README](../README.md) | Bun-native API, support, tests, and benchmark commands |
+| [Benchmarks](benchmarks.md) | Recorded hyperfine baseline |
+| [Legacy production guide](production.md) | Old optional librdkafka backend |

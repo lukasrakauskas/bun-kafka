@@ -1,6 +1,7 @@
 use rdkafka::config::ClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::producer::{BaseProducer, BaseRecord, Producer};
+use rdkafka::{Offset, TopicPartitionList};
 use std::env;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -9,14 +10,20 @@ fn main() {
     let topic = env::args().nth(1).unwrap_or_else(|| {
         format!(
             "bench-rs-{}",
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         )
     });
     let count: usize = env::args()
         .nth(2)
         .and_then(|s| s.parse().ok())
         .unwrap_or(10_000);
-    let msg_size: usize = env::var("MSG_SIZE").ok().and_then(|s| s.parse().ok()).unwrap_or(100);
+    let msg_size: usize = env::var("MSG_SIZE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(100);
     let payload = vec![b'x'; msg_size];
 
     let producer: BaseProducer = ClientConfig::new()
@@ -52,7 +59,10 @@ fn main() {
 
     let group = format!(
         "bench-rs-{}",
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
     );
     let consumer: BaseConsumer = ClientConfig::new()
         .set("bootstrap.servers", &brokers)
@@ -61,7 +71,11 @@ fn main() {
         .set("auto.offset.reset", "earliest")
         .create()
         .expect("consumer");
-    consumer.subscribe(&[&topic]).unwrap();
+    let mut assignment = TopicPartitionList::new();
+    assignment
+        .add_partition_offset(&topic, 0, Offset::Beginning)
+        .unwrap();
+    consumer.assign(&assignment).unwrap();
 
     let t1 = Instant::now();
     let mut n = 0usize;

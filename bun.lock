@@ -1,14 +1,12 @@
 {
-  "lockfileVersion": 2,
+  "lockfileVersion": 1,
   "configVersion": 1,
   "workspaces": {
     "": {
       "name": "bun-kafka",
       "devDependencies": {
-        "@types/bun": "latest",
-      },
-      "peerDependencies": {
-        "typescript": "^7",
+        "@types/bun": "^1.4.0",
+        "typescript": "^7.0.2",
       },
     },
   },

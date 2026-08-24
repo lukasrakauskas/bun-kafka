@@ -26,5 +26,14 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  "include": [
+    "index.ts",
+    "src/bun/**/*.ts",
+    "src/errors.ts",
+    "src/types.ts",
+    "test/bun-*.test.ts",
+    "bench/bun-*.ts",
+    "scripts/bench-bun.ts"
+  ]
 }
