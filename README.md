@@ -103,6 +103,15 @@ The fixed API versions require Kafka 0.11 or newer. Use a current Kafka or Redpa
 
 The old librdkafka client remains in the repository for comparison. It is not part of the root package export.
 
+## Readiness documentation
+
+- [Recorded benchmarks](docs/benchmarks.md)
+- [Performance validation and soak tests](docs/performance-validation.md)
+- [Broker failure and chaos testing](docs/chaos-testing.md)
+- [Kafka feature completeness and client comparison](docs/feature-completeness.md)
+
+The native client has short-run benchmark and integration evidence. It does not yet have the soak and chaos evidence required by these release gates.
+
 ## Test
 
 ```bash
