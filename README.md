@@ -141,6 +141,8 @@ The native client has short-run benchmark and integration evidence. It does not 
 ```bash
 bun test test/bun-native.test.ts
 KAFKA_BROKERS=127.0.0.1:9092 bun test test/bun-integration.test.ts
+bun run test:chaos:mock
+bun run test:chaos
 ```
 
 The unit test includes a Bun TCP mock broker. The integration test reuses the producer, metadata, record, and consumer acceptance cases against a real broker.

@@ -33,7 +33,9 @@
     "src/errors.ts",
     "src/types.ts",
     "test/bun-*.test.ts",
+    "test/chaos*.test.ts",
     "bench/bun-*.ts",
-    "scripts/bench-bun.ts"
+    "scripts/bench-bun.ts",
+    "scripts/chaos.ts"
   ]
 }

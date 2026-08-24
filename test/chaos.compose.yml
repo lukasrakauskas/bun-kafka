@@ -1,0 +1,76 @@
+name: bun-kafka-chaos
+
+x-redpanda: &redpanda
+  image: bun-kafka-chaos-redpanda:v25.2.1
+  build:
+    context: ..
+    dockerfile: test/chaos.Dockerfile
+  restart: no
+  cap_add: [NET_ADMIN]
+  healthcheck:
+    test: [CMD-SHELL, "rpk cluster health -X brokers=localhost:9092 >/dev/null"]
+    interval: 2s
+    timeout: 2s
+    retries: 30
+
+services:
+  redpanda-0:
+    <<: *redpanda
+    command:
+      - redpanda
+      - start
+      - --node-id=0
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --check=false
+      - --rpc-addr=0.0.0.0:33145
+      - --advertise-rpc-addr=redpanda-0:33145
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda-0:9092,external://127.0.0.1:19092
+    ports: ["19092:19092", "19644:9644"]
+    volumes: ["redpanda-0:/var/lib/redpanda/data"]
+
+  redpanda-1:
+    <<: *redpanda
+    command:
+      - redpanda
+      - start
+      - --node-id=1
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --check=false
+      - --seeds=redpanda-0:33145
+      - --rpc-addr=0.0.0.0:33145
+      - --advertise-rpc-addr=redpanda-1:33145
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:29092
+      - --advertise-kafka-addr=internal://redpanda-1:9092,external://127.0.0.1:29092
+    ports: ["29092:29092", "29644:9644"]
+    volumes: ["redpanda-1:/var/lib/redpanda/data"]
+
+  redpanda-2:
+    <<: *redpanda
+    command:
+      - redpanda
+      - start
+      - --node-id=2
+      - --smp=1
+      - --memory=512M
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --check=false
+      - --seeds=redpanda-0:33145
+      - --rpc-addr=0.0.0.0:33145
+      - --advertise-rpc-addr=redpanda-2:33145
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:39092
+      - --advertise-kafka-addr=internal://redpanda-2:9092,external://127.0.0.1:39092
+    ports: ["39092:39092", "39644:9644"]
+    volumes: ["redpanda-2:/var/lib/redpanda/data"]
+
+volumes:
+  redpanda-0:
+  redpanda-1:
+  redpanda-2:

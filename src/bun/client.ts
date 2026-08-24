@@ -210,6 +210,7 @@ export class Cluster {
   }
 
   get retryOptions(): Required<RetryOptions> { return this.#retry; }
+  get requestTimeoutMs(): number { return this.#options.requestTimeoutMs; }
 
   event(event: KafkaEvent): void {
     try { this.#onEvent?.(event); } catch { /* Observability must not break requests. */ }
@@ -784,7 +785,7 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
               .i32(options.maxPartitionBytes ?? 1024 * 1024);
           });
         });
-      const response = await this.#cluster.request(leader, API_FETCH, 4, body, (options.maxWaitMs ?? 500) + 30_000, false);
+      const response = await this.#cluster.request(leader, API_FETCH, 4, body, (options.maxWaitMs ?? 500) + this.#cluster.requestTimeoutMs, false);
       this.#cluster.throttle(API_FETCH, response.i32());
       return response.array((topicReader) => {
         const topic = topicReader.string() ?? "";

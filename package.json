@@ -12,6 +12,8 @@
   "scripts": {
     "test": "bun test test/bun-native.test.ts",
     "test:integration": "bun test test/bun-integration.test.ts",
+    "test:chaos:mock": "bun test test/chaos.test.ts",
+    "test:chaos": "bun scripts/chaos.ts",
     "typecheck": "bunx tsc --noEmit",
     "bench": "bun scripts/bench-bun.ts",
     "bench:build": "bun run scripts/build-benches.ts"
