@@ -1,0 +1,23 @@
+{
+  "name": "bun-kafka",
+  "version": "0.1.0",
+  "module": "index.ts",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts"
+  },
+  "scripts": {
+    "build:napi": "bun run scripts/build-napi.ts",
+    "test": "bun test",
+    "test:ffi": "BUN_KAFKA_NATIVE=ffi bun test",
+    "test:napi": "BUN_KAFKA_NATIVE=napi bun test",
+    "bench:build": "bun run scripts/build-benches.ts",
+    "bench": "bun run scripts/bench.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

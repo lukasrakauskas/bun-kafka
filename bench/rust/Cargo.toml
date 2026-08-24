@@ -1,0 +1,8 @@
+[package]
+name = "bun-kafka-bench-rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rdkafka = { version = "0.37", default-features = false, features = ["libz", "ssl", "external-lz4"] }
+serde_json = "1"
