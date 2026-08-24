@@ -1,16 +1,37 @@
-import { beforeAll, describe, expect, test } from "bun:test";
-import { consumer, dec, initNative, produceN, producer, topic } from "./helpers.ts";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
+import {
+  consumer as makeConsumer,
+  dec,
+  initNative,
+  produceN,
+  producer as makeProducer,
+  topic,
+  waitTopic,
+} from "./helpers.ts";
 
 beforeAll(async () => { await initNative(); });
+
+const open: { close: () => Promise<void> | void }[] = [];
+function track<T extends { close: () => Promise<void> | void }>(c: T): T {
+  open.push(c);
+  return c;
+}
+afterEach(async () => {
+  while (open.length) {
+    const c = open.pop()!;
+    try { await c.close(); } catch {}
+  }
+});
 
 describe("Consumer.batches", () => {
   test("yields arrays and covers all messages", async () => {
     const t = topic("batch");
-    const p = producer();
+    const p = track(makeProducer());
     await produceN(p, t, 50, "b");
     await p.close();
+    await waitTopic(t);
 
-    const c = consumer();
+    const c = track(makeConsumer());
     c.subscribe(t);
 
     const got: string[] = [];
@@ -26,18 +47,19 @@ describe("Consumer.batches", () => {
     expect(got.length).toBe(50);
     expect(got[0]).toBe("b-0");
     expect(got[49]).toBe("b-49");
-    expect(batches).toBeGreaterThan(1); // 50/16 => multiple
+    expect(batches).toBeGreaterThan(1);
     await c.close();
   });
 
   test("eachBatchCommit commits high-water per partition", async () => {
     const t = topic("batch-c");
     const group = `g-batch-${crypto.randomUUID()}`;
-    const p = producer();
+    const p = track(makeProducer());
     await produceN(p, t, 10);
     await p.close();
+    await waitTopic(t);
 
-    const c = consumer({ "group.id": group });
+    const c = track(makeConsumer({ "group.id": group }));
     c.subscribe(t);
     let lastOff = -1n;
     let part = 0;

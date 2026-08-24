@@ -383,6 +383,14 @@ class FfiConsumer implements NativeConsumer {
     if (err !== C.NO_ERROR) {
       const estr = rk.rd_kafka_message_errstr(raw) || rk.rd_kafka_err2str(err);
       rk.rd_kafka_message_destroy(raw);
+      // transient while topic auto-creates / metadata catches up
+      if (
+        err === 3 /* UNKNOWN_TOPIC_OR_PART */ ||
+        err === -190 /* UNKNOWN_PARTITION */ ||
+        err === -188 /* UNKNOWN_TOPIC */
+      ) {
+        return null;
+      }
       throw new KafkaError(err, estr);
     }
     return readMsg(raw);

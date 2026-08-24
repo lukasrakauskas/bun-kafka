@@ -17,6 +17,7 @@ export function producer(extra: Record<string, string | number | boolean> = {}) 
     "bootstrap.servers": BROKERS,
     "socket.timeout.ms": 10000,
     "message.timeout.ms": 10000,
+    "allow.auto.create.topics": true,
     acks: "all",
     ...extra,
   });
@@ -30,6 +31,7 @@ export function consumer(extra: Record<string, string | number | boolean> = {}) 
     "auto.offset.reset": "earliest",
     "socket.timeout.ms": 10000,
     "session.timeout.ms": 10000,
+    "allow.auto.create.topics": true,
     ...extra,
   });
 }
@@ -43,12 +45,34 @@ export async function waitFor<T>(
   { timeoutMs = 20_000, intervalMs = 50 }: { timeoutMs?: number; intervalMs?: number } = {},
 ): Promise<T> {
   const start = Date.now();
+  let lastErr: unknown;
   while (Date.now() - start < timeoutMs) {
-    const v = await fn();
-    if (v) return v as T;
+    try {
+      const v = await fn();
+      if (v) return v as T;
+    } catch (e) {
+      lastErr = e;
+    }
     await Bun.sleep(intervalMs);
   }
-  throw new Error(`waitFor timed out after ${timeoutMs}ms`);
+  throw new Error(`waitFor timed out after ${timeoutMs}ms${lastErr ? `: ${lastErr}` : ""}`);
+}
+
+/** Wait until topic appears in metadata (after auto-create produce). */
+export async function waitTopic(name: string, timeoutMs = 15_000) {
+  const a = admin();
+  try {
+    await waitFor(() => {
+      try {
+        const m = a.metadata({ allTopics: true, timeoutMs: 5_000 });
+        return m.topics.find((t) => t.name === name && t.partitions.length > 0) ?? null;
+      } catch {
+        return null;
+      }
+    }, { timeoutMs, intervalMs: 150 });
+  } finally {
+    try { await a.close(); } catch {}
+  }
 }
 
 export async function produceN(p: Producer, t: string, n: number, prefix = "m") {
