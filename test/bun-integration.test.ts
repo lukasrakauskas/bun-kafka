@@ -10,7 +10,7 @@ integration("Bun native Kafka integration", () => {
     const kafka = new Kafka({ brokers: brokers!, clientId: "bun-kafka-test" });
     const topic = `bun-native-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
     try {
-      const producer = kafka.producer();
+      const producer = kafka.producer({ idempotent: true, compression: "zstd" });
       const sent = await producer.send({
         topic,
         acks: "all",
@@ -50,6 +50,13 @@ integration("Bun native Kafka integration", () => {
       const replay = await consumer.fetch({ maxWaitMs: 100, maxMessages: 1 });
       expect(replay[0]?.offset).toBe(10n);
       expect((await consumer.watermarks(topic, 0)).high).toBeGreaterThanOrEqual(45n);
+
+      const grouped = kafka.consumer({ groupId: `group-${crypto.randomUUID()}`, fromBeginning: true });
+      await grouped.subscribe(topic);
+      expect((await grouped.fetch({ maxWaitMs: 100, maxMessages: 1 }))[0]?.offset).toBe(0n);
+      await grouped.commitOffsets();
+      expect((await grouped.committed([{ topic, partition: 0 }]))[0]?.offset).toBe(1n);
+      await grouped.close();
     } finally {
       await kafka.disconnect();
     }

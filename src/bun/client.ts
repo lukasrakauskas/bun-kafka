@@ -1,6 +1,6 @@
 import { KafkaError } from "../errors.ts";
 import type { Bytes, ClusterMetadata, KafkaMessage, MessageHeaders, TopicPartition, Watermarks } from "../types.ts";
-import { Connection, type BunKafkaTls, type ConnectionOptions } from "./connection.ts";
+import { Connection, type BunKafkaSasl, type BunKafkaTls, type ConnectionOptions } from "./connection.ts";
 import {
   Reader,
   Writer,
@@ -16,6 +16,19 @@ const API_PRODUCE = 0;
 const API_FETCH = 1;
 const API_LIST_OFFSETS = 2;
 const API_METADATA = 3;
+const API_CREATE_TOPICS = 19;
+const API_DELETE_TOPICS = 20;
+const API_CREATE_PARTITIONS = 37;
+const API_DESCRIBE_CONFIGS = 32;
+const API_ALTER_CONFIGS = 33;
+const API_FIND_COORDINATOR = 10;
+const API_JOIN_GROUP = 11;
+const API_SYNC_GROUP = 14;
+const API_HEARTBEAT = 12;
+const API_LEAVE_GROUP = 13;
+const API_OFFSET_COMMIT = 8;
+const API_OFFSET_FETCH = 9;
+const API_INIT_PRODUCER_ID = 22;
 
 const errorNames: Record<number, string> = {
   1: "Offset out of range",
@@ -29,7 +42,7 @@ const errorNames: Record<number, string> = {
   30: "Group authorization failed",
   35: "Unsupported version",
 };
-const retriableErrors = new Set([3, 5, 6, 7, 13, 14, 15, 19, 20, 56]);
+const retriableErrors = new Set([3, 5, 6, 7, 13, 14, 15, 19, 20, 41, 56]);
 
 function kafkaError(code: number, context: string): KafkaError {
   return new KafkaError(code, `${context}: ${errorNames[code] ?? `Kafka error ${code}`}`, {
@@ -45,12 +58,34 @@ function partitionKey(topic: string, partition: number): string {
   return `${topic}\0${partition}`;
 }
 
+function retryDelay(options: Required<RetryOptions>, attempt: number): number {
+  const base = Math.min(options.maxBackoffMs, options.initialBackoffMs * 2 ** attempt);
+  return Math.round(base * (0.5 + Math.random()));
+}
+
+export interface RetryOptions {
+  /** Maximum retries after the first request. Default 3. */
+  maxRetries?: number;
+  /** Initial retry delay. Default 50 ms. */
+  initialBackoffMs?: number;
+  /** Maximum retry delay. Default 2,000 ms. */
+  maxBackoffMs?: number;
+}
+
+export type KafkaEvent =
+  | { type: "retry"; apiKey: number; attempt: number; delayMs: number; error: unknown }
+  | { type: "throttle"; apiKey: number; durationMs: number };
+
 export interface KafkaOptions {
   brokers: string[];
   clientId?: string;
   tls?: BunKafkaTls;
+  sasl?: BunKafkaSasl;
   requestTimeoutMs?: number;
+  connectTimeoutMs?: number;
   maxResponseBytes?: number;
+  retry?: RetryOptions;
+  onEvent?: (event: KafkaEvent) => void;
 }
 
 type TopicMetadata = ClusterMetadata["topics"][number];
@@ -58,21 +93,46 @@ type TopicMetadata = ClusterMetadata["topics"][number];
 export class Cluster {
   #bootstrap: string[];
   #options: ConnectionOptions;
+  #retry: Required<RetryOptions>;
+  #onEvent?: (event: KafkaEvent) => void;
   #connections = new Map<string, Connection>();
   #brokers = new Map<number, string>();
+  #controller?: number;
   #topics = new Map<string, TopicMetadata>();
 
   constructor(options: KafkaOptions) {
     if (!Array.isArray(options.brokers) || !options.brokers.length) throw new TypeError("Kafka requires at least one broker");
     const requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
+    const connectTimeoutMs = options.connectTimeoutMs ?? 10_000;
     const maxResponseBytes = options.maxResponseBytes ?? 100 * 1024 * 1024;
-    if (requestTimeoutMs <= 0 || maxResponseBytes < 4) throw new RangeError("Invalid Kafka timeout or response size");
+    const retry = {
+      maxRetries: options.retry?.maxRetries ?? 3,
+      initialBackoffMs: options.retry?.initialBackoffMs ?? 50,
+      maxBackoffMs: options.retry?.maxBackoffMs ?? 2_000,
+    };
+    if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs <= 0
+      || !Number.isSafeInteger(connectTimeoutMs) || connectTimeoutMs <= 0
+      || !Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 4
+      || !Number.isSafeInteger(retry.maxRetries) || retry.maxRetries < 0
+      || !Number.isFinite(retry.initialBackoffMs) || retry.initialBackoffMs < 0
+      || !Number.isFinite(retry.maxBackoffMs) || retry.maxBackoffMs < retry.initialBackoffMs) {
+      throw new RangeError("Invalid Kafka timeout, response size, or retry options");
+    }
+    const sasl = options.sasl;
+    if (sasl && (!(new Set(["plain", "scram-sha-256", "scram-sha-512", "oauthbearer"])).has(sasl.mechanism)
+      || (sasl.mechanism === "oauthbearer" ? !sasl.token : !sasl.username || !sasl.password))) {
+      throw new TypeError("Invalid Kafka SASL options");
+    }
     this.#bootstrap = [...options.brokers];
+    this.#retry = retry;
+    this.#onEvent = options.onEvent;
     this.#options = {
       clientId: options.clientId ?? "bun-kafka",
       requestTimeoutMs,
+      connectTimeoutMs,
       maxResponseBytes,
       tls: options.tls,
+      sasl: options.sasl,
     };
   }
 
@@ -83,6 +143,10 @@ export class Cluster {
       this.#connections.set(broker, connection);
     }
     return connection;
+  }
+
+  async anyRequest(apiKey: number, apiVersion: number, body: Writer): Promise<Reader> {
+    return this.#anyRequest(apiKey, apiVersion, body);
   }
 
   async #anyRequest(apiKey: number, apiVersion: number, body: Writer): Promise<Reader> {
@@ -102,6 +166,7 @@ export class Cluster {
     const body = new Writer().array(topics, (writer, topic) => writer.string(topic));
     const response = readMetadataResponse(await this.#anyRequest(API_METADATA, 1, body));
     for (const broker of response.brokers) this.#brokers.set(broker.id, address(broker.host, broker.port));
+    this.#controller = response.controllerId;
     for (const topic of response.topics) this.#topics.set(topic.name, topic);
     return { brokers: response.brokers, topics: response.topics };
   }
@@ -115,14 +180,43 @@ export class Cluster {
     return metadata.topics.find((item) => item.name === topic) ?? { name: topic, err: 3, partitions: [] };
   }
 
-  async request(brokerId: number, apiKey: number, apiVersion: number, body: Writer, timeoutMs?: number): Promise<Reader> {
-    let broker = this.#brokers.get(brokerId);
-    if (!broker) {
-      await this.metadata();
-      broker = this.#brokers.get(brokerId);
+  async request(brokerId: number, apiKey: number, apiVersion: number, body: Writer, timeoutMs?: number, retry = true): Promise<Reader> {
+    let lastError: unknown;
+    const maxRetries = retry ? this.#retry.maxRetries : 0;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        let broker = this.#brokers.get(brokerId);
+        if (!broker) {
+          await this.metadata();
+          broker = this.#brokers.get(brokerId);
+        }
+        if (!broker) throw new KafkaError(-1, `Kafka broker ${brokerId} is not in metadata`, { retriable: true });
+        return await this.#connection(broker).request(apiKey, apiVersion, body, timeoutMs);
+      } catch (error) {
+        lastError = error;
+        if (!(error instanceof KafkaError && error.retriable) || attempt === maxRetries) throw error;
+        const delay = retryDelay(this.#retry, attempt);
+        this.event({ type: "retry", apiKey, attempt: attempt + 1, delayMs: delay, error });
+        if (delay) await Bun.sleep(delay);
+      }
     }
-    if (!broker) throw new KafkaError(-1, `Kafka broker ${brokerId} is not in metadata`, { retriable: true });
-    return this.#connection(broker).request(apiKey, apiVersion, body, timeoutMs);
+    throw lastError;
+  }
+
+  async controllerRequest(apiKey: number, apiVersion: number, body: Writer): Promise<Reader> {
+    if (this.#controller === undefined) await this.metadata();
+    if (this.#controller === undefined) throw new KafkaError(-1, "Kafka metadata has no controller", { retriable: true });
+    return this.request(this.#controller, apiKey, apiVersion, body);
+  }
+
+  get retryOptions(): Required<RetryOptions> { return this.#retry; }
+
+  event(event: KafkaEvent): void {
+    try { this.#onEvent?.(event); } catch { /* Observability must not break requests. */ }
+  }
+
+  throttle(apiKey: number, durationMs: number): void {
+    if (durationMs > 0) this.event({ type: "throttle", apiKey, durationMs });
   }
 
   close(): void {
@@ -165,6 +259,10 @@ export interface ProducerOptions {
   lingerMs?: number;
   /** Flush immediately at this queued message count. Default 1,000. */
   batchMaxMessages?: number;
+  /** Record-batch compression through Bun primitives. */
+  compression?: "none" | "gzip" | "zstd";
+  /** Use broker sequence numbers to make retries duplicate-safe. */
+  idempotent?: boolean;
 }
 
 type PendingSend = {
@@ -181,6 +279,8 @@ export class BunProducer {
   #onClose: () => void;
   #options: Required<ProducerOptions>;
   #pending: PendingSend[] = [];
+  #producer?: { id: bigint; epoch: number };
+  #sequences = new Map<string, number>();
   #queuedMessages = 0;
   #timer?: ReturnType<typeof setTimeout>;
   #flushing?: Promise<void>;
@@ -188,9 +288,15 @@ export class BunProducer {
   constructor(options: KafkaOptions | Cluster, producerOptions: ProducerOptions = {}, onClose = () => {}) {
     this.#ownsCluster = !(options instanceof Cluster);
     this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : options as Cluster;
-    this.#options = { lingerMs: producerOptions.lingerMs ?? 5, batchMaxMessages: producerOptions.batchMaxMessages ?? 1_000 };
+    this.#options = {
+      lingerMs: producerOptions.lingerMs ?? 5,
+      batchMaxMessages: producerOptions.batchMaxMessages ?? 1_000,
+      compression: producerOptions.compression ?? "none",
+      idempotent: producerOptions.idempotent ?? false,
+    };
     if (!Number.isFinite(this.#options.lingerMs) || this.#options.lingerMs < 0
-      || !Number.isSafeInteger(this.#options.batchMaxMessages) || this.#options.batchMaxMessages < 1) {
+      || !Number.isSafeInteger(this.#options.batchMaxMessages) || this.#options.batchMaxMessages < 1
+      || !["none", "gzip", "zstd"].includes(this.#options.compression)) {
       throw new RangeError("Invalid producer batching options");
     }
     this.#onClose = onClose;
@@ -232,15 +338,38 @@ export class BunProducer {
 
   async #flushPending(pending: PendingSend[]): Promise<void> {
     try {
+      if (this.#options.idempotent && !this.#producer) {
+        const response = await this.#cluster.anyRequest(API_INIT_PRODUCER_ID, 0, new Writer().string(null).i32(30_000));
+        this.#cluster.throttle(API_INIT_PRODUCER_ID, response.i32());
+        const error = response.i16();
+        const id = response.i64();
+        const epoch = response.i16();
+        if (error) throw kafkaError(error, "Initialize idempotent producer");
+        this.#producer = { id, epoch };
+      }
       const configs = Map.groupBy(pending, ({ input }) => `${input.acks ?? 1}\0${input.timeoutMs ?? 30_000}`);
       for (const group of configs.values()) {
         const topics = Map.groupBy(group, ({ input }) => input.topic);
-        const partitions = (await Promise.all([...topics].map(async ([topic, sends]) => {
-          const messages = sends.flatMap(({ input }) => input.messages);
-          return this.#route(topic, messages, sends[0]!.input.timeoutMs ?? 30_000);
-        }))).flat();
         const first = group[0]!.input;
-        const results = await this.#produce(partitions, first.acks === "all" ? -1 : 1, first.timeoutMs ?? 30_000);
+        let results: ProduceResult[] | undefined;
+        let lastError: unknown;
+        for (let attempt = 0; attempt <= this.#cluster.retryOptions.maxRetries; attempt++) {
+          try {
+            const partitions = (await Promise.all([...topics].map(async ([topic, sends]) => {
+              const messages = sends.flatMap(({ input }) => input.messages);
+              return this.#route(topic, messages, sends[0]!.input.timeoutMs ?? 30_000, attempt > 0);
+            }))).flat();
+            results = await this.#produce(partitions, this.#options.idempotent || first.acks === "all" ? -1 : 1, first.timeoutMs ?? 30_000, this.#options.compression);
+            break;
+          } catch (error) {
+            lastError = error;
+            if (!(error instanceof KafkaError && error.retriable) || attempt === this.#cluster.retryOptions.maxRetries) throw error;
+            const delay = retryDelay(this.#cluster.retryOptions, attempt);
+            this.#cluster.event({ type: "retry", apiKey: API_PRODUCE, attempt: attempt + 1, delayMs: delay, error });
+            if (delay) await Bun.sleep(delay);
+          }
+        }
+        if (!results) throw lastError ?? new KafkaError(-1, "Kafka produce failed", { retriable: true });
         const byTopic = Map.groupBy(results, (result) => result.topic);
         for (const item of group) item.resolve(byTopic.get(item.input.topic) ?? []);
       }
@@ -250,11 +379,11 @@ export class BunProducer {
     }
   }
 
-  async #route(topic: string, messages: readonly ProducerMessage[], timeoutMs: number): Promise<PartitionRecords[]> {
+  async #route(topic: string, messages: readonly ProducerMessage[], timeoutMs: number, refresh = false): Promise<PartitionRecords[]> {
     let metadata: TopicMetadata | undefined;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      metadata = await this.#cluster.topic(topic, !!metadata);
+      metadata = await this.#cluster.topic(topic, refresh || !!metadata);
       if (!metadata.err && metadata.partitions.length) break;
       if (metadata.err !== 3 && metadata.err !== 5) throw kafkaError(metadata.err, topic);
       await Bun.sleep(10);
@@ -286,16 +415,18 @@ export class BunProducer {
     return [...partitions.values()];
   }
 
-  async #produce(partitions: PartitionRecords[], acks: number, timeoutMs: number): Promise<ProduceResult[]> {
+  async #produce(partitions: PartitionRecords[], acks: number, timeoutMs: number, compression: "none" | "gzip" | "zstd"): Promise<ProduceResult[]> {
     const leaders = Map.groupBy(partitions, (partition) => partition.leader);
     const responses = await Promise.all([...leaders].map(async ([leader, leaderPartitions]) => {
       const topics = Map.groupBy(leaderPartitions, (partition) => partition.topic);
       const body = new Writer().string(null).i16(acks).i32(timeoutMs).array([...topics], (writer, [topic, topicPartitions]) => {
         writer.string(topic).array(topicPartitions, (partitionWriter, value) => {
-          partitionWriter.i32(value.partition).bytes(encodeRecordBatch(value.records));
+          const key = partitionKey(value.topic, value.partition);
+          const producer = this.#producer && { ...this.#producer, sequence: this.#sequences.get(key) ?? 0 };
+          partitionWriter.i32(value.partition).bytes(encodeRecordBatch(value.records, Date.now(), compression, producer));
         });
       });
-      const response = await this.#cluster.request(leader, API_PRODUCE, 3, body, timeoutMs);
+      const response = await this.#cluster.request(leader, API_PRODUCE, 3, body, timeoutMs, false);
       const results = response.array((topicReader) => {
         const topic = topicReader.string() ?? "";
         return topicReader.array((partitionReader) => {
@@ -307,10 +438,17 @@ export class BunProducer {
           return { topic, partition, baseOffset, logAppendTime };
         });
       }).flat();
-      response.i32();
+      this.#cluster.throttle(API_PRODUCE, response.i32());
       return results;
     }));
-    return responses.flat();
+    const results = responses.flat();
+    if (this.#producer) {
+      for (const partition of partitions) {
+        const key = partitionKey(partition.topic, partition.partition);
+        this.#sequences.set(key, ((this.#sequences.get(key) ?? 0) + partition.records.length) % 0x80000000);
+      }
+    }
+    return results;
   }
 
   async close(): Promise<void> {
@@ -328,17 +466,29 @@ export class BunProducer {
 export interface ConsumerOptions {
   fromBeginning?: boolean;
   fetchMaxBytes?: number;
+  groupId?: string;
+  sessionTimeoutMs?: number;
+  rebalanceTimeoutMs?: number;
+  heartbeatIntervalMs?: number;
+  autoCommit?: boolean;
 }
 
 export interface ConsumerSubscribe {
   topics: string | string[];
   fromBeginning?: boolean;
+  groupId?: string;
 }
 
 export interface ConsumerAssignment {
   topic: string;
   partition: number;
   offset?: bigint | "earliest" | "latest";
+}
+
+export interface CommittedOffset {
+  topic: string;
+  partition: number;
+  offset: bigint;
 }
 
 export interface FetchOptions {
@@ -352,6 +502,8 @@ export interface FetchOptions {
 }
 
 type Assigned = { topic: string; partition: number; leader: number };
+type GroupMember = { memberId: string; topics: string[] };
+type GroupAssignment = { topic: string; partitions: number[] };
 
 export class BunConsumer implements AsyncIterable<KafkaMessage> {
   #cluster: Cluster;
@@ -363,12 +515,154 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
   #closed = false;
   #ownsCluster: boolean;
   #onClose: () => void;
+  #groupId?: string;
+  #memberId = "";
+  #generationId = -1;
+  #coordinator?: number;
+  #heartbeat?: ReturnType<typeof setInterval>;
+  #groupTopics: string[] = [];
+  #rejoining?: Promise<void>;
 
   constructor(options: KafkaOptions | Cluster, consumerOptions: ConsumerOptions = {}, onClose = () => {}) {
     this.#ownsCluster = !(options instanceof Cluster);
     this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : options as Cluster;
     this.#options = consumerOptions;
+    const session = consumerOptions.sessionTimeoutMs ?? 45_000;
+    const rebalance = consumerOptions.rebalanceTimeoutMs ?? 60_000;
+    const heartbeat = consumerOptions.heartbeatIntervalMs ?? 3_000;
+    if (![session, rebalance, heartbeat].every((value) => Number.isSafeInteger(value) && value > 0) || heartbeat >= session) {
+      throw new RangeError("Invalid consumer group timeout options");
+    }
     this.#onClose = onClose;
+  }
+
+  async #findCoordinator(): Promise<number> {
+    if (this.#coordinator !== undefined) return this.#coordinator;
+    const response = await this.#cluster.anyRequest(API_FIND_COORDINATOR, 0, new Writer().string(this.#groupId!));
+    const error = response.i16();
+    const coordinator = response.i32();
+    response.string();
+    response.i32();
+    if (error) throw kafkaError(error, `Kafka group ${this.#groupId}`);
+    this.#coordinator = coordinator;
+    return coordinator;
+  }
+
+  async #joinGroup(topics: string[], fromBeginning: boolean): Promise<void> {
+    const coordinator = await this.#findCoordinator();
+    const memberMetadata = new Writer().i16(0).array(topics, (writer, topic) => writer.string(topic)).bytes(null).result();
+    const join = new Writer().string(this.#groupId!).i32(this.#options.sessionTimeoutMs ?? 45_000)
+      .i32(this.#options.rebalanceTimeoutMs ?? 60_000).string(this.#memberId).string("consumer")
+      .array([["range", memberMetadata] as const], (writer, [name, metadata]) => writer.string(name).bytes(metadata));
+    const response = await this.#cluster.request(coordinator, API_JOIN_GROUP, 2, join);
+    this.#cluster.throttle(API_JOIN_GROUP, response.i32());
+    const error = response.i16();
+    this.#generationId = response.i32();
+    response.string();
+    const leader = response.string() ?? "";
+    this.#memberId = response.string() ?? "";
+    const members = response.array((reader) => {
+      const memberId = reader.string() ?? "";
+      const metadata = new Reader(reader.bytes() ?? new Uint8Array());
+      metadata.i16();
+      const memberTopics = metadata.array((item) => item.string() ?? "");
+      metadata.bytes();
+      return { memberId, topics: memberTopics };
+    });
+    if (error) throw kafkaError(error, `Kafka group ${this.#groupId}`);
+
+    const assignments = new Map<string, GroupAssignment[]>();
+    if (this.#memberId === leader) {
+      const metadata = await this.#cluster.metadata(topics);
+      for (const member of members) assignments.set(member.memberId, []);
+      for (const topic of metadata.topics) {
+        const eligible = members.filter((member) => member.topics.includes(topic.name)).sort((a, b) => a.memberId.localeCompare(b.memberId));
+        const partitions = topic.partitions.map(({ id }) => id).sort((a, b) => a - b);
+        let start = 0;
+        eligible.forEach((member, index) => {
+          const count = Math.floor(partitions.length / eligible.length) + (index < partitions.length % eligible.length ? 1 : 0);
+          assignments.get(member.memberId)!.push({ topic: topic.name, partitions: partitions.slice(start, start + count) });
+          start += count;
+        });
+      }
+    }
+    const sync = new Writer().string(this.#groupId!).i32(this.#generationId).string(this.#memberId)
+      .array([...assignments], (writer, [memberId, memberAssignments]) => {
+        const assignment = new Writer().i16(0).array(memberAssignments, (assignmentWriter, item) => assignmentWriter.string(item.topic).array(item.partitions, (writer, partition) => writer.i32(partition))).bytes(null);
+        writer.string(memberId).bytes(assignment.result());
+      });
+    const synced = await this.#cluster.request(coordinator, API_SYNC_GROUP, 0, sync);
+    const syncError = synced.i16();
+    const syncAssignment = synced.bytes() ?? new Uint8Array();
+    if (syncError) throw kafkaError(syncError, `Kafka group ${this.#groupId} sync`);
+    const assignmentReader = new Reader(syncAssignment);
+    assignmentReader.i16();
+    const assigned: ConsumerAssignment[] = [];
+    for (const item of assignmentReader.array((reader) => ({ topic: reader.string() ?? "", partitions: reader.array((reader) => reader.i32()) }))) {
+      for (const partition of item.partitions) assigned.push({ topic: item.topic, partition });
+    }
+    const committed = new Map((await this.committed(assigned)).map((item) => [partitionKey(item.topic, item.partition), item.offset]));
+    await this.assign(assigned.map((item) => ({
+      ...item,
+      offset: (committed.get(partitionKey(item.topic, item.partition)) ?? -1n) >= 0n
+        ? committed.get(partitionKey(item.topic, item.partition))!
+        : fromBeginning ? "earliest" : "latest",
+    })));
+    if (this.#heartbeat) clearInterval(this.#heartbeat);
+    this.#heartbeat = setInterval(() => void this.#heartbeatOnce(coordinator), this.#options.heartbeatIntervalMs ?? 3_000);
+  }
+
+  async #heartbeatOnce(coordinator: number): Promise<void> {
+    if (!this.#groupId || this.#generationId < 0 || this.#rejoining) return;
+    try {
+      const response = await this.#cluster.request(coordinator, API_HEARTBEAT, 0, new Writer().string(this.#groupId).i32(this.#generationId).string(this.#memberId));
+      const error = response.i16();
+      if (!error) return;
+      if (error === 25) this.#memberId = "";
+      if (error !== 22 && error !== 25 && error !== 27) throw kafkaError(error, `Kafka group ${this.#groupId} heartbeat`);
+    } catch {
+      this.#coordinator = undefined;
+    }
+    if (this.#heartbeat) clearInterval(this.#heartbeat);
+    this.#assigned.clear();
+    this.#positions.clear();
+    this.#decoders = [];
+    this.#rejoining = this.#joinGroup(this.#groupTopics, this.#options.fromBeginning ?? false)
+      .finally(() => { this.#rejoining = undefined; });
+    try { await this.#rejoining; } catch { this.#coordinator = undefined; }
+  }
+
+  async commitOffsets(assignments: readonly ConsumerAssignment[] = this.assignment().map(({ topic, partition, offset }) => ({ topic, partition, offset: typeof offset === "bigint" ? offset : undefined }))): Promise<void> {
+    this.#open();
+    if (!this.#groupId) throw new Error("Consumer groupId is required for offset commits");
+    const coordinator = await this.#findCoordinator();
+    const topics = Map.groupBy(assignments, (assignment) => assignment.topic);
+    const body = new Writer().string(this.#groupId).i32(this.#generationId).string(this.#memberId).i32(-1)
+      .array([...topics], (writer, [topic, values]) => writer.string(topic).array(values, (partitionWriter, value) => partitionWriter.i32(value.partition).i64(typeof value.offset === "bigint" ? value.offset : this.#positions.get(partitionKey(topic, value.partition)) ?? 0n).string(null)));
+    const response = await this.#cluster.request(coordinator, API_OFFSET_COMMIT, 2, body);
+    this.#cluster.throttle(API_OFFSET_COMMIT, response.i32());
+    for (const result of response.array((reader) => ({ topic: reader.string() ?? "", partitions: reader.array((reader) => ({ partition: reader.i32(), error: reader.i16() })) }))) {
+      for (const partition of result.partitions) if (partition.error) throw kafkaError(partition.error, `${result.topic}[${partition.partition}]`);
+    }
+  }
+
+  async committed(assignments: readonly ConsumerAssignment[]): Promise<CommittedOffset[]> {
+    this.#open();
+    if (!this.#groupId) throw new Error("Consumer groupId is required for offset fetch");
+    const coordinator = await this.#findCoordinator();
+    const topics = Map.groupBy(assignments, (assignment) => assignment.topic);
+    const body = new Writer().string(this.#groupId).array([...topics], (writer, [topic, values]) => writer.string(topic).array(values, (partitionWriter, value) => partitionWriter.i32(value.partition)));
+    const response = await this.#cluster.request(coordinator, API_OFFSET_FETCH, 2, body);
+    const result: CommittedOffset[] = [];
+    for (const topic of response.array((reader) => ({ topic: reader.string() ?? "", partitions: reader.array((reader) => ({ partition: reader.i32(), offset: reader.i64(), metadata: reader.string(), error: reader.i16() })) }))) {
+      for (const partition of topic.partitions) {
+        if (partition.error) throw kafkaError(partition.error, `${topic.topic}[${partition.partition}]`);
+        result.push({ topic: topic.topic, partition: partition.partition, offset: partition.offset });
+      }
+    }
+    const error = response.i16();
+    if (error) throw kafkaError(error, `Kafka group ${this.#groupId}`);
+    return result;
   }
 
   async subscribe(input: ConsumerSubscribe | string | string[]): Promise<void> {
@@ -377,6 +671,13 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
       ? input
       : { topics: input };
     const topics = Array.isArray(request.topics) ? request.topics : [request.topics];
+    const groupId = request.groupId ?? this.#options.groupId;
+    if (groupId) {
+      this.#groupId = groupId;
+      this.#groupTopics = topics;
+      await this.#joinGroup(topics, request.fromBeginning ?? this.#options.fromBeginning ?? false);
+      return;
+    }
     const metadata = await this.#cluster.metadata(topics);
     const assignments: ConsumerAssignment[] = [];
     for (const topic of topics) {
@@ -439,6 +740,30 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
 
   async fetch(options: FetchOptions = {}): Promise<KafkaMessage[]> {
     this.#open();
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= this.#cluster.retryOptions.maxRetries; attempt++) {
+      try {
+        const messages = await this.#fetchOnce(options);
+        if (messages.length && this.#groupId && this.#options.autoCommit) await this.commitOffsets();
+        return messages;
+      } catch (error) {
+        lastError = error;
+        if (!(error instanceof KafkaError && error.retriable) || attempt === this.#cluster.retryOptions.maxRetries) throw error;
+        for (const assigned of this.#assigned.values()) {
+          const metadata = await this.#cluster.topic(assigned.topic, true);
+          const partition = metadata.partitions.find((item) => item.id === assigned.partition);
+          if (partition) assigned.leader = partition.leader;
+        }
+        const delay = retryDelay(this.#cluster.retryOptions, attempt);
+        this.#cluster.event({ type: "retry", apiKey: API_FETCH, attempt: attempt + 1, delayMs: delay, error });
+        if (delay) await Bun.sleep(delay);
+      }
+    }
+    throw lastError;
+  }
+
+  async #fetchOnce(options: FetchOptions = {}): Promise<KafkaMessage[]> {
+    this.#open();
     const maxMessages = options.maxMessages ?? 500;
     if (!Number.isSafeInteger(maxMessages) || maxMessages < 1) throw new RangeError("maxMessages must be a positive integer");
     if (this.#decoders.length) return this.#drain(maxMessages);
@@ -459,8 +784,8 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
               .i32(options.maxPartitionBytes ?? 1024 * 1024);
           });
         });
-      const response = await this.#cluster.request(leader, API_FETCH, 4, body, (options.maxWaitMs ?? 500) + 30_000);
-      response.i32();
+      const response = await this.#cluster.request(leader, API_FETCH, 4, body, (options.maxWaitMs ?? 500) + 30_000, false);
+      this.#cluster.throttle(API_FETCH, response.i32());
       return response.array((topicReader) => {
         const topic = topicReader.string() ?? "";
         return topicReader.array((partitionReader) => {
@@ -569,6 +894,14 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
 
   async close(): Promise<void> {
     if (this.#closed) return;
+    if (this.#heartbeat) clearInterval(this.#heartbeat);
+    if (this.#groupId && this.#coordinator !== undefined && this.#generationId >= 0) {
+      try {
+        await this.#cluster.request(this.#coordinator, API_LEAVE_GROUP, 0, new Writer().string(this.#groupId).string(this.#memberId));
+      } catch {
+        // The broker may already be unavailable during shutdown.
+      }
+    }
     this.#closed = true;
     if (this.#ownsCluster) this.#cluster.close();
     this.#onClose();
@@ -576,6 +909,34 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
 
   disconnect(): Promise<void> { return this.close(); }
   #open(): void { if (this.#closed) throw new Error("Consumer is closed"); }
+}
+
+export interface CreateTopicInput {
+  name: string;
+  numPartitions: number;
+  replicationFactor?: number;
+  assignments?: number[][];
+  configs?: Record<string, string | null>;
+}
+
+export interface TopicResult {
+  name: string;
+  error: number;
+  message: string | null;
+}
+
+export interface CreatePartitionsInput {
+  name: string;
+  count: number;
+  assignments?: number[][];
+}
+
+export interface ConfigResource {
+  resourceType: number;
+  resourceName: string;
+  error: number;
+  message: string | null;
+  configs: Array<{ name: string; value: string | null; source: number; sensitive: boolean; readOnly: boolean }>;
 }
 
 export class BunAdmin {
@@ -595,6 +956,75 @@ export class BunAdmin {
     return this.#cluster.metadata(topics);
   }
 
+  async createTopics(topics: readonly CreateTopicInput[], options: { timeoutMs?: number; validateOnly?: boolean } = {}): Promise<TopicResult[]> {
+    this.#open();
+    if (!topics.length) return [];
+    const body = new Writer().array(topics, (writer, topic) => {
+      writer.string(topic.name).i32(topic.numPartitions).i16(topic.replicationFactor ?? -1)
+        .array(topic.assignments ? topic.assignments.map((brokers, partition) => ({ partition, brokers })) : null, (assignmentWriter, assignment) => assignmentWriter.i32(assignment.partition).array(assignment.brokers, (writer, broker) => writer.i32(broker)))
+        .array(topic.configs ? Object.entries(topic.configs) : null, (writer, [name, value]) => writer.string(name).string(value));
+    }).i32(options.timeoutMs ?? 30_000).bool(options.validateOnly ?? false);
+    const response = await this.#cluster.controllerRequest(API_CREATE_TOPICS, 4, body);
+    this.#cluster.throttle(API_CREATE_TOPICS, response.i32());
+    return response.array((reader) => ({ name: reader.string() ?? "", error: reader.i16(), message: reader.string() }));
+  }
+
+  async deleteTopics(topics: readonly string[], options: { timeoutMs?: number } = {}): Promise<TopicResult[]> {
+    this.#open();
+    if (!topics.length) return [];
+    const response = await this.#cluster.controllerRequest(API_DELETE_TOPICS, 3, new Writer().array(topics, (writer, topic) => writer.string(topic)).i32(options.timeoutMs ?? 30_000));
+    this.#cluster.throttle(API_DELETE_TOPICS, response.i32());
+    return response.array((reader) => ({ name: reader.string() ?? "", error: reader.i16(), message: null }));
+  }
+
+  async createPartitions(topics: readonly CreatePartitionsInput[], options: { timeoutMs?: number; validateOnly?: boolean } = {}): Promise<TopicResult[]> {
+    this.#open();
+    if (!topics.length) return [];
+    const body = new Writer().array(topics, (writer, topic) => {
+      writer.string(topic.name).i32(topic.count).array(topic.assignments ?? null, (assignmentWriter, assignment) => assignmentWriter.array(assignment, (writer, broker) => writer.i32(broker)));
+    }).i32(options.timeoutMs ?? 30_000).bool(options.validateOnly ?? false);
+    const response = await this.#cluster.controllerRequest(API_CREATE_PARTITIONS, 2, body);
+    this.#cluster.throttle(API_CREATE_PARTITIONS, response.i32());
+    return response.array((reader) => ({ name: reader.string() ?? "", error: reader.i16(), message: reader.string() }));
+  }
+
+  async describeConfigs(resources: readonly { resourceType: number; resourceName: string; configNames?: string[] | null }[]): Promise<ConfigResource[]> {
+    this.#open();
+    const body = new Writer().array(resources, (writer, resource) => writer.i8(resource.resourceType).string(resource.resourceName).array(resource.configNames ?? null, (writer, name) => writer.string(name)));
+    const response = await this.#cluster.anyRequest(API_DESCRIBE_CONFIGS, 0, body);
+    this.#cluster.throttle(API_DESCRIBE_CONFIGS, response.i32());
+    return response.array((reader) => {
+      const error = reader.i16();
+      const message = reader.string();
+      const resourceType = reader.i8();
+      const resourceName = reader.string() ?? "";
+      const configs = reader.array((configReader) => {
+        const name = configReader.string() ?? "";
+        const value = configReader.string();
+        const readOnly = configReader.bool();
+        const isDefault = configReader.bool();
+        const sensitive = configReader.bool();
+        return { name, value, source: isDefault ? 5 : 0, sensitive, readOnly };
+      });
+      return { resourceType, resourceName, error, message, configs };
+    });
+  }
+
+  async alterConfigs(resources: readonly { resourceType: number; resourceName: string; configs: Record<string, string | null> }[]): Promise<TopicResult[]> {
+    this.#open();
+    const body = new Writer().array(resources, (writer, resource) => writer.i8(resource.resourceType).string(resource.resourceName)
+      .array(Object.entries(resource.configs), (writer, [name, value]) => writer.string(name).string(value)));
+    const response = await this.#cluster.anyRequest(API_ALTER_CONFIGS, 0, body);
+    this.#cluster.throttle(API_ALTER_CONFIGS, response.i32());
+    return response.array((reader) => {
+      const error = reader.i16();
+      const message = reader.string();
+      reader.i8();
+      const name = reader.string() ?? "";
+      return { name, error, message };
+    });
+  }
+
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
@@ -603,6 +1033,7 @@ export class BunAdmin {
   }
 
   disconnect(): Promise<void> { return this.close(); }
+  #open(): void { if (this.#closed) throw new Error("Admin is closed"); }
 }
 
 export class Kafka {

@@ -4,12 +4,13 @@
 
 The Bun-native client is a fast, zero-runtime-dependency implementation for these use cases:
 
-- Produce record batches with leader or all-replica acknowledgements
-- Read manually assigned partitions
-- Read metadata and offsets
-- Use TCP or TLS
+- Produce optionally idempotent record batches with leader or all-replica acknowledgements
+- Read manually assigned partitions or use an eager range consumer group
+- Commit and read consumer-group offsets
+- Read metadata and change topics or configs
+- Use TCP or TLS with PLAIN, SCRAM, or OAuth bearer authentication
 
-It is **not a feature-complete general Kafka client**. The largest missing areas are consumer groups, offset commits, compression, SASL, request retries, idempotent production, transactions, and administration changes.
+It is **not a feature-complete general Kafka client**. The largest missing areas are transactions, cooperative rebalancing, static membership, observability, and the less common administration APIs.
 
 Use this document as a release snapshot. Other libraries can add or change features after this snapshot.
 
@@ -26,11 +27,27 @@ The native client uses fixed, non-flexible protocol versions.
 | Kafka API | Key | Version | Use |
 |---|---:|---:|---|
 | Produce | 0 | 3 | Send magic-2 record batches |
-| Fetch | 1 | 4 | Fetch manually assigned partitions |
+| Fetch | 1 | 4 | Fetch assigned partitions |
 | ListOffsets | 2 | 1 | Resolve earliest, latest, and watermarks |
 | Metadata | 3 | 1 | Discover brokers, topics, partitions, and leaders |
+| OffsetCommit | 8 | 2 | Commit group offsets |
+| OffsetFetch | 9 | 2 | Read group offsets |
+| FindCoordinator | 10 | 0 | Find a group coordinator |
+| JoinGroup | 11 | 2 | Join an eager consumer group |
+| Heartbeat | 12 | 0 | Keep group membership active |
+| LeaveGroup | 13 | 0 | Leave a consumer group |
+| SyncGroup | 14 | 0 | Receive a group assignment |
+| SaslHandshake | 17 | 1 | Select a SASL mechanism |
+| ApiVersions | 18 | 0 | Validate required API versions |
+| CreateTopics | 19 | 4 | Create topics |
+| DeleteTopics | 20 | 3 | Delete topics |
+| InitProducerId | 22 | 0 | Initialize idempotent production |
+| DescribeConfigs | 32 | 0 | Read resource configs |
+| AlterConfigs | 33 | 0 | Replace resource configs |
+| SaslAuthenticate | 36 | 1 | Exchange SASL data |
+| CreatePartitions | 37 | 2 | Increase partition counts |
 
-No ApiVersions negotiation occurs. The fixed versions require Kafka 0.11 or newer. A broker that removes or rejects one of these versions is not supported.
+Each connection uses ApiVersions v0 to verify that the broker supports the fixed request versions. The core Produce and Fetch versions require Kafka 0.11 or newer. Newer administration APIs also require a broker that reports their fixed versions.
 
 ## Native client feature matrix
 
@@ -40,17 +57,17 @@ No ApiVersions negotiation occurs. The fixed versions require Kafka 0.11 or newe
 |---|---|---|
 | TCP with `Bun.connect()` | Yes | One multiplexed connection per known broker in a shared `Kafka` instance |
 | TLS | Yes | Uses Bun TLS options |
-| Multiple bootstrap brokers | Partial | Metadata tries known and configured brokers; request retry is not automatic |
+| Multiple bootstrap brokers | Partial | Metadata tries known and configured brokers; broker-specific requests do not fail over to an arbitrary broker |
 | Correlation IDs | Yes | Concurrent responses are matched to requests |
 | Request timeout | Yes | Active requests reject after the configured timeout |
-| Explicit TCP connect timeout | No | Bun or the operating system controls a blackholed connect attempt |
+| Explicit TCP connect timeout | Yes | `connectTimeoutMs` bounds a new `Bun.connect()` attempt |
 | Response size limit | Yes | `maxResponseBytes` limits frame allocation |
 | Fragmented TCP frames | Yes | Exact-size response frame assembly |
-| ApiVersions negotiation | No | API versions are fixed |
-| Automatic leader metadata refresh | No | Leader errors reach the caller |
-| Automatic request retries | No | Caller owns retry behavior |
-| Retry backoff and jitter | No | Not applicable until retries exist |
-| Broker throttling metrics | No | Throttle fields are read and discarded |
+| ApiVersions negotiation | Partial | Each connection validates fixed versions; serializers do not downgrade to older versions |
+| Automatic leader metadata refresh | Yes | Retried Produce and Fetch refresh topic metadata before retrying |
+| Automatic request retries | Partial | Retriable network and Produce errors use the bounded retry policy |
+| Retry backoff and jitter | Yes | Exponential backoff uses bounded 50–100% jitter |
+| Broker throttling metrics | Yes | Positive throttle durations emit an `onEvent` event |
 | Proxy support | No | No explicit proxy API |
 
 ### Producer
@@ -73,12 +90,12 @@ No ApiVersions negotiation occurs. The fixed versions require Kafka 0.11 or newe
 | CRC32C | Yes | Record batch CRC is generated |
 | Delivery Promise | Yes | Resolves with partition Produce results |
 | Per-message delivery callback | No | Promise result is partition-level |
-| Automatic retry | No | Retriable errors are typed but not retried |
-| Idempotent producer | No | No producer ID, epoch, or sequence state |
+| Automatic retry | Partial | Retriable network and Produce errors use bounded retries |
+| Idempotent producer | Yes | Optional `idempotent: true` initializes producer identity, forces all-replica acknowledgements, and tracks per-partition sequences |
 | Transactions | No | Transactional ID is always null |
-| Compression | No | Compressed record batches are rejected by the consumer |
+| Compression | Partial | Gzip and Zstandard record batches are supported; Snappy and LZ4 are not |
 | Custom partitioner | No | No callback API |
-| Quotas and throttle events | No | No public metric or event |
+| Quotas and throttle events | Yes | `onEvent` receives broker throttle durations |
 
 ### Consumer
 
@@ -97,10 +114,10 @@ No ApiVersions negotiation occurs. The fixed versions require Kafka 0.11 or newe
 | Pause and resume | Yes | Manual partitions |
 | Position | Yes | Local next offset |
 | Watermarks | Yes | Earliest and latest offsets |
-| Consumer groups | No | No coordinator, join, sync, heartbeat, or leave |
-| Offset commit and fetch | No | No group offset API |
-| Rebalancing | No | No eager or cooperative rebalance |
-| Static membership | No | No group membership |
+| Consumer groups | Partial | Basic range assignment with coordinator, join, sync, heartbeat, and leave |
+| Offset commit and fetch | Partial | Group OffsetCommit and OffsetFetch APIs are available |
+| Rebalancing | Partial | Eager range assignment; cooperative assignment is not implemented |
+| Static membership | No | `group.instance.id` is not sent |
 | Read committed isolation | No | Fetch uses read-uncommitted isolation |
 | Fetch sessions | No | Full Fetch requests only |
 | Regex subscription | No | No group subscription protocol |
@@ -114,10 +131,10 @@ No ApiVersions negotiation occurs. The fixed versions require Kafka 0.11 or newe
 | Broker metadata | Yes | IDs, hosts, and ports |
 | Topic metadata | Yes | Errors, partitions, and leaders |
 | Cluster ID | No | Metadata v1 does not return it |
-| Create topics | No | Current tests rely on broker auto-creation |
-| Delete topics | No | — |
-| Create partitions | No | — |
-| Describe or alter configs | No | — |
+| Create topics | Yes | Fixed CreateTopics v4 request |
+| Delete topics | Yes | Fixed DeleteTopics v3 request |
+| Create partitions | Yes | Fixed CreatePartitions v2 request |
+| Describe or alter configs | Yes | Fixed v0 config APIs |
 | ACL operations | No | — |
 | Consumer group administration | No | — |
 | Topic offset administration | Partial | Earliest/latest watermarks only |
@@ -131,26 +148,26 @@ No ApiVersions negotiation occurs. The fixed versions require Kafka 0.11 or newe
 | TLS server authentication | Yes | Bun TLS validation |
 | Custom CA | Yes | Bun TLS option |
 | Mutual TLS | Yes | Certificate and key options |
-| SASL/PLAIN | No | — |
-| SASL/SCRAM-SHA-256 | No | — |
-| SASL/SCRAM-SHA-512 | No | — |
-| SASL/OAUTHBEARER | No | — |
+| SASL/PLAIN | Yes | Uses Kafka SASL handshake and authenticate APIs |
+| SASL/SCRAM-SHA-256 | Yes | Uses Web Crypto PBKDF2 and HMAC |
+| SASL/SCRAM-SHA-512 | Yes | Uses Web Crypto PBKDF2 and HMAC |
+| SASL/OAUTHBEARER | Partial | Static tokens and async token providers work; active connections are not reauthenticated on a timer |
 | Kerberos/GSSAPI | No | — |
-| Credential refresh | No | — |
+| Credential refresh | Partial | OAuth token providers run for each authentication or reconnect |
 
 ### Reliability and operations
 
 | Feature | Status | Notes |
 |---|---|---|
 | Typed Kafka errors | Partial | Code, fatal flag, and retriable flag; error catalog is incomplete |
-| Reconnect after socket close | Partial | A later request can reconnect; failed operation is not retried |
+| Reconnect after socket close | Partial | Retriable operations use a bounded retry policy; not all APIs recover coordinator or leader state |
 | Graceful producer flush | Yes | Queued sends flush on close |
-| Graceful consumer close | Yes | No group leave is needed because groups are absent |
+| Graceful consumer close | Yes | Stops heartbeats and makes a best-effort LeaveGroup request |
 | Statistics callback | No | — |
 | Request logging hooks | No | — |
-| Metrics API | No | — |
+| Metrics API | Partial | Retry and throttle events exist; counters and histograms do not |
 | OpenTelemetry hooks | No | — |
-| Broker throttle event | No | — |
+| Broker throttle event | Yes | Emitted through `KafkaOptions.onEvent` |
 | Health check API | No | Metadata can be used by the application |
 | Performance soak evidence | No | Short benchmark exists; see performance validation plan |
 | Chaos qualification | No | See broker failure plan |
@@ -165,21 +182,23 @@ This comparison covers common public features. It does not compare every configu
 | Runtime library dependencies | None | Go modules at build time | librdkafka/native build | Package dependencies |
 | Basic Produce and Fetch | Yes | Yes | Yes | Yes |
 | Automatic producer batching | Yes | Yes | Yes | Yes |
-| Compression | No | Yes | Yes | Yes, codec support depends on setup |
-| Idempotent producer | No | Yes | Yes | Yes |
+| Gzip compression | Yes | Yes | Yes | Yes |
+| Zstandard compression | Yes | Yes | Yes | Yes, codec support depends on setup |
+| Snappy and LZ4 compression | No | Yes | Yes | Yes, codec support depends on setup |
+| Idempotent producer | Yes | Yes | Yes | Yes |
 | Transactions | No | Yes | Yes | Yes |
-| Automatic retries | No | Yes | Yes | Yes |
-| Metadata refresh after leader movement | No | Yes | Yes | Yes |
-| Consumer groups | No | Yes | Yes | Yes |
+| Automatic retries | Partial | Yes | Yes | Yes |
+| Metadata refresh after leader movement | Yes | Yes | Yes | Yes |
+| Consumer groups | Partial | Yes | Yes | Yes |
 | Cooperative rebalancing | No | Yes | Yes | Yes |
 | Manual assignment | Yes | Yes | Yes | Limited compared with native clients |
-| Offset commits | No | Yes | Yes | Yes |
-| SASL/PLAIN and SCRAM | No | Yes | Yes | Yes |
-| OAuth bearer | No | Yes | Yes | Yes |
+| Offset commits | Partial | Yes | Yes | Yes |
+| SASL/PLAIN and SCRAM | Yes | Yes | Yes | Yes |
+| OAuth bearer | Partial | Yes | Yes | Yes |
 | TLS and mutual TLS | Yes | Yes | Yes | Yes |
-| Broad admin API | No | Yes | Yes | Yes |
-| Protocol version negotiation | No | Yes | Yes | Yes |
-| Metrics and hooks | No | Yes | Yes | Yes |
+| Broad admin API | Partial | Yes | Yes | Yes |
+| Protocol version negotiation | Partial | Yes | Yes | Yes |
+| Metrics and hooks | Partial | Yes | Yes | Yes |
 | Zero-copy Bun response views | Yes | Not applicable | Native message ownership | No equivalent Bun-specific API |
 | No native addon or shared library | Yes | Compiled Go binary | No | Yes |
 
@@ -205,20 +224,17 @@ Choose the Bun-native client when all these statements are true:
 
 - The service runs on Bun 1.4 or newer.
 - Zero runtime dependencies are a hard requirement.
-- Manual partition ownership is acceptable.
+- Manual partition ownership or eager range consumer groups are acceptable.
 - TLS or trusted plaintext is sufficient.
-- The application can handle visible request failures.
-- The application does not require compressed records.
-- The application can tolerate duplicates when it retries an unknown Produce result.
+- The application can handle failures after the bounded retry budget.
+- The application enables `idempotent: true` or can tolerate duplicates after an unknown Produce result.
 
 Choose a more complete client when any of these statements are true:
 
-- The service needs consumer groups or automatic rebalancing.
-- The service needs committed offsets.
-- The cluster requires SASL.
-- The service requires compression.
-- The producer requires idempotence or transactions.
-- The client must recover from leader movement without application action.
+- The service needs cooperative rebalancing or static group membership.
+- The cluster requires Kerberos/GSSAPI or timed OAuth reauthentication on an active connection.
+- The service requires Snappy or LZ4 compression.
+- The producer requires transactions.
 - The service requires a broad admin API.
 - The release requires existing soak and chaos evidence.
 

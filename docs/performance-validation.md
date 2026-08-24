@@ -227,7 +227,7 @@ The long-running soak harness must record these values at least every 10 seconds
 - CPU use
 - Open file descriptors and sockets
 
-The current repository does not have this long-running metrics harness. It also does not expose public producer-queue, reconnect, or request counters. Add the harness and the minimum diagnostics needed by these gates before making a performance-proven claim.
+The current repository does not have this long-running metrics harness. Retry and broker-throttle events are public, but producer-queue, reconnect, and request counters are not. Add the harness and the remaining diagnostics needed by these gates before making a performance-proven claim.
 
 ## Result artifact
 

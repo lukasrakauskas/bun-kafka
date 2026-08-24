@@ -4,7 +4,7 @@
 
 **Current status: failure behavior is defined, but the full chaos suite is not implemented.**
 
-The client reconnects a closed TCP connection when a later request uses that connection. It rejects requests that were active when the socket closed. It does not yet retry Produce or Fetch requests, refresh a moved leader automatically, or use an idempotent producer.
+The client reconnects a closed TCP connection when a later request uses that connection. Active requests reject when the socket closes. Retriable Produce and Fetch failures use bounded retries and refresh leader metadata. Set producer `idempotent: true` to attach broker-managed sequence state; the default non-idempotent mode can create duplicates after a lost response.
 
 Therefore, the current safe promise is **bounded failure**, not seamless recovery.
 
@@ -15,15 +15,15 @@ Therefore, the current safe promise is **bounded failure**, not seamless recover
 | Bootstrap broker is unavailable | Metadata tries the next configured or known broker. |
 | Active socket closes | All active requests on that socket reject. |
 | Same broker returns before the next request | A later request can open a new socket. |
-| Partition leader moves | Produce or Fetch can fail because leader metadata is stale. |
-| Caller retries Produce after an unknown result | A duplicate is possible. |
+| Partition leader moves | Produce and Fetch refresh metadata and retry within the configured budget. |
+| Produce response is lost | Idempotent mode reuses the partition sequence; default mode can create a duplicate. |
 | Broker accepts Produce but response is lost | The Promise rejects or times out; the record can still exist. |
-| Consumer Fetch fails | `fetch()` rejects. The caller must retry or recreate its loop. |
+| Consumer Fetch fails | `fetch()` retries retriable failures, then rejects when its budget is exhausted. |
 | Connected broker stays silent | The request rejects after `requestTimeoutMs`. |
-| New TCP connection is blackholed | The operating system controls the connect timeout; `requestTimeoutMs` starts after connect. |
+| New TCP connection is blackholed | `connectTimeoutMs` rejects the connection attempt. |
 | Response is malformed or too large | The connection rejects the response. |
 
-Do not describe the client as automatically fault-tolerant until request retries, metadata refresh, retry budgets, and idempotent production are implemented.
+Do not describe idempotent Produce as qualified until its broker-failure chaos gates pass.
 
 ## Safety rules
 
@@ -58,7 +58,7 @@ After each test, scan all records and classify each message ID as:
 - Out of order within a partition
 - Corrupt
 
-The classification is necessary because a lost response creates an unknown Produce result. Without idempotence, **rejected but present** and duplicates can occur after an application retry.
+The classification is necessary because a lost response creates an unknown Produce result. In default non-idempotent mode, **rejected but present** and duplicates can occur after an application retry.
 
 ## Fault tools
 
@@ -98,7 +98,7 @@ Pass conditions:
 
 - Metadata uses another configured broker.
 - A refused connection moves to the next broker without an application retry.
-- A blackholed connection records the operating-system timeout. This is a known gap until an explicit connect timeout exists.
+- A blackholed connection rejects within `connectTimeoutMs` plus test tolerance.
 - No request remains pending after the connection attempt ends.
 - No extra socket remains open to the failed address.
 
@@ -119,11 +119,11 @@ Pass conditions for the current client:
 
 Expected current limitation:
 
-- A later send can fail after the leader moves because automatic metadata refresh is not implemented.
+- A later send can still fail when the retry budget is exhausted or the broker does not recover.
 
 Future seamless-recovery gate:
 
-- Refresh metadata, retry only retriable errors, respect a retry budget, and preserve idempotent sequence state.
+- Preserve idempotent sequence state through leader failover and broker restart.
 
 ### 3. Consumer leader process is killed
 
@@ -142,7 +142,7 @@ Pass conditions for the current client:
 
 Expected current limitation:
 
-- The caller must handle the error. A moved leader can require a new client or a future metadata-refresh API.
+- The caller must handle the error when the retry budget is exhausted.
 
 ### 4. TCP reset during Produce response
 
@@ -180,7 +180,7 @@ Pass conditions:
 - Shutdown remains bounded.
 - Memory and pending-request counts return to normal after rejection.
 
-Run this test for Produce, Fetch, Metadata, and ListOffsets on an established connection. Run a separate startup blackhole test because the current client has no explicit TCP connect timeout.
+Run this test for Produce, Fetch, Metadata, and ListOffsets on an established connection. Run a separate startup blackhole test for `connectTimeoutMs`.
 
 ### 7. Slow and lossy network
 
@@ -223,7 +223,7 @@ Pass conditions:
 - No malformed data is returned.
 - Manual recovery with fresh metadata succeeds.
 
-This test becomes a required automatic-recovery test when leader refresh is implemented.
+Automatic recovery must complete within the retry budget.
 
 ### 10. Broker pause and resume
 
@@ -322,16 +322,12 @@ Required before recommendation for a production service that owns retries:
 
 ### Gate C: seamless client recovery
 
-Not available in the current implementation. It requires:
+Not available in the current implementation. Version validation, connect timeout, metadata refresh, retry classification, backoff, and basic group offsets now exist. Gate C still requires:
 
-- Automatic ApiVersions negotiation
-- Explicit TCP connect timeout
-- Automatic metadata refresh on leader errors
-- Per-request retry classification
-- Retry backoff and jitter
-- Total retry budget
-- Idempotent producer state
-- Consumer group recovery and offset commits
+- ApiVersions-based request version selection
+- Total retry deadline
+- Broker-failure qualification of idempotent producer state
+- Reliable consumer-group rejoin during coordinator and membership changes
 
 Do not mark Gate C complete until broker-kill, leader-transfer, rolling-restart, and network-blackhole tests pass without application client recreation.
 

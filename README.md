@@ -29,11 +29,11 @@ await producer.send({
 await kafka.disconnect();
 ```
 
-One `send()` call makes record batches by topic partition. Concurrent calls are collected for 5 ms or 1,000 messages. Configure this with `kafka.producer({ lingerMs, batchMaxMessages })`.
+One `send()` call makes record batches by topic partition. Concurrent calls are collected for 5 ms or 1,000 messages. Configure this with `kafka.producer({ lingerMs, batchMaxMessages, compression: "zstd", idempotent: true })`. Idempotent mode forces all-replica acknowledgements and makes client retries duplicate-safe.
 
 ## Consume
 
-This Bun-native release uses manual partition assignment. It does not join a consumer group.
+Manual assignment is available without a group:
 
 ```ts
 const consumer = kafka.consumer({ fromBeginning: true });
@@ -57,7 +57,16 @@ await consumer.subscribe({ topics: ["events"], fromBeginning: true });
 const batch = await consumer.fetch({ maxMessages: 500, maxWaitMs: 100 });
 ```
 
-`fetch()`, `seek()`, `pause()`, `resume()`, `assignment()`, `position()`, and `watermarks()` are available. Payloads are stable zero-copy views by default. Set `copy: true` on `fetch()` when you need separate buffers.
+Use `groupId` for eager range assignment and committed offsets:
+
+```ts
+const grouped = kafka.consumer({ groupId: "workers", fromBeginning: true });
+await grouped.subscribe("events");
+const messages = await grouped.fetch();
+await grouped.commitOffsets();
+```
+
+`fetch()`, `seek()`, `pause()`, `resume()`, `assignment()`, `position()`, `watermarks()`, `commitOffsets()`, and `committed()` are available. Payloads are stable zero-copy views by default. Set `copy: true` on `fetch()` when you need separate buffers.
 
 ## Metadata
 
@@ -65,6 +74,9 @@ const batch = await consumer.fetch({ maxMessages: 500, maxWaitMs: 100 });
 const admin = kafka.admin();
 const metadata = await admin.metadata();       // all topics
 const one = await admin.metadata(["events"]); // selected topics
+await admin.createTopics([{ name: "audit", numPartitions: 3 }]);
+await admin.createPartitions([{ name: "audit", count: 6 }]);
+await admin.deleteTopics(["audit"]);
 ```
 
 ## Configuration
@@ -74,8 +86,14 @@ const kafka = new Kafka({
   brokers: ["kafka-1:9093", "kafka-2:9093"],
   clientId: "orders",
   requestTimeoutMs: 30_000,
+  connectTimeoutMs: 10_000,
   maxResponseBytes: 100 * 1024 * 1024,
+  retry: { maxRetries: 3 },
+  onEvent: (event) => console.log(event), // retry and broker-throttle events
   tls: true,
+  // sasl: { mechanism: "plain", username: "user", password: "secret" },
+  // sasl: { mechanism: "scram-sha-256", username: "user", password: "secret" },
+  // sasl: { mechanism: "oauthbearer", token: async () => getToken() },
 });
 ```
 
@@ -88,16 +106,24 @@ const kafka = new Kafka({
 | Bun TCP and TLS | Yes |
 | Metadata API | Yes |
 | Produce with acks 1/all and automatic batching | Yes |
+| Gzip and Zstandard record-batch compression | Yes |
+| Bounded request retries, events, and metadata refresh | Partial |
 | Kafka record batches (magic 2) | Yes |
 | Keys, values, timestamps, and headers | Yes |
 | CRC32C validation | Yes |
 | Kafka-compatible Murmur2 partitioning | Yes |
 | Bounded, zero-copy manual consume and offset lookup | Yes |
-| Consumer groups and offset commits | Not yet |
-| SASL | Not yet |
-| Compression | Not yet |
-| Transactions and idempotent produce | Not yet |
-| Admin topic changes | Not yet |
+| Topic and config administration | Yes |
+| Basic consumer groups and offset commits | Partial |
+| Cooperative rebalancing and static membership | Not yet |
+| SASL/PLAIN and SCRAM-SHA-256/512 | Yes |
+| SASL/OAUTHBEARER static or provider token | Yes |
+| Timed SASL reauthentication and Kerberos | Not yet |
+| Gzip and Zstandard compression | Yes |
+| Snappy and LZ4 compression | Not yet |
+| Idempotent produce | Yes |
+| Transactions | Not yet |
+| Admin topic and config changes | Yes |
 
 The fixed API versions require Kafka 0.11 or newer. Use a current Kafka or Redpanda release.
 
