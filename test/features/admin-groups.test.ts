@@ -160,5 +160,77 @@ describe("Admin: group and record management", () => {
       listener.stop(true);
     }
   }, 15_000);
+
+  test("group offset administration, watermarks, and broker-tolerant describeGroups", async () => {
+    let sawOffsetCommit = 0;
+    let sawFindCoordinator = false;
+    let listOffsets = 0;
+    let describedWithoutMessage = false;
+    function viewCorrelation(buffer: ArrayBuffer, at: number): number {
+      return new DataView(buffer, at, 4).getInt32(0);
+    }
+    const listener = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data(socket, request) {
+          let offset = 0;
+          while (offset < request.byteLength) {
+            const size = new DataView(request.buffer, request.byteOffset + offset).getInt32(0);
+            const frameView = new DataView(request.buffer, request.byteOffset + offset + 4, 8);
+            const key = frameView.getInt16(0);
+            const correlation = viewCorrelation(request.buffer, request.byteOffset + offset + 4 + 8 - 4);
+            let body: Writer;
+            if (key === 18) body = apiVersions();
+            else if (key === 3) body = metadataBody(listener.port);
+            else if (key === 10) {
+              sawFindCoordinator = true;
+              body = new Writer().i16(0).i32(1).string("127.0.0.1").i32(listener.port);
+            } else if (key === 2) {
+              // ListOffsets v1: arrival order is earliest then latest; later calls are timestamp lookups.
+              const resolved = listOffsets === 0 ? 5n : listOffsets === 1 ? 9n : 7n;
+              listOffsets++;
+              body = new Writer().array(["events"], (writer, name) => writer.string(name).array([0], (pWriter, p) => pWriter.i32(p).i16(0).i64(0).i64(resolved)));
+            } else if (key === 9) {
+              // OffsetFetch v2: [topics][top-level error], no throttle.
+              body = new Writer().array(["events"], (writer, name) => writer.string(name).array([0], (pWriter, p) => pWriter.i32(p).i64(12).string(null).i16(0))).i16(0);
+            } else if (key === 8) {
+              sawOffsetCommit++;
+              body = new Writer().array(["events"], (writer, name) => writer.string(name).array([0], (pWriter, p) => pWriter.i32(p).i16(0)));
+            } else if (key === 15) {
+              // Redpanda-style entry with the nullable error_message omitted entirely.
+              describedWithoutMessage = true;
+              body = new Writer().i32(0).array(["g"], (writer, g) => writer
+                .i16(0).string(g).string("Dead").string(null).string(null)
+                .array([], (mWriter) => mWriter));
+            } else body = new Writer().i16(0);
+            const response = new Writer().i32(0).i32(correlation).raw(body.result());
+            response.patchI32(0, response.length - 4);
+            socket.write(response.result());
+            offset += 4 + size;
+          }
+        },
+      },
+    });
+    const kafka = new Kafka({ brokers: [`127.0.0.1:${listener.port}`] });
+    try {
+      const a = kafka.admin();
+      expect(await a.topicOffsets("events")).toEqual([{ partition: 0, low: 5n, high: 9n }]);
+      await a.setGroupOffsets("workers", [{ topic: "events", partitions: [{ partition: 0, offset: 12n }] }]);
+      expect(sawOffsetCommit).toBe(1);
+      expect(await a.groupOffsets("workers", ["events"])).toEqual([{ topic: "events", partitions: [{ partition: 0, offset: 12n, metadata: null }] }]);
+      await a.resetGroupOffsets("workers", "events", true);
+      expect(sawOffsetCommit).toBe(2);
+      expect(await a.offsetByTimestamp("events", 0, Date.now() - 1000)).toBe(7n);
+      const [described] = await a.describeGroups(["g"]);
+      expect(described).toMatchObject({ groupId: "g", state: "Dead", protocolType: "", protocol: null });
+      expect(sawFindCoordinator).toBe(true);
+      expect(describedWithoutMessage).toBe(true);
+      await a.close();
+    } finally {
+      await kafka.disconnect();
+      listener.stop(true);
+    }
+  }, 15_000);
 });
 
