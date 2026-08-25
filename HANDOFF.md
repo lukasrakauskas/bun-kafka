@@ -31,6 +31,36 @@ All features listed in docs/feature-completeness.md are implemented and tested.
   order violations/missing, RSS stable (+7.5 MiB range), no throughput decay. The 24-hour
   and 72-hour release soaks remain outstanding by design.
 
+## Live 24-hour release soak (in progress)
+
+Started 2026-08-25 ~12:15 UTC on the `feat/release-soak` tree (PR #14), detached via
+`setsid` so it outlives any terminal session:
+
+    SOAK_DURATION_S=86400 SOAK_BURST_INTERVAL_S=3600 SOAK_BURST_S=600 bun scripts/soak.ts
+
+Same as `bun run test:soak:release`. Profile: 86,400 s at 1,000 msg/s (1 KiB acks=all,
+6 partitions) with a 10-minute 150% burst every hour — the 24-hour gate profile from
+docs/performance-validation.md.
+
+- Progress: `tail -f out/soak/release-24h.log`
+- Artifacts on completion: newest `out/soak/<timestamp>.{json,md}`
+- Broker: local Redpanda dev container (`bun-kafka-dev`) — keep it up for the full run.
+- ETA ≈ 2026-08-26 ~12:20 UTC.
+
+### When it finishes (wrap-up checklist)
+
+1. Check gates in the log tail / MD artifact: zero failed acks/duplicates/order
+   violations/missing records, RSS growth < 64 MiB over 24 h, throughput decay < 5 %,
+   p95/p99 drift within limits, lag recovery after every burst.
+2. Commit evidence: `out/` is gitignored, so `git add -f out/soak/release-24h.log` plus
+   the final `<timestamp>.{json,md}` pair.
+3. Flip status in docs/performance-validation.md ("Current status" line and the soak
+   sections) to 24-hour soak-proven with the run numbers; link the artifacts.
+4. Merge PR #14 (stacked on #13 → #12); issue #11 closes with it.
+5. Still outstanding afterwards: the 72-hour follow-up soak at 75 % of max stable rate,
+   required before releases that touch protocol/connection/producer/consumer code.
+
+
 ## Broker notes
 
 Single-node Redpanda dev container `bun-kafka-dev` (image be202e716d34). Recreate with:
