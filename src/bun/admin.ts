@@ -20,6 +20,7 @@ import {
   API_DESCRIBE_GROUPS,
   API_EXPIRE_DELEGATION_TOKEN,
   API_FIND_COORDINATOR,
+  API_INCREMENTAL_ALTER_CONFIGS,
   API_LIST_GROUPS,
   API_LIST_OFFSETS,
   API_OFFSET_COMMIT,
@@ -235,6 +236,54 @@ export class BunAdmin {
       const message = reader.string();
       reader.i8();
       const name = reader.string() ?? "";
+      return { name, error, message };
+    });
+  }
+
+  /**
+   * Incremental config updates (IncrementalAlterConfigs v1): set/delete/append/subtract
+   * individual entries without replacing the resource's remaining configuration.
+   * Requires Apache Kafka 2.3+ / current Redpanda; older brokers answer UNSUPPORTED_VERSION.
+   */
+  async incrementalAlterConfigs(
+    resources: readonly {
+      resourceType: number;
+      resourceName: string;
+      ops: ReadonlyArray<{
+        name: string;
+        operation: "set" | "delete" | "append" | "subtract";
+        value?: string | null;
+      }>;
+    }[],
+    options: { validateOnly?: boolean } = {},
+  ): Promise<TopicResult[]> {
+    this.#open();
+    if (!resources.length) return [];
+    const operations = { set: 0, delete: 1, append: 2, subtract: 3 } as const;
+    const body = new Writer()
+      .compactArray(resources, (writer, resource) =>
+        writer
+          .i8(resource.resourceType)
+          .compactString(resource.resourceName)
+          .compactArray(resource.ops, (opsWriter, op) =>
+            opsWriter
+              .compactString(op.name)
+              .i8(operations[op.operation])
+              .compactString(op.value ?? null)
+              .tags(),
+          )
+          .tags(),
+      )
+      .bool(options.validateOnly ?? false)
+      .tags();
+    const response = await this.#cluster.anyRequest(API_INCREMENTAL_ALTER_CONFIGS, 1, body, true);
+    this.#cluster.throttle(API_INCREMENTAL_ALTER_CONFIGS, response.i32());
+    return response.compactArray((reader) => {
+      const error = reader.i16();
+      const message = reader.compactString();
+      reader.i8();
+      const name = reader.compactString() ?? "";
+      reader.skipTags();
       return { name, error, message };
     });
   }
