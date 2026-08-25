@@ -33,11 +33,7 @@ if (process.env.KAFKA_BROKERS) {
     `bun bench/bun-produce-consume.ts ${topic}-bun-$(date +%s%N) ${count}`,
   );
   if (await Bun.file("native/build/bench-go").exists())
-    args.push(
-      COMMAND_NAME,
-      "franz-go",
-      `native/build/bench-go ${topic}-go-$(date +%s%N) ${count}`,
-    );
+    args.push(COMMAND_NAME, "franz-go", `native/build/bench-go ${topic}-go-$(date +%s%N) ${count}`);
   if (await Bun.file("native/build/bench-rust").exists())
     args.push(
       COMMAND_NAME,

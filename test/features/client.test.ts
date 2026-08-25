@@ -388,9 +388,12 @@ describe("Bun native Kafka client (mock brokers)", () => {
   });
 
   test("rejects invalid batching, retry, timeout, and fetch limits", async () => {
-    expect(() => new Kafka({ brokers: [UNREACHABLE_BROKER], connectTimeoutMs: 0 })).toThrow(RangeError);
+    expect(() => new Kafka({ brokers: [UNREACHABLE_BROKER], connectTimeoutMs: 0 })).toThrow(
+      RangeError,
+    );
     expect(
-      () => new Kafka({ brokers: [UNREACHABLE_BROKER], maxResponseBytes: Number.POSITIVE_INFINITY }),
+      () =>
+        new Kafka({ brokers: [UNREACHABLE_BROKER], maxResponseBytes: Number.POSITIVE_INFINITY }),
     ).toThrow(RangeError);
     expect(() => new Kafka({ brokers: [UNREACHABLE_BROKER], retry: { maxRetries: -1 } })).toThrow(
       RangeError,

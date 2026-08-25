@@ -18,16 +18,37 @@ describe("Compat producer compression overrides (real broker)", () => {
     const producer = compat.producer();
     try {
       await producer.connect();
-      await producer.send({ topic: name, compression: CompressionTypes.GZIP, messages: [{ key: "a", value: "gzip-1" }, { key: "b", value: "gzip-2" }] });
-      await producer.send({ topic: name, compression: CompressionTypes.Snappy, messages: [{ key: "c", value: "snappy-1" }] });
+      await producer.send({
+        topic: name,
+        compression: CompressionTypes.GZIP,
+        messages: [
+          { key: "a", value: "gzip-1" },
+          { key: "b", value: "gzip-2" },
+        ],
+      });
+      await producer.send({
+        topic: name,
+        compression: CompressionTypes.Snappy,
+        messages: [{ key: "c", value: "snappy-1" }],
+      });
       await producer.send({ topic: name, messages: [{ key: "d", value: "plain-1" }] });
-      await producer.send({ topic: name, compression: CompressionTypes.GZIP, messages: [{ key: "e", value: "gzip-3" }] });
+      await producer.send({
+        topic: name,
+        compression: CompressionTypes.GZIP,
+        messages: [{ key: "e", value: "gzip-3" }],
+      });
       await producer.disconnect();
 
       const consumer = client.consumer();
       await consumer.assign([{ topic: name, partition: 0, offset: "earliest" }]);
       const messages = await consumer.fetch({ maxWaitMs: 5_000, maxMessages: 10, copy: true });
-      expect(messages.map((message) => dec(message.value))).toEqual(["gzip-1", "gzip-2", "snappy-1", "plain-1", "gzip-3"]);
+      expect(messages.map((message) => dec(message.value))).toEqual([
+        "gzip-1",
+        "gzip-2",
+        "snappy-1",
+        "plain-1",
+        "gzip-3",
+      ]);
       expect(messages.every((message) => message.partition === 0)).toBe(true);
       await consumer.close();
     } finally {
