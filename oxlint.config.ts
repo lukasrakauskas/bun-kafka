@@ -1,3 +1,4 @@
+import sonarjs from "eslint-plugin-sonarjs";
 import { defineConfig } from "oxlint";
 
 export default defineConfig({
@@ -15,12 +16,16 @@ export default defineConfig({
     ".windsurf/**",
     "tools/oxlint/anti-slop/**",
   ],
-  jsPlugins: [{ name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" }],
+  jsPlugins: [
+    { name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" },
+    { name: "sonarjs", specifier: "eslint-plugin-sonarjs" },
+  ],
   plugins: ["typescript", "unicorn", "import", "promise", "oxc"],
   categories: {
     correctness: "error",
   },
   rules: {
+    ...sonarjs.configs.recommended.rules,
     "anti-slop/no-chained-type-assertions": "error",
     "anti-slop/no-conditional-empty-object-spread": "error",
     "anti-slop/no-known-value-widening": "error",
