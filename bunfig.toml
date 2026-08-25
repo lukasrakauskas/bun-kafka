@@ -1,2 +1,6 @@
 [test]
 timeout = 60000
+
+# coverage runs via: bun test --coverage (or `bun run test:coverage`)
+coverageReporter = ["text", "lcov"]
+coverageDir = "out/coverage"

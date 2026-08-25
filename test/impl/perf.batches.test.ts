@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { consumer, producer, topic } from "./helpers.ts";
+import { consumer, producer, topic } from "../helpers.ts";
 
 const N = Number(process.env.PERF_N ?? 5_000);
 

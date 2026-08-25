@@ -21,7 +21,7 @@ These commands passed:
 
 ```bash
 bun run typecheck
-bun test test/bun-native.test.ts
+bun run test
 CHAOS_FAULT_CYCLES=100 bun run test:chaos:mock
 CHAOS_FAULT_CYCLES=10 bun run test:chaos
 ```

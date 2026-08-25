@@ -158,14 +158,15 @@ The native client has short-run benchmark evidence, a passing three-broker chaos
 ## Test
 
 ```bash
-bun test test/bun-native.test.ts
-KAFKA_BROKERS=127.0.0.1:9092 bun test test/bun-integration.test.ts
+bun run test            # unit + feature suites (mock broker)
+bun run test:coverage   # same, with code coverage report
+KAFKA_BROKERS=127.0.0.1:9092 bun test test/impl/bun-integration.test.ts
 bun run test:chaos:mock
 bun run test:chaos
 bun run test:soak
 ```
 
-The unit test includes a Bun TCP mock broker. The integration test reuses the producer, metadata, record, and consumer acceptance cases against a real broker.
+Tests are split by scope: `test/unit/` (wire protocol primitives), `test/features/` (client features against a mock broker), and `test/impl/` (implementation tests against a real broker, chaos, perf, soak). The unit/feature suites use a Bun TCP mock broker.
 
 ## Soak
 

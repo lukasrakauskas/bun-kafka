@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { BunProducer, KafkaError } from "../index.ts";
-import { admin, producer, topic } from "./helpers.ts";
+import { BunProducer, KafkaError } from "../../index.ts";
+import { admin, producer, topic } from "../helpers.ts";
 
 describe("Producer", () => {
   test("send delivers messages", async () => {

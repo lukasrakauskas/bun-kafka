@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Kafka, KafkaError } from "../index.ts";
-import { BROKERS, dec, topic } from "./helpers.ts";
+import { Kafka, KafkaError } from "../../index.ts";
+import { BROKERS, dec, topic } from "../helpers.ts";
 
 describe("Bun Kafka features", () => {
   test("KafkaError exposes code and retry state", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { lz4Compress, lz4CompressBlock, lz4Decompress, lz4DecompressBlock, xxhash32 } from "../src/bun/lz4.ts";
-import { snappyCompress, snappyCompressBlock, snappyDecompress, snappyDecompressBlock } from "../src/bun/snappy.ts";
-import { decodeRecordSet, encodeRecordBatch } from "../src/bun/protocol.ts";
+import { lz4Compress, lz4CompressBlock, lz4Decompress, lz4DecompressBlock, xxhash32 } from "../../src/bun/lz4.ts";
+import { snappyCompress, snappyCompressBlock, snappyDecompress, snappyDecompressBlock } from "../../src/bun/snappy.ts";
+import { decodeRecordSet, encodeRecordBatch } from "../../src/bun/protocol.ts";
 
 const decode = (value: Uint8Array) => new TextDecoder().decode(value);
 

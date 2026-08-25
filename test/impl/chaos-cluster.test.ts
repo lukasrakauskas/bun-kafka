@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Kafka, type ConsumedMessage, type KafkaMessage } from "../index.ts";
+import { Kafka, type ConsumedMessage, type KafkaMessage } from "../../index.ts";
 
 const enabled = process.env.CHAOS_CLUSTER === "1";
 const chaos = enabled ? describe.serial : describe.skip;
