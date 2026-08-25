@@ -9,8 +9,7 @@
   "packageManager": "bun@1.4.0",
   "exports": {
     ".": "./index.ts",
-    "./kafkajs-compat": "./src/kafkajs-compat.ts",
-    "./kafkajs": "./src/kafkajs-compat.ts"
+    "./kafkajs-compat": "./src/kafkajs-compat/index.ts"
   },
   "scripts": {
     "test": "bun test test/unit test/features",
