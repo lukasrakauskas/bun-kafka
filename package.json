@@ -3,10 +3,9 @@
   "version": "0.2.0",
   "description": "Zero-dependency Kafka wire protocol client for Bun",
   "license": "MIT",
+  "type": "module",
   "module": "index.ts",
   "types": "index.ts",
-  "type": "module",
-  "packageManager": "bun@1.4.0",
   "exports": {
     ".": "./index.ts",
     "./kafkajs-compat": "./src/kafkajs-compat/index.ts"
@@ -28,13 +27,15 @@
     "format": "oxfmt",
     "format:check": "oxfmt --check"
   },
-  "engines": {
-    "bun": ">=1.4.0"
-  },
   "devDependencies": {
+    "@oxlint/plugins": "1.80.0",
     "@types/bun": "^1.4.0",
     "oxfmt": "^0.65.0",
     "oxlint": "^1.80.0",
     "typescript": "^7.0.2"
-  }
+  },
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "packageManager": "bun@1.4.0"
 }
