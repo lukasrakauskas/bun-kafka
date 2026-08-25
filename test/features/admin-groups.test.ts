@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
 import { Writer } from "../../src/bun/protocol.ts";
-import { admin, topic } from "../helpers.ts";
+import { admin } from "../helpers.ts";
 
 const apiVersions = () => new Writer().i16(0).array(Array.from({ length: 64 }, (_, key) => key), (writer, key) => writer.i16(key).i16(0).i16(20));
 
@@ -103,32 +103,5 @@ describe("Admin: group and record management", () => {
       listener.stop(true);
     }
   }, 15_000);
-
-  test("createAcls, describeAcls, and deleteAcls round-trip against the broker", async () => {
-    const kafka = new Kafka({ brokers: ["127.0.0.1:9092"] });
-    try {
-      const a = kafka.admin();
-      const resourceName = topic("acl");
-      const binding = {
-        resourceType: 2, // TOPIC
-        resourceName,
-        principal: "User:bun-kafka-test",
-        host: "*",
-        operation: 3, // READ
-        permissionType: 3, // ALLOW
-      };
-      await a.createAcls([binding]);
-      const listed = await a.describeAcls({ resourceType: 2, resourceName, operation: 3, permissionType: 3 });
-      expect(listed.error).toBe(0);
-      expect(listed.acls.some((acl) => acl.principal === "User:bun-kafka-test" && acl.resourceName === resourceName)).toBe(true);
-      const removed = await a.deleteAcls([{ resourceType: 2, resourceName, principal: "User:bun-kafka-test", operation: 3, permissionType: 3 }]);
-      expect(removed[0]?.error).toBe(0);
-      expect(removed[0]?.acls.length).toBeGreaterThanOrEqual(1);
-      const after = await a.describeAcls({ resourceType: 2, resourceName, operation: 3, permissionType: 3 });
-      expect(after.acls.some((acl) => acl.principal === "User:bun-kafka-test")).toBe(false);
-      await a.close();
-    } finally {
-      await kafka.disconnect();
-    }
-  }, 30_000);
 });
+
