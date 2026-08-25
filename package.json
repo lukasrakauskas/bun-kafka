@@ -22,13 +22,19 @@
     "test:soak": "bun scripts/soak.ts",
     "typecheck": "bunx tsc --noEmit",
     "bench": "bun scripts/bench-bun.ts",
-    "bench:build": "bun run scripts/build-benches.ts"
+    "bench:build": "bun run scripts/build-benches.ts",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check"
   },
   "engines": {
     "bun": ">=1.4.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",
+    "oxfmt": "^0.65.0",
+    "oxlint": "^1.80.0",
     "typescript": "^7.0.2"
   }
 }
