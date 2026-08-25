@@ -109,3 +109,8 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+
+## Linting and formatting
+
+- After making code changes, run `bunx oxlint --fix`, then run `bunx oxfmt`.
+- Before finishing, run `bunx oxlint --deny-warnings --format=agent`.
