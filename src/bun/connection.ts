@@ -106,13 +106,31 @@ export class Connection {
   async request(apiKey: number, apiVersion: number, body: Writer, timeoutMs = this.#options.requestTimeoutMs): Promise<Reader> {
     if (this.#closed) throw new Error("Kafka connection is closed");
     const socket = await this.#connect();
+    await this.#prepare(socket, apiKey, apiVersion, timeoutMs);
+    return this.#send(socket, apiKey, apiVersion, body, timeoutMs);
+  }
+
+  /** Send a request whose response never arrives (acks=0 Produce). */
+  async sendOnly(apiKey: number, apiVersion: number, body: Writer, timeoutMs = this.#options.requestTimeoutMs): Promise<void> {
+    if (this.#closed) throw new Error("Kafka connection is closed");
+    const socket = await this.#connect();
+    await this.#prepare(socket, apiKey, apiVersion, timeoutMs);
+    const correlation = this.#correlation = (this.#correlation + 1) & 0x7fffffff;
+    const frame = new Writer();
+    frame.i32(0).i16(apiKey).i16(apiVersion).i32(correlation).string(this.#options.clientId).raw(body.result());
+    frame.patchI32(0, frame.length - 4);
+    if (socket.write(frame.result()) < 0) {
+      throw new KafkaError(-1, `Could not write to Kafka broker ${this.address}`, { retriable: true });
+    }
+  }
+
+  async #prepare(socket: Bun.Socket, apiKey: number, apiVersion: number, timeoutMs: number): Promise<void> {
     if (apiKey !== 18) await this.#negotiate(socket, timeoutMs);
     if (this.#options.sasl && apiKey !== 17 && apiKey !== 36) await this.#authenticate(socket, timeoutMs);
     const supported = this.#versions?.get(apiKey);
     if (supported && (apiVersion < supported.min || apiVersion > supported.max)) {
       throw new KafkaError(35, `Kafka broker ${this.address} does not support API ${apiKey} version ${apiVersion} (${supported.min}-${supported.max})`);
     }
-    return this.#send(socket, apiKey, apiVersion, body, timeoutMs);
   }
 
   async #negotiate(socket: Bun.Socket, timeoutMs: number): Promise<void> {
