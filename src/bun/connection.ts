@@ -96,6 +96,8 @@ export class Connection {
   #bytesSent = 0;
   #bytesReceived = 0;
   #authenticated = false;
+  #reauthTimer?: ReturnType<typeof setTimeout>;
+  #sessionLifetimeMs = 0;
   #authenticating?: Promise<void>;
   #versions?: Map<number, { min: number; max: number }>;
   #negotiating?: Promise<void>;
@@ -172,6 +174,8 @@ export class Connection {
         if (!token) throw new KafkaError(-1, `SASL/OAUTHBEARER token is empty for ${this.address}`);
         const authentication = await this.#sasl(socket, bytes(`n,,\u0001auth=Bearer ${token}\u0001\u0001`), timeoutMs);
         if (authentication.byteLength) throw new KafkaError(-1, `Unexpected SASL/OAUTHBEARER challenge from ${this.address}`);
+        // Timed reauthentication (KIP-368): re-run SASL before the token expires.
+        if (this.#sessionLifetimeMs > 0) this.scheduleReauthentication(socket, timeoutMs);
       } else {
         await this.#scram(socket, sasl, timeoutMs);
       }
@@ -185,9 +189,32 @@ export class Connection {
     const error = response.i16();
     const message = response.string();
     const authBytes = response.bytes() ?? new Uint8Array();
-    response.i64();
+    this.#sessionLifetimeMs = Number(response.i64());
     if (error) throw new KafkaError(error, message ?? `SASL authentication failed on ${this.address}`);
     return authBytes;
+  }
+
+  /** Re-run SASL on a live connection before the advertised session expires (KIP-368). */
+  scheduleReauthentication(socket: Bun.Socket, timeoutMs: number): void {
+    if (this.#reauthTimer) clearTimeout(this.#reauthTimer);
+    const delay = Math.max(0, Math.floor(this.#sessionLifetimeMs * 0.8));
+    this.#reauthTimer = setTimeout(() => {
+      void this.reauthenticate(socket).catch(() => {});
+    }, delay);
+    this.#reauthTimer.unref?.();
+  }
+
+  private async reauthenticate(socket: Bun.Socket): Promise<void> {
+    try {
+      const sasl = this.#options.sasl;
+      if (sasl?.mechanism !== "oauthbearer") return; // Other mechanisms cannot re-authenticate mid-session.
+      const token = typeof sasl.token === "function" ? await sasl.token() : sasl.token;
+      if (!token) throw new KafkaError(-1, `SASL/OAUTHBEARER reauthentication token is empty for ${this.address}`);
+      await this.#sasl(socket, bytes(`n,,\u0001auth=Bearer ${token}\u0001\u0001`), this.#options.requestTimeoutMs);
+      if (this.#sessionLifetimeMs > 0) this.scheduleReauthentication(socket, this.#options.requestTimeoutMs);
+    } catch (error) {
+      this.#fail(new KafkaError(58, `SASL reauthentication failed on ${this.address}: ${String(error)}`, { fatal: true }), socket);
+    }
   }
 
   async #scram(socket: Bun.Socket, sasl: Extract<BunKafkaSasl, { mechanism: "scram-sha-256" | "scram-sha-512" }>, timeoutMs: number): Promise<void> {
@@ -327,6 +354,8 @@ export class Connection {
 
   #fail(error: Error, socket?: Bun.Socket): void {
     if (socket && (this.#ignoredSockets.has(socket) || this.#socket && socket !== this.#socket)) return;
+    if (this.#reauthTimer) clearTimeout(this.#reauthTimer);
+    this.#reauthTimer = undefined;
     this.#socket = undefined;
     this.#connecting = undefined;
     this.#authenticated = false;
@@ -346,6 +375,8 @@ export class Connection {
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+    if (this.#reauthTimer) clearTimeout(this.#reauthTimer);
+    this.#reauthTimer = undefined;
     this.#socket?.end();
     this.#fail(new Error("Kafka connection is closed"));
   }
