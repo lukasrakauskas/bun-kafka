@@ -1,6 +1,7 @@
+import { KafkaError } from "../errors.ts";
 import type { ClusterMetadata } from "../types.ts";
 import { Cluster } from "./cluster.ts";
-import { Writer } from "./protocol.ts";
+import { Reader, Writer } from "./protocol.ts";
 import {
   API_ALTER_CLIENT_QUOTAS,
   API_ALTER_CONFIGS,
@@ -18,7 +19,11 @@ import {
   API_DESCRIBE_DELEGATION_TOKEN,
   API_DESCRIBE_GROUPS,
   API_EXPIRE_DELEGATION_TOKEN,
+  API_FIND_COORDINATOR,
   API_LIST_GROUPS,
+  API_LIST_OFFSETS,
+  API_OFFSET_COMMIT,
+  API_OFFSET_FETCH,
   API_RENEW_DELEGATION_TOKEN,
   kafkaError,
   type KafkaOptions,
@@ -69,7 +74,7 @@ export class BunAdmin {
     return this.#cluster.metadata(topics);
   }
 
-  async createTopics(topics: readonly CreateTopicInput[], options: { timeoutMs?: number; validateOnly?: boolean } = {}): Promise<TopicResult[]> {
+  async createTopics(topics: readonly CreateTopicInput[], options: { timeoutMs?: number; validateOnly?: boolean; waitForLeaders?: boolean } = {}): Promise<TopicResult[]> {
     this.#open();
     if (!topics.length) return [];
     const body = new Writer().array(topics, (writer, topic) => {
@@ -79,7 +84,18 @@ export class BunAdmin {
     }).i32(options.timeoutMs ?? 30_000).bool(options.validateOnly ?? false);
     const response = await this.#cluster.controllerRequest(API_CREATE_TOPICS, 4, body);
     this.#cluster.throttle(API_CREATE_TOPICS, response.i32());
-    return response.array((reader) => ({ name: reader.string() ?? "", error: reader.i16(), message: reader.string() }));
+    const results = response.array((reader) => ({ name: reader.string() ?? "", error: reader.i16(), message: reader.string() }));
+    if (!options.waitForLeaders || !results.some((result) => result.error === 0)) return results;
+    // Wait until every created partition reports a leader so immediate
+    // produce/fetch does not race leader election.
+    const created = results.filter((result) => result.error === 0).map((result) => result.name);
+    const deadline = Date.now() + Math.max(options.timeoutMs ?? 30_000, 5_000);
+    while (Date.now() < deadline) {
+      const metadata = await this.metadata(created);
+      if (metadata.topics.every((topicMeta) => !topicMeta.err && topicMeta.partitions.every((p) => p.leader >= 0))) break;
+      await Bun.sleep(100);
+    }
+    return results;
   }
 
   async deleteTopics(topics: readonly string[], options: { timeoutMs?: number } = {}): Promise<TopicResult[]> {
@@ -138,17 +154,22 @@ export class BunAdmin {
     });
   }
 
-  /** List consumer groups known to the cluster coordinator. */
+  /** List consumer groups (ListGroups v1 wire shape: groupId + protocolType per entry). */
   async listGroups(statesFilter: readonly string[] = []): Promise<Array<{ groupId: string; protocolType: string; state: string }>> {
     this.#open();
-    const response = await this.#cluster.anyRequest(API_LIST_GROUPS, 1, new Writer().array(statesFilter, (writer, state) => writer.string(state)));
+    if (statesFilter.length) {
+      // States filtering arrived in ListGroups v4; filter client-side instead.
+      const all = await this.listGroups();
+      return statesFilter.length ? all.filter((group) => statesFilter.includes(group.state)) : all;
+    }
+    const response = await this.#cluster.anyRequest(API_LIST_GROUPS, 1, new Writer().array([], () => {}));
     this.#cluster.throttle(API_LIST_GROUPS, response.i32());
     const error = response.i16();
     if (error) throw kafkaError(error, "ListGroups");
     return response.array((reader) => ({
       groupId: reader.string() ?? "",
       protocolType: reader.string() ?? "",
-      state: reader.string() ?? "",
+      state: "",
     }));
   }
 
@@ -159,22 +180,36 @@ export class BunAdmin {
     const body = new Writer().array(groupIds, (writer, group) => writer.string(group));
     const response = await this.#cluster.anyRequest(API_DESCRIBE_GROUPS, 1, body);
     this.#cluster.throttle(API_DESCRIBE_GROUPS, response.i32());
-    return response.array((reader) => {
-      const error = reader.i16();
-      const message = reader.string();
-      const groupId = reader.string() ?? "";
-      const state = reader.string() ?? "";
-      const protocolType = reader.string() ?? "";
-      const protocol = reader.string();
-      const members = reader.array((memberReader) => ({
-        memberId: memberReader.string() ?? "",
-        clientId: memberReader.string() ?? "",
-        clientHost: memberReader.string() ?? "",
-        memberMetadata: memberReader.bytes(),
-        memberAssignment: memberReader.bytes(),
-      }));
-      return { error, message, groupId, state, protocolType, protocol, members };
-    });
+    // Apache Kafka always writes the nullable error_message; some brokers
+    // (Redpanda) omit it entirely. Trial-parse both shapes and keep the one
+    // that consumes the buffer exactly.
+    const data = response.data;
+    for (const withMessage of [true, false]) {
+      try {
+        const reader = new Reader(data);
+        reader.i32();
+        const parsed: GroupDescription[] = reader.array((entryReader) => {
+          const error = entryReader.i16();
+          const message = withMessage ? entryReader.string() : null;
+          const groupId = entryReader.string() ?? "";
+          const state = entryReader.string() ?? "";
+          const protocolType = entryReader.string() ?? "";
+          const protocol = entryReader.string();
+          const members = entryReader.array((memberReader) => ({
+            memberId: memberReader.string() ?? "",
+            clientId: memberReader.string() ?? "",
+            clientHost: memberReader.string() ?? "",
+            memberMetadata: memberReader.bytes(),
+            memberAssignment: memberReader.bytes(),
+          }));
+          return { error, message, groupId, state, protocolType, protocol, members };
+        });
+        if (reader.remaining === 0) return parsed;
+      } catch {
+        // Try the next shape.
+      }
+    }
+    throw new KafkaError(-1, "Malformed DescribeGroups response");
   }
 
   /** Delete consumer groups that no longer have active members. */
@@ -418,6 +453,119 @@ export class BunAdmin {
       }));
       return { error, message, acls };
     });
+  }
+
+  /**
+   * Committed offsets for a consumer group. Topics omitted scans every
+   * cluster topic (OffsetFetch v2 per topic; no v5 nullable-topics needed).
+   */
+  async groupOffsets(groupId: string, topics?: readonly string[]): Promise<Array<{ topic: string; partitions: Array<{ partition: number; offset: bigint; metadata: string | null }> }>> {
+    this.#open();
+    if (!groupId) throw new Error("groupId is required");
+    const names = topics ?? (await this.metadata(null)).topics.filter((topic) => !topic.err && topic.name && !topic.name.startsWith("__")).map((topic) => topic.name);
+    const coordinator = await this.#findGroupCoordinator(groupId);
+    const result: Array<{ topic: string; partitions: Array<{ partition: number; offset: bigint; metadata: string | null }> }> = [];
+    for (const topic of names) {
+      const meta = await this.#cluster.topic(topic);
+      if (meta.err || !meta.partitions.length) continue;
+      const partitions = meta.partitions.map((p) => p.id);
+      const body = new Writer().string(groupId)
+        .array([topic], (writer, name) => writer.string(name).array(partitions, (partitionWriter, partition) => partitionWriter.i32(partition)));
+      const response = await this.#cluster.request(coordinator, API_OFFSET_FETCH, 2, body);
+      const parsed = response.array((topicReader) => {
+        const name = topicReader.string() ?? "";
+        return topicReader.array((partitionReader) => ({
+          name,
+          partition: partitionReader.i32(),
+          offset: partitionReader.i64(),
+          metadata: partitionReader.string(),
+          error: partitionReader.i16(),
+        }));
+      }).flat();
+      response.i16(); // top-level error code
+      result.push({
+        topic,
+        partitions: parsed.filter((entry) => entry.error === 0).map(({ partition, offset, metadata }) => ({ partition, offset, metadata })),
+      });
+    }
+    return result;
+  }
+
+  /** Commit offsets for a group with no active members (simple-consumer path: generation -1). */
+  async setGroupOffsets(groupId: string, topics: ReadonlyArray<{ topic: string; partitions: ReadonlyArray<{ partition: number; offset: bigint; metadata?: string }> }>): Promise<void> {
+    this.#open();
+    if (!topics.length) return;
+    const coordinator = await this.#findGroupCoordinator(groupId);
+    const body = new Writer().string(groupId).i32(-1).string("").i64(-1n)
+      .array(topics, (writer, { topic, partitions }) =>
+        writer.string(topic).array(partitions, (partitionWriter, entry) =>
+          partitionWriter.i32(entry.partition).i64(entry.offset).string(entry.metadata ?? null)));
+    const response = await this.#cluster.request(coordinator, API_OFFSET_COMMIT, 2, body);
+    for (const topicResult of response.array((reader) => ({
+      topic: reader.string() ?? "",
+      partitions: reader.array((p) => ({ partition: p.i32(), error: p.i16() })),
+    }))) {
+      for (const partition of topicResult.partitions) {
+        if (partition.error) throw kafkaError(partition.error, `${topicResult.topic}[${partition.partition}]`);
+      }
+    }
+  }
+
+  /** Move a group's offsets to the earliest or latest watermarks of a topic. */
+  async resetGroupOffsets(groupId: string, topic: string, earliest = true): Promise<void> {
+    this.#open();
+    const resolved = await Promise.all((await this.topicOffsets(topic)).map(async ({ partition, low, high }) => ({
+      partition,
+      offset: earliest ? low : high,
+    })));
+    await this.setGroupOffsets(groupId, [{ topic, partitions: resolved }]);
+  }
+
+  /** Low and high watermarks for every partition of a topic. */
+  async topicOffsets(topic: string): Promise<Array<{ partition: number; low: bigint; high: bigint }>> {
+    this.#open();
+    const meta = await this.#cluster.topic(topic);
+    if (meta.err) throw kafkaError(meta.err, topic);
+    return Promise.all(meta.partitions.map(async (partition) => {
+      const [low, high] = await Promise.all([
+        this.offsetByTimestamp(topic, partition.id, -2),
+        this.offsetByTimestamp(topic, partition.id, -1),
+      ]);
+      return { partition: partition.id, low, high };
+    }));
+  }
+
+  /** First offset at or after a timestamp; -2/-1 resolve to earliest/latest. Returns -1 when none match. */
+  async offsetByTimestamp(topic: string, partition: number, timestamp: number): Promise<bigint> {
+    this.#open();
+    const meta = await this.#cluster.topic(topic);
+    const leader = meta.partitions.find((p) => p.id === partition)?.leader;
+    if (leader === undefined) throw new RangeError(`Partition ${partition} does not exist on ${topic}`);
+    const body = new Writer().i32(-1).array([topic], (writer, name) =>
+      writer.string(name).array([partition], (partitionWriter, index) => {
+        partitionWriter.i32(index).i64(BigInt(timestamp));
+      }));
+    const response = await this.#cluster.request(leader, API_LIST_OFFSETS, 1, body);
+    const result = response.array((topicReader) => {
+      topicReader.string();
+      return topicReader.array((partitionReader) => {
+        partitionReader.i32();
+        const error = partitionReader.i16();
+        partitionReader.i64();
+        const offset = partitionReader.i64();
+        if (error) throw kafkaError(error, `${topic}[${partition}]`);
+        return offset;
+      });
+    });
+    return result[0]?.[0] ?? -1n;
+  }
+
+  async #findGroupCoordinator(groupId: string): Promise<number> {
+    const response = await this.#cluster.anyRequest(API_FIND_COORDINATOR, 0, new Writer().string(groupId));
+    const error = response.i16();
+    const coordinator = response.i32();
+    if (error) throw kafkaError(error, `Kafka group ${groupId}`);
+    return coordinator;
   }
 
   async close(): Promise<void> {

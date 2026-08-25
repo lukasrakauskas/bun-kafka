@@ -340,8 +340,10 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const request = typeof input === "object" && !Array.isArray(input)
       ? input
       : { topics: input };
+    // Accept both `topics` and the singular `topic` spelling used by kafkajs.
+    const requested = request.topics ?? (request as { topic?: string | RegExp }).topic;
     let topics = await this.#resolveTopicPatterns(
-      typeof request.topics === "string" || request.topics instanceof RegExp ? [request.topics] : request.topics,
+      typeof requested === "string" || requested instanceof RegExp ? [requested] : requested,
     );
     const groupId = request.groupId ?? this.#options.groupId;
     if (groupId) {
@@ -459,7 +461,8 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     if (this.#decoders.length) return this.#drain(maxMessages);
     const active = [...this.#assigned].filter(([key]) => !this.#paused.has(key));
     if (!active.length) {
-      await Bun.sleep(options.maxWaitMs ?? 500);
+      // Bounded idle nap so pause()/resume()/seek() take effect promptly.
+      await Bun.sleep(Math.min(options.maxWaitMs ?? 500, 250));
       return [];
     }
 
@@ -607,15 +610,19 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     }
   }
 
+  /**
+   * Pause fetching. Entries may omit `partition` to pause every currently
+   * assigned partition of the topic.
+   */
   pause(partitions: TopicPartition[]): void {
     this.#open();
-    for (const partition of partitions) this.#paused.add(partitionKey(partition.topic, partition.partition));
+    for (const target of this.#expandPartitions(partitions)) this.#paused.add(partitionKey(target.topic, target.partition));
   }
 
   resume(partitions: TopicPartition[]): void {
     this.#open();
-    for (const partition of partitions) {
-      const key = partitionKey(partition.topic, partition.partition);
+    for (const target of this.#expandPartitions(partitions)) {
+      const key = partitionKey(target.topic, target.partition);
       this.#paused.delete(key);
       // Re-join the fetch session so the resumed partition is polled again.
       for (const session of this.#fetchSessions.values()) {
@@ -623,6 +630,13 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
         session.streaming.delete(key);
       }
     }
+  }
+
+  #expandPartitions(partitions: TopicPartition[]): Array<{ topic: string; partition: number }> {
+    return partitions.flatMap(({ topic, partition }) => {
+      if (partition !== undefined) return [{ topic, partition }];
+      return [...this.#assigned.values()].filter((assigned) => assigned.topic === topic).map(({ partition }) => ({ topic, partition }));
+    });
   }
 
   assignment(): TopicPartition[] {
