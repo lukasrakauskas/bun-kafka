@@ -20,6 +20,7 @@ type Pending = {
   resolve: (reader: Reader) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  flexible?: boolean;
 };
 
 const textEncoder = new TextEncoder();
@@ -108,11 +109,11 @@ export class Connection {
     this.#options = options;
   }
 
-  async request(apiKey: number, apiVersion: number, body: Writer, timeoutMs = this.#options.requestTimeoutMs): Promise<Reader> {
+  async request(apiKey: number, apiVersion: number, body: Writer, timeoutMs = this.#options.requestTimeoutMs, flexible = false): Promise<Reader> {
     if (this.#closed) throw new Error("Kafka connection is closed");
     const socket = await this.#connect();
     await this.#prepare(socket, apiKey, apiVersion, timeoutMs);
-    return this.#send(socket, apiKey, apiVersion, body, timeoutMs);
+    return this.#send(socket, apiKey, apiVersion, body, timeoutMs, flexible);
   }
 
   /** Send a request whose response never arrives (acks=0 Produce). */
@@ -248,10 +249,14 @@ export class Connection {
     if (serverFinal.get("v") !== serverSignature) throw new KafkaError(-1, `SCRAM server signature mismatch from ${this.address}`);
   }
 
-  #send(socket: Bun.Socket, apiKey: number, apiVersion: number, body: Writer, timeoutMs: number): Promise<Reader> {
+  #send(socket: Bun.Socket, apiKey: number, apiVersion: number, body: Writer, timeoutMs: number, flexible = false): Promise<Reader> {
     const correlation = this.#correlation = (this.#correlation + 1) & 0x7fffffff;
     const frame = new Writer();
-    frame.i32(0).i16(apiKey).i16(apiVersion).i32(correlation).string(this.#options.clientId).raw(body.result());
+    frame.i32(0).i16(apiKey).i16(apiVersion).i32(correlation).string(this.#options.clientId);
+    // Flexible requests append a tagged-field section to the header itself
+    // (KIP-482 keeps the non-compact client_id there).
+    if (flexible) frame.uvarint(0);
+    frame.raw(body.result());
     frame.patchI32(0, frame.length - 4);
     this.#requests++;
     this.#bytesSent += frame.length;
@@ -263,7 +268,7 @@ export class Connection {
         this.#pending.delete(correlation);
         reject(new KafkaError(-1, `Kafka request ${apiKey} timed out after ${timeoutMs}ms`, { retriable: true }));
       }, timeoutMs);
-      this.#pending.set(correlation, { resolve, reject, timer });
+      this.#pending.set(correlation, { resolve, reject, timer, flexible });
       const written = socket.write(frame.result());
       if (written < 0) {
         clearTimeout(timer);
@@ -348,7 +353,17 @@ export class Connection {
         if (pending) {
           clearTimeout(pending.timer);
           this.#pending.delete(correlation);
-          pending.resolve(new Reader(frame.subarray(4)));
+          const reader = new Reader(frame.subarray(4));
+          if (pending.flexible) {
+            // Flexible responses carry a tagged-field section before the body.
+            try {
+              reader.skipTags();
+            } catch (error) {
+              pending.reject(error instanceof Error ? error : new Error(String(error)));
+              continue;
+            }
+          }
+          pending.resolve(reader);
         }
       }
     }

@@ -40,8 +40,8 @@ function defaultBody(apiKey: number, broker: MockBroker, fetchOffset = 0n): Writ
   if (apiKey === 3) return metadataBody([broker]);
   if (apiKey === 2) return new Writer().array([topic], (writer, name) => writer.string(name).array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(0).i64(0)));
   if (apiKey === 0) return new Writer().array([topic], (writer, name) => writer.string(name).array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(fetchOffset).i64(-1))).i32(0);
-  if (apiKey === 1) return new Writer().i32(0).array([topic], (writer, name) => writer.string(name).array([0], (partitionWriter) => {
-    partitionWriter.i32(0).i16(0).i64(fetchOffset + 1n).i64(fetchOffset + 1n).array([], () => {}).bytes(recordBatch(`value-${fetchOffset}`, fetchOffset));
+  if (apiKey === 1) return new Writer().i32(0).i16(0).i32(0).array([topic], (writer, name) => writer.string(name).array([0], (partitionWriter) => {
+    partitionWriter.i32(0).i16(0).i64(fetchOffset + 1n).i64(fetchOffset + 1n).i64(0).array([], () => {}).bytes(recordBatch(`value-${fetchOffset}`, fetchOffset));
   }));
   if (apiKey === 22) return new Writer().i32(0).i16(0).i64(1).i16(0);
   return new Writer();

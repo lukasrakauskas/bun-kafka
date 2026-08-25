@@ -206,7 +206,7 @@ describe("Read-committed isolation", () => {
           if (key === 1) {
             // Fetch v4 body starts after the request header incl. client_id string.
             let at = 12 + view.getInt16(12) + 2; // skip client_id string
-            at += 16; // replica_id + max_wait_ms + min_bytes + max_bytes
+            at += 16; // replica_id + max_wait_ms + min_bytes + max_bytes (isolation sits before session fields)
             isolationByte = new DataView(request.buffer, request.byteOffset + at, 1).getInt8(0);
           }
           const body = key === 18 ? apiVersions()
@@ -215,8 +215,10 @@ describe("Read-committed isolation", () => {
                 .string(null).i32(1)
                 .array([{ name: "events" }], (writer, item) => writer.i16(0).string(item.name).bool(false).array([0], (pw) => pw.i16(0).i32(0).i32(1).array([1], (w) => w.i32(1)).array([1], (w) => w.i32(1))))
               : key === 2 ? new Writer().array(["events"], (w, t) => w.string(t).array([0], (p, partition) => p.i32(partition).i16(0).i64(0).i64(0)))
-                : new Writer().i32(0)
-                  .array(["events"], (topicWriter) => topicWriter.string("events").array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(0).i64(1)
+                : new Writer().i32(0) // throttle_time_ms (Fetch v7 response)
+                  .i16(0) // top-level error code
+                  .i32(0) // session id
+                  .array(["events"], (topicWriter) => topicWriter.string("events").array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(0).i64(1).i64(0)
                     .array([], () => {})
                     .bytes(null)));
           const response = new Writer().i32(0).i32(correlation).raw(body.result());

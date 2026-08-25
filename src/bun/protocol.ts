@@ -43,6 +43,7 @@ export class Writer {
   i32(value: number): this { const at = this.#reserve(4); this.#view.setInt32(at, value); return this; }
   u32(value: number): this { const at = this.#reserve(4); this.#view.setUint32(at, value); return this; }
   i64(value: number | bigint): this { const at = this.#reserve(8); this.#view.setBigInt64(at, BigInt(value)); return this; }
+  f64(value: number): this { const at = this.#reserve(8); this.#view.setFloat64(at, value); return this; }
   bool(value: boolean): this { return this.i8(value ? 1 : 0); }
 
   string(value: string | null): this {
@@ -88,6 +89,40 @@ export class Writer {
     return this.i8(Number(encoded));
   }
 
+  /** Unsigned varint used by compact strings, compact arrays, and tagged fields. */
+  uvarint(value: number): this {
+    if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) throw new RangeError("Kafka unsigned varint is out of range");
+    let encoded = value;
+    while (encoded > 0x7f) {
+      this.i8((encoded & 0x7f) | 0x80);
+      encoded >>>= 7;
+    }
+    return this.i8(encoded);
+  }
+
+  /** COMPACT_STRING / COMPACT_NULLABLE_STRING: length+1 as an unsigned varint; null encodes as 0. */
+  compactString(value: string | null): this {
+    if (value === null) return this.uvarint(0);
+    const bytes = textEncoder.encode(value);
+    return this.uvarint(bytes.byteLength + 1).raw(bytes);
+  }
+
+  /** COMPACT_BYTES / COMPACT_NULLABLE_BYTES. */
+  compactBytes(value: Uint8Array | null): this {
+    return value === null ? this.uvarint(0) : this.uvarint(value.byteLength + 1).raw(value);
+  }
+
+  /** COMPACT_ARRAY: element count + 1 as an unsigned varint; null encodes as 0. */
+  compactArray<T>(values: readonly T[] | null, write: (writer: Writer, value: T) => void): this {
+    if (values === null) return this.uvarint(0);
+    this.uvarint(values.length + 1);
+    for (const value of values) write(this, value);
+    return this;
+  }
+
+  /** Empty tagged-field section closing a flexible request. */
+  tags(): this { return this.uvarint(0); }
+
   patchI32(offset: number, value: number): this { this.#view.setInt32(offset, value); return this; }
   patchU32(offset: number, value: number): this { this.#view.setUint32(offset, value); return this; }
   view(): Uint8Array { return new Uint8Array(this.#buffer, 0, this.length); }
@@ -118,6 +153,7 @@ export class Reader {
   i32(): number { return this.#view.getInt32(this.#take(4)); }
   u32(): number { return this.#view.getUint32(this.#take(4)); }
   i64(): bigint { return this.#view.getBigInt64(this.#take(8)); }
+  f64(): number { return this.#view.getFloat64(this.#take(8)); }
   bool(): boolean { return this.i8() !== 0; }
 
   string(): string | null {
@@ -164,6 +200,50 @@ export class Reader {
       if (!(byte & 0x80)) return (value >> 1n) ^ -(value & 1n);
     }
     throw new KafkaError(-1, "Invalid Kafka varlong");
+  }
+
+  uvarint(): number {
+    let value = 0;
+    for (let shift = 0; shift < 35; shift += 7) {
+      if (this.offset >= this.data.byteLength) throw new KafkaError(-1, "Malformed Kafka response");
+      const byte = this.data[this.offset++]!;
+      value += (byte & 0x7f) * 2 ** shift;
+      if (!(byte & 0x80)) return value;
+    }
+    throw new KafkaError(-1, "Invalid Kafka unsigned varint");
+  }
+
+  /** COMPACT_STRING / COMPACT_NULLABLE_STRING. */
+  compactString(): string | null {
+    const size = this.uvarint();
+    return size === 0 ? null : textDecoder.decode(this.raw(size - 1));
+  }
+
+  /** COMPACT_BYTES / COMPACT_NULLABLE_BYTES. */
+  compactBytes(): Uint8Array | null {
+    const size = this.uvarint();
+    return size === 0 ? null : this.raw(size - 1);
+  }
+
+  /** COMPACT_ARRAY. */
+  compactArray<T>(read: (reader: Reader) => T): T[] {
+    const size = this.uvarint();
+    if (size === 0) return [];
+    const count = size - 1;
+    if (count > this.remaining) throw new KafkaError(-1, "Malformed Kafka array");
+    const values = new Array<T>(count);
+    for (let i = 0; i < count; i++) values[i] = read(this);
+    return values;
+  }
+
+  /** Consume a tagged-field section (tagged fields are not interpreted). */
+  skipTags(): void {
+    const count = this.uvarint();
+    for (let i = 0; i < count; i++) {
+      this.uvarint(); // tag id
+      const size = this.uvarint();
+      this.raw(size);
+    }
   }
 }
 

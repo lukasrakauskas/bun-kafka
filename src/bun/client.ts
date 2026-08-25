@@ -36,6 +36,12 @@ const API_CREATE_ACLS = 30;
 const API_DESCRIBE_ACLS = 29;
 const API_DELETE_ACLS = 31;
 const API_DELETE_GROUPS = 42;
+const API_DESCRIBE_CLIENT_QUOTAS = 48;
+const API_ALTER_CLIENT_QUOTAS = 49;
+const API_CREATE_DELEGATION_TOKEN = 38;
+const API_RENEW_DELEGATION_TOKEN = 39;
+const API_EXPIRE_DELEGATION_TOKEN = 40;
+const API_DESCRIBE_DELEGATION_TOKEN = 41;
 const API_ADD_PARTITIONS_TO_TXN = 24;
 const API_ADD_OFFSETS_TO_TXN = 25;
 // API key numbering per the Kafka protocol spec: EndTxn is 26,
@@ -45,8 +51,9 @@ const API_TXN_OFFSET_COMMIT = 28;
 
 const retriableErrors = new Set([1, 2, 3, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 19, 20, 25, 27, 32, 33, 38, 39, 41, 44, 45, 47, 49, 56, 70, 71, 74, 75, 78, 82, 86, 88, 89]);
 
-function kafkaError(code: number, context: string): KafkaError {
-  return new KafkaError(code, `${context}: ${kafkaErrorName(code)}`, {
+function kafkaError(code: number, context: string, detail?: string | null): KafkaError {
+  const label = detail ? `${context}: ${kafkaErrorName(code)} (${detail})` : `${context}: ${kafkaErrorName(code)}`;
+  return new KafkaError(code, label, {
     retriable: retriableErrors.has(code),
     fatal: code === 58 || code === 34,
   });
@@ -197,16 +204,16 @@ export class Cluster {
     return connection;
   }
 
-  async anyRequest(apiKey: number, apiVersion: number, body: Writer): Promise<Reader> {
-    return this.#anyRequest(apiKey, apiVersion, body);
+  async anyRequest(apiKey: number, apiVersion: number, body: Writer, flexible = false): Promise<Reader> {
+    return this.#anyRequest(apiKey, apiVersion, body, flexible);
   }
 
-  async #anyRequest(apiKey: number, apiVersion: number, body: Writer): Promise<Reader> {
+  async #anyRequest(apiKey: number, apiVersion: number, body: Writer, flexible = false): Promise<Reader> {
     let lastError: unknown;
     const candidates = [...new Set([...this.#brokers.values(), ...this.#bootstrap])];
     for (const broker of candidates) {
       try {
-        return await this.#connection(broker).request(apiKey, apiVersion, body);
+        return await this.#connection(broker).request(apiKey, apiVersion, body, undefined, flexible);
       } catch (error) {
         lastError = error;
       }
@@ -233,7 +240,7 @@ export class Cluster {
     return metadata.topics.find((item) => item.name === topic) ?? { name: topic, err: 3, partitions: [] };
   }
 
-  async request(brokerId: number, apiKey: number, apiVersion: number, body: Writer, timeoutMs?: number, retry = true): Promise<Reader> {
+  async request(brokerId: number, apiKey: number, apiVersion: number, body: Writer, timeoutMs?: number, retry = true, flexible = false): Promise<Reader> {
     let lastError: unknown;
     const maxRetries = retry ? this.#retry.maxRetries : 0;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -244,7 +251,7 @@ export class Cluster {
           broker = this.#brokers.get(brokerId);
         }
         if (!broker) throw new KafkaError(-1, `Kafka broker ${brokerId} is not in metadata`, { retriable: true });
-        return await this.#connection(broker).request(apiKey, apiVersion, body, timeoutMs);
+        return await this.#connection(broker).request(apiKey, apiVersion, body, timeoutMs, flexible);
       } catch (error) {
         lastError = error;
         if (!(error instanceof KafkaError && error.retriable) || attempt === maxRetries) throw error;
@@ -840,6 +847,12 @@ export interface ConsumerOptions {
   groupId?: string;
   /** Static group membership identity (KIP-345); requires a broker that supports JoinGroup v3+. */
   groupInstanceId?: string;
+  /**
+   * Consumer group partition assignor protocol. "range" (default) is eager:
+   * every rebalance revokes all partitions. "cooperative-sticky" (KIP-429)
+   * retains ownership across rebalances so only moved partitions change hands.
+   */
+  partitionAssigner?: "range" | "cooperative-sticky";
   /** Transaction visibility: read_committed filters aborted transaction records (default read_uncommitted). */
   isolationLevel?: "read_uncommitted" | "read_committed";
   sessionTimeoutMs?: number;
@@ -891,6 +904,16 @@ type Assigned = { topic: string; partition: number; leader: number };
 type GroupMember = { memberId: string; topics: string[] };
 type GroupAssignment = { topic: string; partitions: number[] };
 
+// Per-broker incremental fetch session state (KIP-227). The broker remembers
+// every partition ever added to the session, so omitted partitions stay
+// monitored and reappear in responses once new data arrives.
+type FetchSessionState = {
+  id: number; // broker-assigned session id (0 = not established yet)
+  epoch: number; // INITIAL_EPOCH = 0 while opening, then increments per fetch
+  sent: Map<string, bigint>; // partitionKey -> offset last requested in this session
+  streaming: Map<string, boolean>; // partitionKey -> last response carried records
+};
+
 export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage> {
   #cluster: Cluster;
   #options: ConsumerOptions;
@@ -906,6 +929,8 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
   #generationId = -1;
   #coordinator?: number;
   #heartbeat?: ReturnType<typeof setInterval>;
+  // Fetch sessions (KIP-227), tracked per leader broker.
+  #fetchSessions = new Map<number, FetchSessionState>();
   #groupTopics: string[] = [];
   #rejoining?: Promise<void>;
 
@@ -934,10 +959,23 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
     return coordinator;
   }
 
+  /** Encode a ConsumerProtocolSubscription. v1 adds owned partitions (KIP-429). */
+  #encodeSubscription(topics: string[], owned?: Array<{ topic: string; partition: number }>): Uint8Array {
+    const w = new Writer().i16(owned ? 1 : 0).array(topics, (writer, topic) => writer.string(topic));
+    if (owned) {
+      const byTopic = Map.groupBy(owned, (item) => item.topic);
+      w.array([...byTopic], (writer, [name, partitions]) =>
+        writer.string(name).array(partitions, (partitionWriter, p) => partitionWriter.i32(p.partition)));
+    }
+    return w.bytes(null).result();
+  }
+
   async #joinGroup(topics: string[], fromBeginning: boolean): Promise<void> {
     const coordinator = await this.#findCoordinator();
     const instanceId = this.#options.groupInstanceId;
-    const memberMetadata = new Writer().i16(0).array(topics, (writer, topic) => writer.string(topic)).bytes(null).result();
+    const cooperative = this.#options.partitionAssigner === "cooperative-sticky";
+    const protocolName = cooperative ? "cooperative-sticky" : "range";
+    const memberMetadata = this.#encodeSubscription(topics, cooperative ? [...this.#assigned.values()] : undefined);
     // JoinGroup v3+ carries the static membership identity (KIP-345).
     const joinVersion = instanceId === undefined ? 2 : 3;
     const join = new Writer().string(this.#groupId!)
@@ -945,7 +983,7 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
       .i32(this.#options.rebalanceTimeoutMs ?? 60_000).string(this.#memberId);
     if (joinVersion >= 3) join.string(instanceId!);
     join.string("consumer")
-      .array([["range", memberMetadata] as const], (writer, [name, metadata]) => writer.string(name).bytes(metadata));
+      .array([[protocolName, memberMetadata] as const], (writer, [name, metadata]) => writer.string(name).bytes(metadata));
     const response = await this.#cluster.request(coordinator, API_JOIN_GROUP, joinVersion, join);
     this.#cluster.throttle(API_JOIN_GROUP, response.i32());
     const error = response.i16();
@@ -956,26 +994,72 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
     const members = response.array((reader) => {
       const memberId = reader.string() ?? "";
       const metadata = new Reader(reader.bytes() ?? new Uint8Array());
-      metadata.i16();
+      const version = metadata.i16();
       const memberTopics = metadata.array((item) => item.string() ?? "");
-      metadata.bytes();
-      return { memberId, topics: memberTopics };
+      let owned: Array<{ topic: string; partition: number }> = [];
+      if (version >= 1) {
+        owned = metadata.array((ownedReader) => {
+          const topicName = ownedReader.string() ?? "";
+          return ownedReader.array((p) => p.i32()).map((partition) => ({ topic: topicName, partition }));
+        }).flat();
+      }
+      metadata.bytes(); // user data
+      return { memberId, topics: memberTopics, owned };
     });
     if (error) throw kafkaError(error, `Kafka group ${this.#groupId}`);
 
     const assignments = new Map<string, GroupAssignment[]>();
     if (this.#memberId === leader) {
-      const metadata = await this.#cluster.metadata(topics);
+      const allTopics = [...new Set(members.flatMap((member) => member.topics))];
+      const metadata = await this.#cluster.metadata(allTopics);
       for (const member of members) assignments.set(member.memberId, []);
-      for (const topic of metadata.topics) {
-        const eligible = members.filter((member) => member.topics.includes(topic.name)).sort((a, b) => a.memberId.localeCompare(b.memberId));
-        const partitions = topic.partitions.map(({ id }) => id).sort((a, b) => a - b);
-        let start = 0;
-        eligible.forEach((member, index) => {
-          const count = Math.floor(partitions.length / eligible.length) + (index < partitions.length % eligible.length ? 1 : 0);
-          assignments.get(member.memberId)!.push({ topic: topic.name, partitions: partitions.slice(start, start + count) });
-          start += count;
-        });
+      for (const topicMeta of metadata.topics) {
+        if (topicMeta.err || !topicMeta.partitions.length) continue;
+        const eligible = members.filter((member) => member.topics.includes(topicMeta.name)).sort((a, b) => a.memberId.localeCompare(b.memberId));
+        const partitions = topicMeta.partitions.map(({ id }) => id).sort((a, b) => a - b);
+        if (!eligible.length) continue;
+        if (cooperative) {
+          // Cooperative-sticky (KIP-429): compute a fair target distribution,
+          // then retain every partition its owner already holds (up to the
+          // member's fair share). Only surplus partitions move, so ownership
+          // changes only where the balance demands it.
+          const fairShare = Math.floor(partitions.length / eligible.length);
+          const extra = partitions.length % eligible.length;
+          const targetSize = new Map(eligible.map((m, i) => [m.memberId, fairShare + (i < extra ? 1 : 0)]));
+          const finals = new Map<string, number[]>(eligible.map((m) => [m.memberId, []]));
+          const ownedBy = new Map<number, string>();
+          // Pass 1: retain valid existing ownership.
+          for (const m of eligible) {
+            for (const o of m.owned) {
+              if (o.topic !== topicMeta.name || !partitions.includes(o.partition)) continue;
+              if (ownedBy.has(o.partition)) continue;
+              const mine = finals.get(m.memberId)!;
+              if (mine.length >= targetSize.get(m.memberId)!) continue;
+              ownedBy.set(o.partition, m.memberId);
+              mine.push(o.partition);
+            }
+          }
+          // Pass 2: hand out the remaining partitions to the least-loaded subscribers.
+          for (const partition of partitions) {
+            if (ownedBy.has(partition)) continue;
+            const candidates = eligible
+              .filter((m) => finals.get(m.memberId)!.length < targetSize.get(m.memberId)!)
+              .sort((a, b) => (finals.get(a.memberId)!.length - finals.get(b.memberId)!.length) || a.memberId.localeCompare(b.memberId));
+            const chosen = candidates[0] ?? eligible[0]!;
+            ownedBy.set(partition, chosen.memberId);
+            finals.get(chosen.memberId)!.push(partition);
+          }
+          for (const [memberId, parts] of finals) {
+            if (parts.length) assignments.get(memberId)!.push({ topic: topicMeta.name, partitions: parts.sort((a, b) => a - b) });
+          }
+        } else {
+          let start = 0;
+          eligible.forEach((member, index) => {
+            const count = Math.floor(partitions.length / eligible.length) + (index < partitions.length % eligible.length ? 1 : 0);
+            assignments.get(member.memberId)!.push({ topic: topicMeta.name, partitions: partitions.slice(start, start + count) });
+            start += count;
+          });
+        }
       }
     }
     const syncInstance = this.#options.groupInstanceId;
@@ -999,12 +1083,25 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
       for (const partition of item.partitions) assigned.push({ topic: item.topic, partition });
     }
     const committed = new Map((await this.committed(assigned)).map((item) => [partitionKey(item.topic, item.partition), item.offset]));
-    await this.assign(assigned.map((item) => ({
-      ...item,
-      offset: (committed.get(partitionKey(item.topic, item.partition)) ?? -1n) >= 0n
-        ? committed.get(partitionKey(item.topic, item.partition))!
-        : fromBeginning ? "earliest" : "latest",
-    })));
+    // Under cooperative-sticky, partitions this member keeps must not lose
+    // their in-memory position (a rebalance is not a consumer restart).
+    const retained = new Map<string, bigint>();
+    if (cooperative) {
+      for (const item of assigned) {
+        const key = partitionKey(item.topic, item.partition);
+        const position = this.#positions.get(key);
+        if (position !== undefined) retained.set(key, position);
+      }
+    }
+    await this.assign(assigned.map((item) => {
+      const key = partitionKey(item.topic, item.partition);
+      return {
+        ...item,
+        offset: retained.get(key) ?? ((committed.get(key) ?? -1n) >= 0n
+          ? committed.get(key)!
+          : fromBeginning ? "earliest" : "latest"),
+      };
+    }));
     if (this.#heartbeat) clearInterval(this.#heartbeat);
     this.#heartbeat = setInterval(() => void this.#heartbeatOnce(coordinator), this.#options.heartbeatIntervalMs ?? 3_000);
   }
@@ -1042,8 +1139,6 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
     const body = new Writer().string(this.#groupId).i32(this.#generationId).string(this.#memberId).i64(-1n)
       .array([...topics], (writer, [topic, values]) => writer.string(topic).array(values, (partitionWriter, value) => partitionWriter.i32(value.partition).i64(typeof value.offset === "bigint" ? value.offset : this.#positions.get(partitionKey(topic, value.partition)) ?? 0n).string(null)));
     const response = await this.#cluster.request(coordinator, API_OFFSET_COMMIT, 2, body);
-    // OffsetCommit responses gained throttle_time_ms only in v3.
-    if (process.env.DEBUG_COMMIT) console.error("commit resp:", Array.from(response.data).map(b=>b.toString(16).padStart(2,"0")).join(" "));
     for (const result of response.array((reader) => ({ topic: reader.string() ?? "", partitions: reader.array((reader) => ({ partition: reader.i32(), error: reader.i16() })) }))) {
       for (const partition of result.partitions) if (partition.error) throw kafkaError(partition.error, `${result.topic}[${partition.partition}]`);
     }
@@ -1118,6 +1213,7 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
     this.#positions.clear();
     this.#paused.clear();
     this.#decoders = [];
+    this.#fetchSessions.clear(); // assignment change invalidates fetch sessions
     const unresolved: Array<Assigned & { which: "earliest" | "latest" }> = [];
     for (const assignment of assignments) {
       const metadata = await this.#cluster.topic(assignment.topic);
@@ -1195,42 +1291,99 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
       return [];
     }
 
+    const isolationLevel = this.#options.isolationLevel === "read_committed" ? 1 : 0;
     const leaders = Map.groupBy(active, ([, assignment]) => assignment.leader);
-    const batches = await Promise.all([...leaders].map(async ([leader, entries]) => {
+    const batches = await Promise.all([...leaders].map(async ([leader, entries]) =>
+      this.#fetchBatchesFor(leader, entries, options, isolationLevel)));
+    this.#decoders.push(...batches.flat());
+    return this.#drain(maxMessages);
+  }
+
+  async #fetchBatchesFor(leader: number, entries: Array<[string, Assigned]>, options: FetchOptions, isolationLevel: number): Promise<RecordSetDecoder[]> {
+      const session = this.#fetchSessions.get(leader) ?? { id: 0, epoch: 0, sent: new Map<string, bigint>(), streaming: new Map<string, boolean>() };
       const topics = Map.groupBy(entries, ([, assignment]) => assignment.topic);
-      const isolationLevel = this.#options.isolationLevel === "read_committed" ? 1 : 0;
+      const requested: Array<[string, Assigned]> = [];
+      for (const [topic, partitions] of topics) {
+        for (const entry of partitions) {
+          const key = entry[0];
+          const position = this.#positions.get(key) ?? 0n;
+          // Incremental fetch (KIP-227): include a partition when its position
+          // changed since the last request in this session, or when the previous
+          // response still carried records. Omitted partitions stay monitored by
+          // the broker's session and reappear in responses once data arrives.
+          if (session.epoch === 0 || session.sent.get(key) !== position || session.streaming.get(key)) {
+            requested.push(entry);
+          }
+        }
+      }
+      // Partitions that left the assignment are explicitly forgotten so the
+      // broker stops monitoring them in this session.
+      const forgottenTopics = new Map<string, number[]>();
+      for (const key of [...session.sent.keys(), ...session.streaming.keys()]) {
+        if (this.#assigned.has(key) && !this.#paused.has(key)) continue;
+        const [topic, partition] = key.split("\0");
+        if (topic === undefined || partition === undefined) continue;
+        forgottenTopics.set(topic, [...forgottenTopics.get(topic) ?? [], Number(partition)]);
+        session.sent.delete(key);
+        session.streaming.delete(key);
+      }
+      const byTopic = Map.groupBy(requested, ([, assignment]) => assignment.topic);
       const body = new Writer().i32(-1).i32(options.maxWaitMs ?? 500).i32(options.minBytes ?? 1)
         .i32(options.maxBytes ?? this.#options.fetchMaxBytes ?? 50 * 1024 * 1024).i8(isolationLevel)
-        .array([...topics], (writer, [topic, partitions]) => {
+        .i32(session.id).i32(session.epoch)
+        .array([...byTopic], (writer, [topic, partitions]) => {
           writer.string(topic).array(partitions, (partitionWriter, [key, assignment]) => {
             partitionWriter.i32(assignment.partition).i64(this.#positions.get(key) ?? 0n)
+              .i64(-1)
               .i32(options.maxPartitionBytes ?? 1024 * 1024);
           });
+        })
+        .array([...forgottenTopics], (writer, [topic, partitions]) => {
+          writer.string(topic).array(partitions, (partitionWriter, partition) => partitionWriter.i32(partition));
         });
-      const response = await this.#cluster.request(leader, API_FETCH, 4, body, (options.maxWaitMs ?? 500) + this.#cluster.requestTimeoutMs, false);
+      // NOTE: rack_id only exists in Fetch v11+; appending it here would leak
+      // stray bytes that brokers decode as the start of the next request.
+      const response = await this.#cluster.request(leader, API_FETCH, 7, body, (options.maxWaitMs ?? 500) + this.#cluster.requestTimeoutMs, false);
       if (process.env.DEBUG_FETCH) console.error("fetch resp:", Array.from(response.data.slice(0, 80)).map(b=>b.toString(16).padStart(2,"0")).join(" "));
       this.#cluster.throttle(API_FETCH, response.i32());
-      if (process.env.DEBUG_FETCH) console.error("after throttle offset:", response.offset);
+      const topError = response.i16();
+      const sessionId = response.i32();
+      if (topError) {
+        // Session state drifted (broker restart or expiry): start a fresh one.
+        this.#fetchSessions.delete(leader);
+        if (topError === 70 || topError === 71) return this.#fetchBatchesFor(leader, entries, options, isolationLevel);
+        throw kafkaError(topError, `Fetch from broker ${leader}`);
+      }
+      if (session.id === 0) {
+        session.id = sessionId;
+        session.epoch = 1;
+      } else {
+        session.epoch += 1;
+      }
+      this.#fetchSessions.set(leader, session);
       return response.array((topicReader) => {
         const topic = topicReader.string() ?? "";
         return topicReader.array((partitionReader) => {
           const partition = partitionReader.i32();
           const error = partitionReader.i16();
-          partitionReader.i64();
-          partitionReader.i64();
+          partitionReader.i64(); // high watermark
+          partitionReader.i64(); // last stable offset
+          partitionReader.i64(); // log start offset (Fetch v5+)
           const abortedTransactions = partitionReader.array((abortedReader) => ({ producerId: abortedReader.i64(), firstOffset: abortedReader.i64() }));
           const records = partitionReader.bytes();
+          const key = partitionKey(topic, partition);
+          // Remember the requested offset so idle partitions can be pruned
+          // from subsequent incremental requests.
+          session.sent.set(key, this.#positions.get(key) ?? 0n);
+          session.streaming.set(key, Boolean(records));
           if (error) throw kafkaError(error, `${topic}[${partition}]`);
           return records ? new RecordSetDecoder(records, topic, partition, leader, {
-            minOffset: this.#positions.get(partitionKey(topic, partition)) ?? 0n,
+            minOffset: this.#positions.get(key) ?? 0n,
             copy: options.copy,
             abortedTransactions: isolationLevel === 1 ? abortedTransactions : undefined,
           }) : null;
         }).filter((decoder): decoder is RecordSetDecoder => decoder !== null);
       }).flat();
-    }));
-    this.#decoders.push(...batches.flat());
-    return this.#drain(maxMessages);
   }
 
   #drain(max: number): Array<KafkaMessage | ConsumedMessage> {
@@ -1274,6 +1427,11 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
     if (!this.#assigned.has(key)) throw new Error(`${assignment.topic}[${assignment.partition}] is not assigned`);
     this.#positions.set(key, BigInt(assignment.offset));
     this.#decoders = this.#decoders.filter((decoder) => partitionKey(decoder.topic, decoder.partition) !== key);
+    // Force the re-positioned partition into the next fetch request.
+    for (const session of this.#fetchSessions.values()) {
+      session.sent.delete(key);
+      session.streaming.delete(key);
+    }
   }
 
   pause(partitions: TopicPartition[]): void {
@@ -1283,7 +1441,15 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
 
   resume(partitions: TopicPartition[]): void {
     this.#open();
-    for (const partition of partitions) this.#paused.delete(partitionKey(partition.topic, partition.partition));
+    for (const partition of partitions) {
+      const key = partitionKey(partition.topic, partition.partition);
+      this.#paused.delete(key);
+      // Re-join the fetch session so the resumed partition is polled again.
+      for (const session of this.#fetchSessions.values()) {
+        session.sent.delete(key);
+        session.streaming.delete(key);
+      }
+    }
   }
 
   assignment(): TopicPartition[] {
@@ -1535,6 +1701,144 @@ export class BunAdmin {
         return { name, index, lowWatermark, error };
       });
     }).flat();
+  }
+
+  /** Describe client quota entities matching the supplied filters (DescribeClientQuotas v0). */
+  async describeClientQuotas(components: ReadonlyArray<{ entityType: string; matchType?: "exact" | "defaulted" | "any"; match: string | null }> = [], options: { strict?: boolean } = {}): Promise<Array<{ entities: Array<{ entityType: string; entityName: string | null }>; values: Array<{ name: string; value: number }> }>> {
+    this.#open();
+    const matchTypes = { exact: 0, defaulted: 1, any: 2 } as const;
+    const body = new Writer().compactArray(components, (writer, component) =>
+      writer.compactString(component.entityType).i8(matchTypes[component.matchType ?? "exact"]).compactString(component.match))
+      .bool(options.strict ?? false)
+      .tags();
+    const response = await this.#cluster.anyRequest(API_DESCRIBE_CLIENT_QUOTAS, 1, body, true);
+    this.#cluster.throttle(API_DESCRIBE_CLIENT_QUOTAS, response.i32());
+    const error = response.i16();
+    // The nullable error_message field must be consumed regardless of outcome.
+    const errorMessage = response.compactString();
+    if (error) throw kafkaError(error, "Describe client quotas", errorMessage);
+    return response.compactArray((entryReader) => {
+      const entry = {
+        entities: entryReader.compactArray((entityReader) => {
+          const entity = { entityType: entityReader.compactString() ?? "", entityName: entityReader.compactString() };
+          entityReader.skipTags(); // per-struct tagged fields (KIP-482)
+          return entity;
+        }),
+        values: entryReader.compactArray((valueReader) => {
+          const value = { name: valueReader.compactString() ?? "", value: valueReader.f64() };
+          valueReader.skipTags();
+          return value;
+        }),
+      };
+      entryReader.skipTags(); // entry-level tags
+      return entry;
+    });
+  }
+
+  /** Alter client quota entity values (AlterClientQuotas v1). */
+  async alterClientQuotas(entries: ReadonlyArray<{ entity: ReadonlyArray<{ entityType: string; entityName: string | null }>; ops: ReadonlyArray<{ key: string; value?: number; remove?: boolean }>; validateOnly?: boolean }>): Promise<Array<{ error: number; message: string | null; entity: Array<{ entityType: string; entityName: string | null }> }>> {
+    this.#open();
+    if (!entries.length) return [];
+    // Flexible versions close every struct (array elements included) with a
+    // tagged-field section.
+    const body = new Writer().compactArray(entries, (writer, entry) => {
+      writer.compactArray(entry.entity, (entityWriter, item) => entityWriter.compactString(item.entityType).compactString(item.entityName).tags());
+      writer.compactArray(entry.ops, (opsWriter, op) => opsWriter.compactString(op.key).f64(op.value ?? Number.NaN).bool(op.remove ?? false).tags());
+      writer.tags(); // entry-level tags
+    }).bool(entries.some((entry) => entry.validateOnly) ?? false).tags();
+    const response = await this.#cluster.anyRequest(API_ALTER_CLIENT_QUOTAS, 1, body, true);
+    this.#cluster.throttle(API_ALTER_CLIENT_QUOTAS, response.i32());
+    return response.compactArray((entryReader) => {
+      const error = entryReader.i16();
+      const message = entryReader.compactString();
+      const entity = entryReader.compactArray((entityReader) => {
+        const item = { entityType: entityReader.compactString() ?? "", entityName: entityReader.compactString() };
+        entityReader.skipTags();
+        return item;
+      });
+      entryReader.skipTags(); // entry-level tags
+      return { error, message, entity };
+    });
+  }
+
+  /**
+   * Create a delegation token owned by the authenticated (or delegated-to)
+   * principal (CreateDelegationToken v2). Delegation token APIs require SASL
+   * authentication and broker support; brokers answer UNSUPPORTED_VERSION when
+   * unavailable.
+   */
+  async createDelegationToken(options: { ownerPrincipalType?: string | null; ownerPrincipalName?: string | null; renewalPeriodMs?: number | bigint } = {}): Promise<{ error: number; principalType: string; principalName: string; tokenRequester: string; issueTimestampMs: bigint; expiryTimestampMs: bigint; maxTimestampMs: bigint; tokenId: string; hmac: Uint8Array | null }> {
+    this.#open();
+    const body = new Writer().compactString(options.ownerPrincipalType ?? null)
+      .compactString(options.ownerPrincipalName ?? null)
+      .i64(options.renewalPeriodMs === undefined ? -1n : BigInt(options.renewalPeriodMs))
+      .tags();
+    const response = await this.#cluster.anyRequest(API_CREATE_DELEGATION_TOKEN, 2, body, true);
+    this.#cluster.throttle(API_CREATE_DELEGATION_TOKEN, response.i32());
+    const error = response.i16();
+    const message = response.compactString();
+    if (error) throw kafkaError(error, "Create delegation token", message);
+    return {
+      error,
+      principalType: response.compactString() ?? "",
+      principalName: response.compactString() ?? "",
+      tokenRequester: response.compactString() ?? "",
+      issueTimestampMs: response.i64(),
+      expiryTimestampMs: response.i64(),
+      maxTimestampMs: response.i64(),
+      tokenId: response.compactString() ?? "",
+      hmac: response.compactBytes(),
+    };
+  }
+
+  /** List delegation tokens visible to the authenticated principal (DescribeDelegationToken v2). */
+  async describeDelegationTokens(ownersFilters: ReadonlyArray<{ principalType: string; principalName: string }> = []): Promise<Array<{ ownerPrincipalType: string; ownerPrincipalName: string; tokenRequester: string; issueTimestampMs: bigint; expiryTimestampMs: bigint; maxTimestampMs: bigint; tokenId: string; hmac: Uint8Array | null }>> {
+    this.#open();
+    const body = new Writer().compactArray(ownersFilters.length ? ownersFilters : null, (writer, owner) =>
+      writer.compactString(owner.principalType).compactString(owner.principalName).tags()).tags();
+    const response = await this.#cluster.anyRequest(API_DESCRIBE_DELEGATION_TOKEN, 2, body, true);
+    this.#cluster.throttle(API_DESCRIBE_DELEGATION_TOKEN, response.i32());
+    const error = response.i16();
+    const message = response.compactString();
+    if (error) throw kafkaError(error, "Describe delegation tokens", message);
+    return response.compactArray((tokenReader) => {
+      const token = {
+        ownerPrincipalType: tokenReader.compactString() ?? "",
+        ownerPrincipalName: tokenReader.compactString() ?? "",
+        tokenRequester: tokenReader.compactString() ?? "",
+        issueTimestampMs: tokenReader.i64(),
+        expiryTimestampMs: tokenReader.i64(),
+        maxTimestampMs: tokenReader.i64(),
+        tokenId: tokenReader.compactString() ?? "",
+        hmac: tokenReader.compactBytes(),
+      };
+      tokenReader.skipTags();
+      return token;
+    });
+  }
+
+  /** Renew a delegation token before its expiry (RenewDelegationToken v2). */
+  async renewDelegationToken(tokenHmac: Uint8Array, renewPeriodMs: number | bigint): Promise<{ error: number; expiryTimestampMs: bigint }> {
+    this.#open();
+    const body = new Writer().compactBytes(tokenHmac).i64(BigInt(renewPeriodMs)).tags();
+    const response = await this.#cluster.anyRequest(API_RENEW_DELEGATION_TOKEN, 2, body, true);
+    this.#cluster.throttle(API_RENEW_DELEGATION_TOKEN, response.i32());
+    const error = response.i16();
+    const message = response.compactString();
+    if (error) throw kafkaError(error, "Renew delegation token", message);
+    return { error, expiryTimestampMs: response.i64() };
+  }
+
+  /** Expire a delegation token early (ExpireDelegationToken v2). */
+  async expireDelegationToken(tokenHmac: Uint8Array, expiryTimePeriodMs: number | bigint = -1): Promise<{ error: number; expiryTimestampMs: bigint }> {
+    this.#open();
+    const body = new Writer().compactBytes(tokenHmac).i64(BigInt(expiryTimePeriodMs)).tags();
+    const response = await this.#cluster.anyRequest(API_EXPIRE_DELEGATION_TOKEN, 2, body, true);
+    this.#cluster.throttle(API_EXPIRE_DELEGATION_TOKEN, response.i32());
+    const error = response.i16();
+    const message = response.compactString();
+    if (error) throw kafkaError(error, "Expire delegation token", message);
+    return { error, expiryTimestampMs: response.i64() };
   }
 
   /** Create ACL bindings on the broker. */
