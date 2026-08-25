@@ -2,6 +2,29 @@
 
 All features listed in docs/feature-completeness.md are implemented and tested.
 
+## Release-prep cycle (2026-08-26)
+
+Work streams, each on its own branch off `feat/oxlint-oxfmt-with-custom-rules` and merged back:
+
+- `docs/kafka-versions-and-kips.md` — newcomer-oriented mapping of Kafka releases, wire API
+  versioning strategy, KIP catalog (claim → code → verifying test), plus a documented proposal
+  for full per-broker version negotiation with trigger conditions.
+- `docs/client-gap-audit.md` — gap audit vs kafkajs / node-rdkafka / franz-go with explicit
+  dispositions. Top open code item: IncrementalAlterConfigs (API key 50, Apache Kafka 2.3+);
+  implement only against a free broker (needs live verification of the v0/v1 value-field shape).
+  Do NOT run integration tests while the release soak owns the dev container.
+- `feat/release-packaging` — npm publish hygiene: `files` whitelist + repository/keywords;
+  dry-run tarball verified at 31 files / ~260 KB.
+- `feat/docs-website` — nine usage guides under docs/guide/ plus a static documentation website:
+  `bun run docs:build` emits website/dist (16 pages), `bun run docs:serve` serves it.
+- Merged previously unmerged branches: feat/release-soak (24 h soak profile + wrap-up checklist)
+  and feat/ci (perf-ratio CI flake fix).
+
+Gates at merge time: oxlint --deny-warnings clean, oxfmt clean, tsc clean, 68/68 tests pass.
+
+Remaining before tagging a release: the live 24-hour soak finishes ~2026-08-26 12:20 UTC — run
+the wrap-up checklist below, then flip the status lines in docs/performance-validation.md.
+
 ## Completed (commits e46f149..HEAD)
 
 - OffsetCommit v2 INT64 retention / no-v2-throttle fix
