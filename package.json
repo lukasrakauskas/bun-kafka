@@ -3,9 +3,34 @@
   "version": "0.2.0",
   "description": "Zero-dependency Kafka wire protocol client for Bun",
   "license": "MIT",
+  "author": "Lukas Rakauskas <rakauskaslukas123@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lukasrakauskas/bun-kafka.git"
+  },
+  "bugs": "https://github.com/lukasrakauskas/bun-kafka/issues",
+  "homepage": "https://github.com/lukasrakauskas/bun-kafka#readme",
+  "keywords": [
+    "kafka",
+    "client",
+    "producer",
+    "consumer",
+    "kafkajs",
+    "redpanda",
+    "bun",
+    "typescript",
+    "wire-protocol"
+  ],
   "type": "module",
   "module": "index.ts",
   "types": "index.ts",
+  "files": [
+    "index.ts",
+    "src/",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "exports": {
     ".": "./index.ts",
     "./kafkajs-compat": "./src/kafkajs-compat/index.ts"
