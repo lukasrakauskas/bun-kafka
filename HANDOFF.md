@@ -60,7 +60,6 @@ docs/performance-validation.md.
 5. Still outstanding afterwards: the 72-hour follow-up soak at 75 % of max stable rate,
    required before releases that touch protocol/connection/producer/consumer code.
 
-
 ## Broker notes
 
 Single-node Redpanda dev container `bun-kafka-dev` (image be202e716d34). Recreate with:
