@@ -2,6 +2,7 @@
   "name": "bun-kafka",
   "version": "0.2.0",
   "description": "Zero-dependency Kafka wire protocol client for Bun",
+  "license": "MIT",
   "module": "index.ts",
   "types": "index.ts",
   "type": "module",
