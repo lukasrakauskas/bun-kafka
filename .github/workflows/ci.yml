@@ -17,6 +17,8 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bun run format:check
       - run: bunx tsc --noEmit
 
   unit:
