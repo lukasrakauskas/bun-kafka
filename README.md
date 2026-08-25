@@ -172,6 +172,14 @@ Tests are split by scope: `test/unit/` (wire protocol primitives), `test/feature
 
 `SOAK_DURATION_S=1800 SOAK_RATE=1000 bun run test:soak` runs one long-lived Bun process that produces at a fixed offered rate, drains with a consumer, samples latency/memory/socket/CPU metrics every 10 seconds, injects periodic bursts, validates per-partition sequence integrity, evaluates release-gate checks, and writes JSON and Markdown artifacts to `out/soak/`. See [performance validation](docs/performance-validation.md) for the full gate definitions.
 
+## Releasing
+
+1. Bump `version` in `package.json`.
+2. In CHANGELOG.md, rename `[Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and start a fresh `[Unreleased]` section.
+3. Tag `vX.Y.Z` and push the tag.
+
+A release requires green CI plus the soak gates defined in [performance validation](docs/performance-validation.md).
+
 ## Benchmark
 
 Install [hyperfine](https://github.com/sharkdp/hyperfine), then run:
