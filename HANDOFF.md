@@ -10,9 +10,14 @@ Work streams, each on its own branch off `feat/oxlint-oxfmt-with-custom-rules` a
   versioning strategy, KIP catalog (claim → code → verifying test), plus a documented proposal
   for full per-broker version negotiation with trigger conditions.
 - `docs/client-gap-audit.md` — gap audit vs kafkajs / node-rdkafka / franz-go with explicit
-  dispositions. Top open code item: IncrementalAlterConfigs (API key 50, Apache Kafka 2.3+);
-  implement only against a free broker (needs live verification of the v0/v1 value-field shape).
-  Do NOT run integration tests while the release soak owns the dev container.
+  dispositions. Its top open code item, IncrementalAlterConfigs, is now implemented and merged
+  (see below).
+- `feat/incremental-alter-configs` — `admin.incrementalAlterConfigs()` (API key 44, v1 flexible:
+  set/delete/append/subtract per entry, validate-only). Wire schema taken from the Apache
+  protocol sources; mock wire-shape test plus real-broker round trip verified against a
+  dedicated Redpanda container (SET persisted + confirmed via DescribeConfigs, sibling-entry
+  safety, delete-reverts-to-default, error path). Docs updated (feature matrix, gap audit,
+  admin guide, changelog).
 - `feat/release-packaging` — npm publish hygiene: `files` whitelist + repository/keywords;
   dry-run tarball verified at 31 files / ~260 KB.
 - `feat/docs-website` — nine usage guides under docs/guide/ plus a static documentation website:
