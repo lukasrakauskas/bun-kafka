@@ -144,12 +144,25 @@ const kafka = new Kafka({
 
 The fixed API versions require Kafka 0.11 or newer. Use a current Kafka or Redpanda release.
 
-## Readiness documentation
+## Documentation
 
+Full guides and reference pages live in [docs/guide](docs/guide/getting-started.md) and render
+into a static documentation website:
+
+```bash
+bun run docs:build   # emits website/dist (static HTML, deploy anywhere)
+bun run docs:serve   # build + serve on http://localhost:4173
+```
+
+Readiness documentation:
+
+- [Getting started guide](docs/guide/getting-started.md)
 - [Recorded benchmarks](docs/benchmarks.md)
 - [Performance validation and soak tests](docs/performance-validation.md)
 - [Broker failure and chaos testing](docs/chaos-testing.md)
 - [Kafka feature completeness and client comparison](docs/feature-completeness.md)
+- [Kafka versions, APIs, and KIPs mapped to this client](docs/kafka-versions-and-kips.md)
+- [Gap audit versus kafkajs / node-rdkafka / franz-go](docs/client-gap-audit.md)
 
 The native client has short-run benchmark evidence, a passing three-broker chaos qualification (`out/chaos/`), and a passing 30-minute soak run (`out/soak/`). The 24-hour release soak gates defined in the performance validation doc remain outstanding.
 
