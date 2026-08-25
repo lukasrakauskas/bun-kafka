@@ -1,5 +1,5 @@
 import { KafkaError } from "../errors.ts";
-import { isString } from "../type-guards.ts";
+import { isFunction, isString } from "../type-guards.ts";
 import { Cluster } from "./cluster.ts";
 import {
   Reader,
@@ -130,7 +130,8 @@ export class BunProducer {
       this.#options.lingerMs < 0 ||
       !Number.isSafeInteger(this.#options.batchMaxMessages) ||
       this.#options.batchMaxMessages < 1 ||
-      !(this.#options.compression in { none: 1, gzip: 1, snappy: 1, lz4: 1, zstd: 1 })
+      !(this.#options.compression in { none: 1, gzip: 1, snappy: 1, lz4: 1, zstd: 1 }) ||
+      (producerOptions.partitioner !== undefined && !isFunction(producerOptions.partitioner))
     ) {
       throw new RangeError("Invalid producer batching options");
     }
