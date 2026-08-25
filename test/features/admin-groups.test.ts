@@ -64,7 +64,8 @@ describe("Admin: group and record management", () => {
             let body: Writer;
             if (key === 18) body = apiVersions();
             else if (key === 3) body = metadataBody(listener.port);
-            else if (key === 16) body = new Writer().i32(0).i16(0).array(["workers"], (writer, g) => writer.string(g).string("consumer").string("Stable"));
+            // ListGroups v1 wire shape: [throttle][error][groups[{id, protocolType}]] — no per-group state (that arrived in v4).
+            else if (key === 16) body = new Writer().i32(0).i16(0).array(["workers"], (writer, g) => writer.string(g).string("consumer"));
             else if (key === 15) body = new Writer().i32(0)
               .array(["workers"], (writer, g) => writer
                 .i16(0).string(null)
@@ -88,7 +89,7 @@ describe("Admin: group and record management", () => {
     try {
       const a = kafka.admin();
       const groups = await a.listGroups();
-      expect(groups).toEqual([{ groupId: "workers", protocolType: "consumer", state: "Stable" }]);
+      expect(groups).toEqual([{ groupId: "workers", protocolType: "consumer", state: "" }]);
       const described = await a.describeGroups(["workers"]);
       expect(described[0]).toMatchObject({ groupId: "workers", state: "Stable", protocolType: "consumer" });
       expect(described[0]?.members[0]?.clientId).toBe("app-1");

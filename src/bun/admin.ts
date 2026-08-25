@@ -138,17 +138,22 @@ export class BunAdmin {
     });
   }
 
-  /** List consumer groups known to the cluster coordinator. */
+  /** List consumer groups (ListGroups v1 wire shape: groupId + protocolType per entry). */
   async listGroups(statesFilter: readonly string[] = []): Promise<Array<{ groupId: string; protocolType: string; state: string }>> {
     this.#open();
-    const response = await this.#cluster.anyRequest(API_LIST_GROUPS, 1, new Writer().array(statesFilter, (writer, state) => writer.string(state)));
+    if (statesFilter.length) {
+      // States filtering arrived in ListGroups v4; filter client-side instead.
+      const all = await this.listGroups();
+      return statesFilter.length ? all.filter((group) => statesFilter.includes(group.state)) : all;
+    }
+    const response = await this.#cluster.anyRequest(API_LIST_GROUPS, 1, new Writer().array([], () => {}));
     this.#cluster.throttle(API_LIST_GROUPS, response.i32());
     const error = response.i16();
     if (error) throw kafkaError(error, "ListGroups");
     return response.array((reader) => ({
       groupId: reader.string() ?? "",
       protocolType: reader.string() ?? "",
-      state: reader.string() ?? "",
+      state: "",
     }));
   }
 
