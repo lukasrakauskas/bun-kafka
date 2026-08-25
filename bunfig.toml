@@ -2,5 +2,9 @@
 timeout = 60000
 
 # coverage runs via: bun test --coverage (or `bun run test:coverage`)
+# helpers.ts is test scaffolding, not shipped code -> excluded from coverage.
+# Thresholds are enforced per-file; worst src file is connection.ts (74.5% funcs / 81.4% lines).
+coverageThreshold = { lines = 0.80, functions = 0.72 }
+coveragePathIgnorePatterns = ["test/helpers.ts"]
 coverageReporter = ["text", "lcov"]
 coverageDir = "out/coverage"

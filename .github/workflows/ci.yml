@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit
+
+  unit:
+    needs: static
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+      # threshold enforced via [test] coverageThreshold in bunfig.toml
+      - run: bun run test:coverage
+
+  impl:
+    needs: static
+    runs-on: ubuntu-latest
+    env:
+      KAFKA_BROKERS: 127.0.0.1:9092
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      # HANDOFF.md dev-container recipe; a service container cannot override
+      # CMD to pass `redpanda start --mode dev-container --advertise-kafka-addr`
+      - name: Start Redpanda (single node)
+        run: |
+          docker run -d --name redpanda --ulimit nofile=65536:65536 -p 9092:9092 \
+            redpandadata/redpanda:v24.3.7 \
+            redpanda start --mode dev-container \
+            --kafka-addr=PLAINTEXT://0.0.0.0:9092 \
+            --advertise-kafka-addr=PLAINTEXT://127.0.0.1:9092
+      - name: Wait for broker health
+        run: |
+          for i in $(seq 1 60); do
+            docker exec redpanda rpk cluster health 2>/dev/null | grep -Eq 'Healthy:\s*true' && exit 0
+            sleep 1
+          done
+          echo "Redpanda did not become healthy" >&2
+          docker logs redpanda
+          exit 1
+      - name: Single-node internal topic replication factor + restart (HANDOFF.md)
+        run: |
+          docker exec redpanda rpk cluster config set internal_topic_replication_factor 1
+          docker restart redpanda
+          for i in $(seq 1 60); do
+            docker exec redpanda rpk cluster health 2>/dev/null | grep -Eq 'Healthy:\s*true' && exit 0
+            sleep 1
+          done
+          echo "Redpanda did not come back healthy after restart" >&2
+          docker logs redpanda
+          exit 1
+      # gated suites self-skip without their env (chaos-cluster, TLS-external)
+      - run: bun test test/impl
+
+  chaos-mock:
+    needs: static
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+      - run: bun run test:chaos:mock
