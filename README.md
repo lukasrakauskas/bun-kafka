@@ -66,6 +66,21 @@ const messages = await grouped.fetch();
 await grouped.commitOffsets();
 ```
 
+Set `partitionAssigner: "cooperative-sticky"` for KIP-429 incremental rebalancing: members retain owned partitions across rebalances and only moved partitions change hands.
+
+### Transactions
+
+```ts
+const producer = kafka.producer({ transactionalId: "orders-1" });
+await producer.beginTransaction();
+await producer.send({ topic: "events", messages: [{ value: "batch-1" }] });
+await producer.commitTransaction();   // or abortTransaction()
+```
+
+Transactional producers resolve their transaction coordinator, force all-replica acknowledgements, register touched partitions with `AddPartitionsToTxn`, and bump the producer epoch after every transaction. Consumers pair with them through `kafka.consumer({ isolationLevel: "read_committed" })`, which filters aborted transaction records and control markers.
+
+Fetches use incremental sessions (KIP-227): idle partitions are pruned from requests via `forgotten_topics_data` while the broker keeps monitoring them for new data.
+
 `fetch()`, `seek()`, `pause()`, `resume()`, `assignment()`, `position()`, `watermarks()`, `commitOffsets()`, and `committed()` are available. Payloads are stable zero-copy views by default. Set `copy: true` on `fetch()` when you need separate buffers.
 
 ## Metadata
@@ -105,25 +120,29 @@ const kafka = new Kafka({
 |---|---|
 | Bun TCP and TLS | Yes |
 | Metadata API | Yes |
-| Produce with acks 1/all and automatic batching | Yes |
-| Gzip and Zstandard record-batch compression | Yes |
+| Produce with acks 0/1/all and automatic batching | Yes |
+| Gzip, Zstandard, Snappy, and LZ4 record-batch compression | Yes |
 | Bounded request retries, events, and metadata refresh | Partial |
 | Kafka record batches (magic 2) | Yes |
 | Keys, values, timestamps, and headers | Yes |
 | CRC32C validation | Yes |
-| Kafka-compatible Murmur2 partitioning | Yes |
+| Kafka-compatible Murmur2 partitioning and custom partitioners | Yes |
 | Bounded, zero-copy manual consume and offset lookup | Yes |
 | Topic and config administration | Yes |
-| Basic consumer groups and offset commits | Partial |
-| Cooperative rebalancing and static membership | Not yet |
+| Consumer groups with static membership (KIP-345) | Yes |
+| Cooperative-sticky rebalancing (KIP-429) | Yes |
+| Incremental fetch sessions (KIP-227) | Yes |
+| Read-committed isolation | Yes |
 | SASL/PLAIN and SCRAM-SHA-256/512 | Yes |
 | SASL/OAUTHBEARER static or provider token | Yes |
-| Timed SASL reauthentication and Kerberos | Not yet |
-| Gzip and Zstandard compression | Yes |
-| Snappy and LZ4 compression | Not yet |
+| Timed OAuth reauthentication (KIP-368) | Yes |
+| Kerberos/GSSAPI | Not yet |
 | Idempotent produce | Yes |
-| Transactions | Not yet |
-| Admin topic and config changes | Yes |
+| Transactions | Yes |
+| Admin topic, config, group, ACL, quota, and delegation-token changes | Yes |
+| Health/stats hooks and logging | Yes |
+| Proxy support | No |
+| Per-message delivery callbacks | Yes |
 
 The fixed API versions require Kafka 0.11 or newer. Use a current Kafka or Redpanda release.
 
