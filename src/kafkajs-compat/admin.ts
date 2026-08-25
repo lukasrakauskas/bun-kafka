@@ -1,11 +1,8 @@
-import { KafkaError } from "../errors.ts";
-import { Cluster } from "../bun/cluster.ts";
-import { Reader, Writer } from "../bun/protocol.ts";
-import { BunAdmin } from "../bun/admin.ts";
-import { ADMIN_EVENTS } from "./constants.ts";
 import { wrapError } from "./errors.ts";
+import { ADMIN_EVENTS } from "./constants.ts";
 import type { ClusterGetter } from "./config.ts";
 import { Emitter, Logger } from "./logger.ts";
+import { BunAdmin } from "../bun/admin.ts";
 
 export interface CompatCreateTopicsInput {
   validateOnly?: boolean;
@@ -66,19 +63,9 @@ export class CompatAdmin {
         replicationFactor: item.replicationFactor ?? -1,
         assignments: item.replicaAssignment,
         configs: item.configEntries ? Object.fromEntries(item.configEntries.map((entry) => [entry.name, entry.value])) : undefined,
-      })), { validateOnly });
+      })), { validateOnly, waitForLeaders, timeoutMs: timeout });
       // TOPIC_ALREADY_EXISTS counts as "not created" rather than a failure.
-      const outcomes = results.map((result) => result.error === 0);
-      if (waitForLeaders && outcomes.some(Boolean)) {
-        const deadline = Date.now() + Math.max(timeout, 5_000);
-        while (Date.now() < deadline) {
-          const created = topics.filter((_, i) => outcomes[i]).map((item) => item.topic);
-          const metadata = await this.#underlying().metadata(created);
-          if (metadata.topics.every((topicMeta) => !topicMeta.err && topicMeta.partitions.every((p) => p.leader >= 0))) break;
-          await Bun.sleep(100);
-        }
-      }
-      return outcomes;
+      return results.map((result) => result.error === 0);
     } catch (error) {
       throw wrapError(error);
     }
@@ -142,34 +129,17 @@ export class CompatAdmin {
 
   async fetchOffsets({ groupId, topics, resolveOffsets = false }: { groupId: string; topics?: string[]; resolveOffsets?: boolean }): Promise<Array<{ topic: string; partitions: Array<{ partition: number; offset: string; metadata?: string }> }>> {
     try {
-      const cluster = this.#getter().sync();
-      const names = topics ?? await this.listTopics();
+      const listed = await this.#underlying().groupOffsets(groupId, topics);
       const result: Array<{ topic: string; partitions: Array<{ partition: number; offset: string; metadata?: string }> }> = [];
-      for (const topic of names) {
-        const meta = await cluster.topic(topic);
-        if (meta.err) continue;
-        const partitions = meta.partitions.map((p) => p.id);
-        const body = new Writer().string(groupId)
-          .array([topic], (writer, name) => writer.string(name).array(partitions, (partitionWriter, partition) => partitionWriter.i32(partition)));
-        const response = await cluster.anyRequest(9, 2, body);
-        const parsed = response.array((topicReader) => {
-          const name = topicReader.string() ?? "";
-          return topicReader.array((partitionReader) => ({
-            name,
-            partition: partitionReader.i32(),
-            offset: partitionReader.i64(),
-            metadata: partitionReader.string(),
-            error: partitionReader.i16(),
-          }));
-        }).flat();
-        const mapped = parsed
-          .filter((entry) => entry.error === 0)
-          .map(async (entry) => ({
-            partition: entry.partition,
-            offset: (resolveOffsets && entry.offset < 0n ? await listOffset(cluster, topic, entry.partition, -2) : entry.offset).toString(),
-            metadata: entry.metadata ?? undefined,
-          }));
-        result.push({ topic, partitions: await Promise.all(mapped) });
+      for (const { topic, partitions } of listed) {
+        const mapped = await Promise.all(partitions.map(async ({ partition, offset, metadata }) => ({
+          partition,
+          offset: (resolveOffsets && offset < 0n
+            ? await this.#underlying().offsetByTimestamp(topic, partition, -2)
+            : offset).toString(),
+          metadata: metadata ?? undefined,
+        })));
+        result.push({ topic, partitions: mapped });
       }
       return result;
     } catch (error) {
@@ -187,13 +157,11 @@ export class CompatAdmin {
 
   async fetchTopicOffsets(topic: string): Promise<Array<{ partition: number; offset: string; high: string; low: string }>> {
     try {
-      const cluster = this.#getter().sync();
-      const meta = await cluster.topic(topic);
-      if (meta.err) throw new KafkaError(meta.err, `Topic ${topic}`);
-      return await Promise.all(meta.partitions.map(async (partition) => {
-        const low = await listOffset(cluster, topic, partition.id, -2);
-        const high = await listOffset(cluster, topic, partition.id, -1);
-        return { partition: partition.id, offset: high.toString(), high: high.toString(), low: low.toString() };
+      return (await this.#underlying().topicOffsets(topic)).map(({ partition, low, high }) => ({
+        partition,
+        offset: high.toString(),
+        high: high.toString(),
+        low: low.toString(),
       }));
     } catch (error) {
       throw wrapError(error);
@@ -202,12 +170,10 @@ export class CompatAdmin {
 
   async fetchTopicOffsetsByTimestamp(topic: string, timestamp = Date.now()): Promise<Array<{ partition: number; offset: string }>> {
     try {
-      const cluster = this.#getter().sync();
-      const meta = await cluster.topic(topic);
-      if (meta.err) throw new KafkaError(meta.err, `Topic ${topic}`);
-      return await Promise.all(meta.partitions.map(async (partition) => ({
-        partition: partition.id,
-        offset: (await listOffset(cluster, topic, partition.id, timestamp)).toString(),
+      const marks = await this.#underlying().topicOffsets(topic);
+      return await Promise.all(marks.map(async ({ partition }) => ({
+        partition,
+        offset: (await this.#underlying().offsetByTimestamp(topic, partition, timestamp)).toString(),
       })));
     } catch (error) {
       throw wrapError(error);
@@ -216,7 +182,7 @@ export class CompatAdmin {
 
   async setOffsets({ groupId, topic, partitions }: { groupId: string; topic: string; partitions: Array<{ partition: number; offset: string | number | bigint }> }): Promise<void> {
     try {
-      await commitGroupOffsets(this.#getter().sync(), groupId, [{
+      await this.#underlying().setGroupOffsets(groupId, [{
         topic,
         partitions: partitions.map(({ partition, offset }) => ({ partition, offset: BigInt(offset), metadata: "" })),
       }]);
@@ -227,15 +193,7 @@ export class CompatAdmin {
 
   async resetOffsets({ groupId, topic, earliest = true }: { groupId: string; topic: string; earliest?: boolean }): Promise<void> {
     try {
-      const cluster = this.#getter().sync();
-      const meta = await cluster.topic(topic);
-      if (meta.err) throw new KafkaError(meta.err, `Topic ${topic}`);
-      const resolved = await Promise.all(meta.partitions.map(async (partition) => ({
-        partition: partition.id,
-        offset: await listOffset(cluster, topic, partition.id, earliest ? -2 : -1),
-        metadata: "",
-      })));
-      await commitGroupOffsets(cluster, groupId, [{ topic, partitions: resolved }]);
+      await this.#underlying().resetGroupOffsets(groupId, topic, earliest);
     } catch (error) {
       throw wrapError(error);
     }
@@ -256,46 +214,24 @@ export class CompatAdmin {
 
   async describeGroups(groupIds: string[]): Promise<{ groups: Array<Record<string, unknown>> }> {
     try {
-      const cluster = this.#getter().sync();
-      const body = new Writer().array(groupIds, (writer, group) => writer.string(group));
-      const response = await cluster.anyRequest(15, 1, body);
-      const throttleTime = response.i32();
-      cluster.throttle?.(15 as never, throttleTime);
-      // Some brokers (Redpanda) omit the nullable error_message field that
-      // Apache Kafka always writes; trial-parse both shapes and keep the one
-      // that consumes the buffer exactly.
-      const data = response.data;
-      let groups: Array<Record<string, unknown>> | undefined;
-      for (const withMessage of [true, false]) {
-        try {
-          const reader = new Reader(data);
-          reader.i32();
-          const parsed: Array<Record<string, unknown>> = reader.array((entry) => {
-            const error = entry.i16();
-            const message = withMessage ? entry.string() : undefined;
-            const groupId = entry.string() ?? "";
-            const state = entry.string() ?? "";
-            const protocolType = entry.string() ?? "";
-            const protocol = entry.string();
-            const members = entry.array((memberReader) => ({
-              memberId: memberReader.string() ?? "",
-              clientId: memberReader.string() ?? "",
-              clientHost: memberReader.string() ?? "",
-              memberMetadata: memberReader.bytes(),
-              memberAssignment: memberReader.bytes(),
-            }));
-            return { errorCode: error, errorMessage: message, groupId, state, protocolType, protocolData: protocol, members };
-          });
-          if (reader.remaining === 0) {
-            groups = parsed;
-            break;
-          }
-        } catch {
-          // Try the next shape.
-        }
-      }
-      if (!groups) throw new KafkaError(-1, "Malformed DescribeGroups response");
-      return { groups };
+      const described = await this.#underlying().describeGroups(groupIds);
+      return {
+        groups: described.map((group) => ({
+          errorCode: group.error,
+          errorMessage: group.message,
+          groupId: group.groupId,
+          state: group.state,
+          protocolType: group.protocolType,
+          protocolData: group.protocol,
+          members: group.members.map((member) => ({
+            memberId: member.memberId,
+            clientId: member.clientId,
+            clientHost: member.clientHost,
+            memberMetadata: member.memberMetadata,
+            memberAssignment: member.memberAssignment,
+          })),
+        })),
+      };
     } catch (error) {
       throw wrapError(error);
     }
@@ -428,53 +364,6 @@ export class CompatAdmin {
       };
     } catch (error) {
       throw wrapError(error);
-    }
-  }
-}
-
-async function listOffset(cluster: Cluster, topic: string, partition: number, timestamp: number): Promise<bigint> {
-  const meta = await cluster.topic(topic);
-  const leader = meta.partitions.find((p) => p.id === partition)?.leader;
-  if (leader === undefined) throw new KafkaError(3, `${topic}[${partition}]`);
-  const body = new Writer().i32(-1).array([topic], (writer, name) =>
-    writer.string(name).array([partition], (partitionWriter, index) => {
-      partitionWriter.i32(index).i64(BigInt(timestamp));
-    }));
-  const response = await cluster.request(leader, 2, 1, body);
-  const result = response.array((topicReader) => {
-    topicReader.string();
-    return topicReader.array((partitionReader) => {
-      partitionReader.i32();
-      const error = partitionReader.i16();
-      partitionReader.i64();
-      const offset = partitionReader.i64();
-      if (error) throw new KafkaError(error, `${topic}[${partition}]`);
-      return offset;
-    });
-  });
-  return result[0]?.[0] ?? -1n;
-}
-
-async function commitGroupOffsets(
-  cluster: Cluster,
-  groupId: string,
-  topics: Array<{ topic: string; partitions: Array<{ partition: number; offset: bigint; metadata: string }> }>,
-): Promise<void> {
-  const coordinatorResponse = await cluster.anyRequest(10, 0, new Writer().string(groupId));
-  const coordinatorError = coordinatorResponse.i16();
-  const coordinator = coordinatorResponse.i32();
-  if (coordinatorError) throw new KafkaError(coordinatorError, `FindCoordinator ${groupId}`);
-  const body = new Writer().string(groupId).i32(-1).string("").i64(-1n)
-    .array(topics, (writer, { topic, partitions }) =>
-      writer.string(topic).array(partitions, (partitionWriter, entry) =>
-        partitionWriter.i32(entry.partition).i64(entry.offset).string(entry.metadata || null)));
-  const response = await cluster.request(coordinator, 8, 2, body);
-  for (const topicResult of response.array((reader: Reader) => ({
-    topic: reader.string() ?? "",
-    partitions: reader.array((p) => ({ partition: p.i32(), error: p.i16() })),
-  }))) {
-    for (const partition of topicResult.partitions) {
-      if (partition.error) throw new KafkaError(partition.error, `${topicResult.topic}[${partition.partition}]`);
     }
   }
 }

@@ -610,15 +610,19 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     }
   }
 
+  /**
+   * Pause fetching. Entries may omit `partition` to pause every currently
+   * assigned partition of the topic.
+   */
   pause(partitions: TopicPartition[]): void {
     this.#open();
-    for (const partition of partitions) this.#paused.add(partitionKey(partition.topic, partition.partition));
+    for (const target of this.#expandPartitions(partitions)) this.#paused.add(partitionKey(target.topic, target.partition));
   }
 
   resume(partitions: TopicPartition[]): void {
     this.#open();
-    for (const partition of partitions) {
-      const key = partitionKey(partition.topic, partition.partition);
+    for (const target of this.#expandPartitions(partitions)) {
+      const key = partitionKey(target.topic, target.partition);
       this.#paused.delete(key);
       // Re-join the fetch session so the resumed partition is polled again.
       for (const session of this.#fetchSessions.values()) {
@@ -626,6 +630,13 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
         session.streaming.delete(key);
       }
     }
+  }
+
+  #expandPartitions(partitions: TopicPartition[]): Array<{ topic: string; partition: number }> {
+    return partitions.flatMap(({ topic, partition }) => {
+      if (partition !== undefined) return [{ topic, partition }];
+      return [...this.#assigned.values()].filter((assigned) => assigned.topic === topic).map(({ partition }) => ({ topic, partition }));
+    });
   }
 
   assignment(): TopicPartition[] {

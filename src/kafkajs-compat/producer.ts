@@ -1,12 +1,12 @@
 import { BunProducer } from "../bun/producer.ts";
-import { COMPRESSION_NAMES, PRODUCER_EVENTS } from "./constants.ts";
+import { COMPRESSION_NAMES, PRODUCER_EVENTS, CompressionTypes } from "./constants.ts";
 import { wrapError, KafkaJSNonRetriableError } from "./errors.ts";
-import { Emitter, type Logger } from "./logger.ts";
 import type { ClusterGetter } from "./config.ts";
+import { Emitter, Logger } from "./logger.ts";
 import { toBunPartitioner, toWireMessage, type KafkaJsSendRecord, type KafkaJsSendBatchRecord } from "./messages.ts";
 
 function producerOptions(options: Record<string, any>, logger: Logger) {
-  const compressionCode = Number(options.compression ?? 0);
+  const compressionCode = Number(options.compression ?? CompressionTypes.None);
   return {
     lingerMs: 5,
     compression: COMPRESSION_NAMES[compressionCode] ?? "none",
@@ -28,7 +28,7 @@ export class CompatProducer {
   #logger: Logger;
   #options: Record<string, any>;
   #emitter = new Emitter();
-  #producers = new Map<string, BunProducer>();
+  #producer?: BunProducer;
   #transaction?: BunProducer;
   #connected = false;
 
@@ -53,8 +53,10 @@ export class CompatProducer {
   }
 
   async disconnect(): Promise<void> {
-    for (const producer of this.#producers.values()) await producer.close().catch(() => {});
-    this.#producers.clear();
+    if (this.#producer) {
+      await this.#producer.close().catch(() => {});
+      this.#producer = undefined;
+    }
     if (this.#transaction) {
       await this.#transaction.close().catch(() => {});
       this.#transaction = undefined;
@@ -63,25 +65,22 @@ export class CompatProducer {
     this.#emitter.emit(PRODUCER_EVENTS.DISCONNECT);
   }
 
-  #underlying(compression?: number): BunProducer {
-    const name = COMPRESSION_NAMES[Number(compression ?? this.#options.compression ?? 0)] ?? "none";
-    let producer = this.#producers.get(name);
-    if (!producer) {
-      producer = new BunProducer(this.#getter().acquire(), producerOptions({ ...this.#options, compression: name }, this.#logger), this.#getter().release);
-      this.#producers.set(name, producer);
-    }
-    return producer;
+  /** Core accepts per-send compression, so one underlying producer covers every codec. */
+  #underlying(): BunProducer {
+    this.#producer ??= new BunProducer(this.#getter().acquire(), producerOptions(this.#options, this.#logger), this.#getter().release);
+    return this.#producer!;
   }
 
   async send({ topic, messages, acks, timeout, compression }: KafkaJsSendRecord):
     Promise<Array<{ topicName: string; partition: number; errorCode: number; baseOffset: string; logAppendTime: string }>> {
     try {
       if (!messages.length) return [];
-      const results = await this.#underlying(compression).send({
+      const results = await this.#underlying().send({
         topic,
         messages: messages.map(toWireMessage),
         acks: acksToWire(acks),
         timeoutMs: timeout,
+        compression: COMPRESSION_NAMES[Number(compression)] ?? undefined,
       });
       return results.map((result) => ({
         topicName: result.topic,
@@ -99,13 +98,15 @@ export class CompatProducer {
     Array<{ topicName: string; partition: number; errorCode: number; baseOffset: string; logAppendTime: string }>
   > {
     try {
-      const producer = this.#underlying(compression);
+      const producer = this.#underlying();
+      const compressionName = COMPRESSION_NAMES[Number(compression)] ?? undefined;
       const results = await Promise.all(topicMessages.filter((item) => item.messages.length).map((item) =>
         producer.send({
           topic: item.topic,
           messages: item.messages.map(toWireMessage),
           acks: acksToWire(acks),
           timeoutMs: timeout,
+          compression: compressionName,
         })));
       await producer.flush();
       return results.flat().map((result) => ({

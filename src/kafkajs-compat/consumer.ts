@@ -341,29 +341,25 @@ export class CompatConsumer {
     this.#underlying().seek({ topic, partition, offset: BigInt(offset) });
   }
 
-  /** kafkajs allows entries without `partitions`, meaning every assigned partition of the topic. */
+  /** Core expands topic-only entries; compat mirrors the result for paused(). */
+  pause(topicPartitions: Array<{ topic: string; partitions?: number[] }>): Array<{ topic: string; partitions: number[] }> {
+    for (const target of this.#resolvePartitions(topicPartitions)) this.#paused.add(`${target.topic}\u0000${target.partition}`);
+    this.#underlying().pause(topicPartitions);
+    return this.paused();
+  }
+
+  resume(topicPartitions: Array<{ topic: string; partitions?: number[] }>): Array<{ topic: string; partitions: number[] }> {
+    for (const target of this.#resolvePartitions(topicPartitions)) this.#paused.delete(`${target.topic}\u0000${target.partition}`);
+    this.#underlying().resume(topicPartitions);
+    return this.paused();
+  }
+
   #resolvePartitions(topicPartitions: Array<{ topic: string; partitions?: number[] }>): Array<{ topic: string; partition: number }> {
     const assigned = this.#underlying().assignment();
     return topicPartitions.flatMap(({ topic, partitions }) => {
       const forTopic = partitions ?? assigned.filter((entry) => entry.topic === topic).map((entry) => entry.partition);
       return forTopic.map((partition) => ({ topic, partition }));
     });
-  }
-
-  pause(topicPartitions: Array<{ topic: string; partitions?: number[] }>): Array<{ topic: string; partitions: number[] }> {
-    const targets = this.#resolvePartitions(topicPartitions);
-    if (!targets.length) return this.paused();
-    this.#underlying().pause(targets);
-    for (const target of targets) this.#paused.add(`${target.topic}\u0000${target.partition}`);
-    return this.paused();
-  }
-
-  resume(topicPartitions: Array<{ topic: string; partitions?: number[] }>): Array<{ topic: string; partitions: number[] }> {
-    const targets = this.#resolvePartitions(topicPartitions);
-    if (!targets.length) return this.paused();
-    this.#underlying().resume(targets);
-    for (const target of targets) this.#paused.delete(`${target.topic}\u0000${target.partition}`);
-    return this.paused();
   }
 
   paused(): Array<{ topic: string; partitions: number[] }> {

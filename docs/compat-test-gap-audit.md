@@ -115,9 +115,13 @@ test today.
 ### Admin
 
 - **describeGroups cross-broker tolerance**: Redpanda omits nullable
-  error_message where Apache writes null; compat handles both, but bun-kafka's
-  own suites have no Redpanda-shaped negative fixture. Add recorded-bytes
+  error_message where Apache writes null; core `BunAdmin.describeGroups` now
+  trial-parses both shapes (moved out of the compat layer), but there is no
+  Redpanda-shaped negative fixture in our suites. Add recorded-bytes
   regression fixtures (hex frames) so broker quirks can't regress silently.
+- **Group offset administration**: `groupOffsets`, `setGroupOffsets`,
+  `resetGroupOffsets`, `topicOffsets`, and `offsetByTimestamp` now live on
+  core `BunAdmin`; no dedicated feature tests cover them yet.
 - **IncrementalAlterConfigs (KIP-248)**: not implemented, not tested.
 - **ListPartitionReassignments / AlterPartitionReassignments (KIP-455)**:
   absent from impl and suites.

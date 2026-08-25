@@ -36,6 +36,8 @@ export interface ProducerSend {
   messages: readonly ProducerMessage[];
   acks?: 0 | 1 | "all";
   timeoutMs?: number;
+  /** Overrides the producer-level compression for this request. */
+  compression?: "none" | "gzip" | "snappy" | "lz4" | "zstd";
 }
 
 export interface ProducerBatch {
@@ -316,10 +318,11 @@ export class BunProducer {
         await this.initProducerId();
       }
 
-      const configs = Map.groupBy(pending, ({ input }) => `${input.acks ?? 1}\0${input.timeoutMs ?? 30_000}`);
+      const configs = Map.groupBy(pending, ({ input }) => `${input.acks ?? 1}\0${input.timeoutMs ?? 30_000}\0${input.compression ?? this.#options.compression}`);
       for (const group of configs.values()) {
         const topics = Map.groupBy(group, ({ input }) => input.topic);
         const first = group[0]!.input;
+        const compression = first.compression ?? this.#options.compression;
         let results: ProduceResult[] | undefined;
         let lastError: unknown;
         let routedPartitions: PartitionRecords[] = [];
@@ -335,11 +338,11 @@ export class BunProducer {
               const leaders = Map.groupBy(routedPartitions, (partition) => partition.leader);
               await Promise.all([...leaders].map(([leader, leaderPartitions]) =>
                 this.#cluster.fireAndForget(leader, API_PRODUCE, 3,
-                  this.#produceRequestBody(leaderPartitions, 0, first.timeoutMs ?? 30_000))));
+                  this.#produceRequestBody(leaderPartitions, 0, first.timeoutMs ?? 30_000, compression))));
               results = routedPartitions.map((group) => ({ topic: group.topic, partition: group.partition, baseOffset: -1n, logAppendTime: -1n }));
             } else {
               const acks = this.#options.idempotent || this.#transactionalId || first.acks === "all" ? -1 : 1;
-              results = await this.#produce(routedPartitions, acks, first.timeoutMs ?? 30_000);
+              results = await this.#produce(routedPartitions, acks, first.timeoutMs ?? 30_000, compression);
             }
             break;
           } catch (error) {
@@ -417,7 +420,7 @@ export class BunProducer {
     return [...partitions.values()];
   }
 
-  #produceRequestBody(leaderPartitions: PartitionRecords[], acks: number, timeoutMs: number): Writer {
+  #produceRequestBody(leaderPartitions: PartitionRecords[], acks: number, timeoutMs: number, compression = this.#options.compression): Writer {
     const topics = Map.groupBy(leaderPartitions, (partition) => partition.topic);
     // Produce v3+: brokers reject transactional batches whose request omits the
     // matching transactional_id, so it must ride along on every produce.
@@ -430,10 +433,10 @@ export class BunProducer {
     });
   }
 
-  async #produce(partitions: PartitionRecords[], acks: number, timeoutMs: number): Promise<ProduceResult[]> {
+  async #produce(partitions: PartitionRecords[], acks: number, timeoutMs: number, compression?: ProducerOptions["compression"]): Promise<ProduceResult[]> {
     const leaders = Map.groupBy(partitions, (partition) => partition.leader);
     const responses = await Promise.all([...leaders].map(async ([leader, leaderPartitions]) => {
-      const body = this.#produceRequestBody(leaderPartitions, acks, timeoutMs);
+      const body = this.#produceRequestBody(leaderPartitions, acks, timeoutMs, compression);
       const response = await this.#cluster.request(leader, API_PRODUCE, 3, body, timeoutMs, false);
       const results = response.array((topicReader) => {
         const topic = topicReader.string() ?? "";
