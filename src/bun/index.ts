@@ -1,37 +1,45 @@
-export {
-  Kafka,
-  BunProducer,
-  BunConsumer,
-  BunAdmin,
-} from "./client.ts";
+export { Kafka } from "./client.ts";
+export { BunProducer } from "./producer.ts";
+export { BunConsumer } from "./consumer.ts";
+export { BunAdmin } from "./admin.ts";
 export type {
   KafkaOptions,
   KafkaEvent,
+  Logger,
+  ClusterStats,
+  ConnectionStats,
+  BrokerHealth,
+  HealthReport,
+  RetryOptions,
+  CommittedOffset,
+} from "./shared.ts";
+export type {
+  ProducerMessage,
+  ProducerOptions,
+  ProducerSend,
+  ProducerBatch,
+  ProduceResult,
+} from "./producer.ts";
+export type {
+  ConsumerOptions,
+  ConsumerSubscribe,
+  ConsumerAssignment,
+  FetchOptions,
+} from "./consumer.ts";
+export type {
   GroupDescription,
   GroupMemberDescription,
   DeleteRecordsResult,
   AclBinding,
   AclFilter,
   AclListing,
-  RetryOptions,
-  ProducerMessage,
-  ProducerOptions,
-  ProducerSend,
-  ProducerBatch,
-  ProduceResult,
-  ConsumerOptions,
-  ConsumerSubscribe,
-  ConsumerAssignment,
-  CommittedOffset,
-  FetchOptions,
   CreateTopicInput,
   TopicResult,
   CreatePartitionsInput,
   ConfigResource,
-} from "./client.ts";
+} from "./admin.ts";
 export type { BunKafkaSasl, BunKafkaTls } from "./connection.ts";
 export { KafkaError, kafkaErrorName, kafkaErrorNames } from "../errors.ts";
-export type { Logger, ClusterStats, ConnectionStats, HealthReport, BrokerHealth } from "./client.ts";
 export type {
   AbortedTransaction,
   Bytes,
