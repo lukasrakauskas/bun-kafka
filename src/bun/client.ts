@@ -1,4 +1,4 @@
-import { KafkaError } from "../errors.ts";
+import { KafkaError, kafkaErrorName } from "../errors.ts";
 import type { Bytes, ClusterMetadata, ConsumedMessage, KafkaMessage, MessageHeaders, TopicPartition, Watermarks } from "../types.ts";
 import { Connection, type BunKafkaSasl, type BunKafkaTls, type ConnectionOptions } from "./connection.ts";
 import {
@@ -37,23 +37,12 @@ const API_DESCRIBE_ACLS = 29;
 const API_DELETE_ACLS = 31;
 const API_DELETE_GROUPS = 42;
 
-const errorNames: Record<number, string> = {
-  1: "Offset out of range",
-  2: "Corrupt message",
-  3: "Unknown topic or partition",
-  5: "Leader not available",
-  6: "Not leader for partition",
-  7: "Request timed out",
-  10: "Message too large",
-  29: "Topic authorization failed",
-  30: "Group authorization failed",
-  35: "Unsupported version",
-};
-const retriableErrors = new Set([3, 5, 6, 7, 13, 14, 15, 19, 20, 41, 56]);
+const retriableErrors = new Set([1, 2, 3, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 19, 20, 25, 27, 32, 33, 38, 39, 41, 44, 45, 47, 49, 56, 70, 71, 74, 75, 78, 82, 86, 88, 89]);
 
 function kafkaError(code: number, context: string): KafkaError {
-  return new KafkaError(code, `${context}: ${errorNames[code] ?? `Kafka error ${code}`}`, {
+  return new KafkaError(code, `${context}: ${kafkaErrorName(code)}`, {
     retriable: retriableErrors.has(code),
+    fatal: code === 58 || code === 34,
   });
 }
 
@@ -81,7 +70,43 @@ export interface RetryOptions {
 
 export type KafkaEvent =
   | { type: "retry"; apiKey: number; attempt: number; delayMs: number; error: unknown }
-  | { type: "throttle"; apiKey: number; durationMs: number };
+  | { type: "throttle"; apiKey: number; durationMs: number }
+  | { type: "stats"; stats: ClusterStats };
+
+export interface Logger {
+  debug(message: string): void;
+  info(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
+}
+
+export interface ConnectionStats {
+  requests: number;
+  bytesSent: number;
+  bytesReceived: number;
+}
+
+export interface BrokerHealth {
+  address: string;
+  brokerId?: number;
+  ok: boolean;
+  latencyMs: number;
+  error?: unknown;
+}
+
+export interface HealthReport {
+  brokers: BrokerHealth[];
+}
+
+export interface ClusterStats extends Record<string, unknown> {
+  connections: number;
+  requests: number;
+  bytesSent: number;
+  bytesReceived: number;
+  retries: number;
+  throttles: number;
+  throttleTimeMs: number;
+}
 
 export interface KafkaOptions {
   brokers: string[];
@@ -93,6 +118,10 @@ export interface KafkaOptions {
   maxResponseBytes?: number;
   retry?: RetryOptions;
   onEvent?: (event: KafkaEvent) => void;
+  /** Emit a stats event on this interval (ms). */
+  statsIntervalMs?: number;
+  /** Optional logging hooks for operational diagnostics. */
+  logger?: Partial<Logger>;
 }
 
 type TopicMetadata = ClusterMetadata["topics"][number];
@@ -102,6 +131,11 @@ export class Cluster {
   #options: ConnectionOptions;
   #retry: Required<RetryOptions>;
   #onEvent?: (event: KafkaEvent) => void;
+  #logger?: Partial<Logger>;
+  #retries = 0;
+  #throttles = 0;
+  #throttleTimeMs = 0;
+  #statsTimer?: ReturnType<typeof setInterval>;
   #connections = new Map<string, Connection>();
   #brokers = new Map<number, string>();
   #controller?: number;
@@ -131,9 +165,13 @@ export class Cluster {
       || (sasl.mechanism === "oauthbearer" ? !sasl.token : !sasl.username || !sasl.password))) {
       throw new TypeError("Invalid Kafka SASL options");
     }
+    if (options.statsIntervalMs !== undefined && (!Number.isSafeInteger(options.statsIntervalMs) || options.statsIntervalMs < 1)) {
+      throw new RangeError("Invalid Kafka statsIntervalMs");
+    }
     this.#bootstrap = [...options.brokers];
     this.#retry = retry;
     this.#onEvent = options.onEvent;
+    this.#logger = options.logger ?? {};
     this.#options = {
       clientId: options.clientId ?? "bun-kafka",
       requestTimeoutMs,
@@ -204,7 +242,9 @@ export class Cluster {
       } catch (error) {
         lastError = error;
         if (!(error instanceof KafkaError && error.retriable) || attempt === maxRetries) throw error;
+        this.#retries++;
         const delay = retryDelay(this.#retry, attempt);
+        this.log("warn", `retrying ${apiKey} attempt ${attempt + 1} in ${delay}ms: ${String(error)}`);
         this.event({ type: "retry", apiKey, attempt: attempt + 1, delayMs: delay, error });
         if (delay) await Bun.sleep(delay);
       }
@@ -238,11 +278,78 @@ export class Cluster {
     try { this.#onEvent?.(event); } catch { /* Observability must not break requests. */ }
   }
 
-  throttle(apiKey: number, durationMs: number): void {
-    if (durationMs > 0) this.event({ type: "throttle", apiKey, durationMs });
+  log(level: keyof Logger, message: string): void {
+    try { this.#logger?.[level]?.(message); } catch { /* Logging must not break requests. */ }
   }
 
+  throttle(apiKey: number, durationMs: number): void {
+    if (durationMs > 0) {
+      this.#throttles++;
+      this.#throttleTimeMs += durationMs;
+      this.log("debug", `broker throttled ${apiKey} by ${durationMs}ms`);
+      this.event({ type: "throttle", apiKey, durationMs });
+    }
+  }
+
+  /** Aggregate counters across all live broker connections. */
+  stats(): ClusterStats {
+    let requests = 0;
+    let bytesSent = 0;
+    let bytesReceived = 0;
+    for (const connection of this.#connections.values()) {
+      const one = connection.stats;
+      requests += one.requests;
+      bytesSent += one.bytesSent;
+      bytesReceived += one.bytesReceived;
+    }
+    return {
+      connections: this.#connections.size,
+      requests: requests + this.#retries,
+      bytesSent,
+      bytesReceived,
+      retries: this.#retries,
+      throttles: this.#throttles,
+      throttleTimeMs: this.#throttleTimeMs,
+    };
+  }
+
+  /** Start emitting periodic stats events. */
+  trackStats(intervalMs: number): void {
+    if (!Number.isSafeInteger(intervalMs) || intervalMs < 1) throw new RangeError("Invalid stats interval");
+    this.stopTrackingStats();
+    this.#statsTimer = setInterval(() => this.event({ type: "stats", stats: this.stats() }), intervalMs);
+    this.#statsTimer.unref?.();
+  }
+
+  stopTrackingStats(): void {
+    if (this.#statsTimer) clearInterval(this.#statsTimer);
+    this.#statsTimer = undefined;
+  }
+
+  /**
+   * Ping every known broker with an ApiVersions request and report latency.
+   */
+  async healthCheck(timeoutMs = 5_000): Promise<HealthReport> {
+    const targets = new Map<string, number | undefined>();
+    for (const [id, addr] of this.#brokers) targets.set(addr, id);
+    for (const addr of this.#bootstrap) if (!targets.has(addr)) targets.set(addr, undefined);
+    const checks = await Promise.all([...targets].map(async ([addr, brokerId]) => {
+      const startedAt = performance.now();
+      try {
+        await this.#connection(addr).request(18, 0, new Writer(), timeoutMs);
+        return { address: addr, brokerId, ok: true as const, latencyMs: Math.round(performance.now() - startedAt) };
+      } catch (error) {
+        this.log("warn", `health check failed for ${addr}: ${String(error)}`);
+        return { address: addr, brokerId, ok: false as const, latencyMs: Math.round(performance.now() - startedAt), error };
+      }
+    }));
+    return { brokers: checks };
+  }
+
+  bumpRetries(n = 1): void { this.#retries += n; }
+
   close(): void {
+    this.stopTrackingStats();
     for (const connection of this.#connections.values()) connection.close();
     this.#connections.clear();
   }
@@ -427,7 +534,9 @@ export class BunProducer {
           } catch (error) {
             lastError = error;
             if (!(error instanceof KafkaError && error.retriable) || attempt === this.#cluster.retryOptions.maxRetries) throw error;
+            this.#cluster.bumpRetries();
             const delay = retryDelay(this.#cluster.retryOptions, attempt);
+            this.#cluster.log("warn", `retrying produce attempt ${attempt + 1} in ${delay}ms: ${String(error)}`);
             this.#cluster.event({ type: "retry", apiKey: API_PRODUCE, attempt: attempt + 1, delayMs: delay, error });
             if (delay) await Bun.sleep(delay);
           }
@@ -888,7 +997,9 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
           const partition = metadata.partitions.find((item) => item.id === assigned.partition);
           if (partition) assigned.leader = partition.leader;
         }
+        this.#cluster.bumpRetries();
         const delay = retryDelay(this.#cluster.retryOptions, attempt);
+        this.#cluster.log("warn", `retrying fetch attempt ${attempt + 1} in ${delay}ms: ${String(error)}`);
         this.#cluster.event({ type: "retry", apiKey: API_FETCH, attempt: attempt + 1, delayMs: delay, error });
         if (delay) await Bun.sleep(delay);
       }
@@ -1398,6 +1509,17 @@ export class Kafka {
 
   constructor(options: KafkaOptions) {
     this.#cluster = new Cluster({ ...options, brokers: [...options.brokers] });
+    if (options.statsIntervalMs !== undefined) this.#cluster.trackStats(options.statsIntervalMs);
+  }
+
+  /** Aggregate client counters (requests, bytes, retries, throttles). */
+  stats(): ClusterStats {
+    return this.#cluster.stats();
+  }
+
+  /** Ping all known brokers and report per-broker latency. */
+  healthCheck(timeoutMs?: number): Promise<HealthReport> {
+    return this.#cluster.healthCheck(timeoutMs ?? Math.min(this.#cluster.requestTimeoutMs, 5_000));
   }
 
   producer(options: ProducerOptions = {}): BunProducer {

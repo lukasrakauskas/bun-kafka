@@ -92,6 +92,9 @@ export class Connection {
   #frame?: Uint8Array;
   #frameOffset = 0;
   #closed = false;
+  #requests = 0;
+  #bytesSent = 0;
+  #bytesReceived = 0;
   #authenticated = false;
   #authenticating?: Promise<void>;
   #versions?: Map<number, { min: number; max: number }>;
@@ -119,9 +122,16 @@ export class Connection {
     const frame = new Writer();
     frame.i32(0).i16(apiKey).i16(apiVersion).i32(correlation).string(this.#options.clientId).raw(body.result());
     frame.patchI32(0, frame.length - 4);
+    this.#requests++;
+    this.#bytesSent += frame.length;
     if (socket.write(frame.result()) < 0) {
       throw new KafkaError(-1, `Could not write to Kafka broker ${this.address}`, { retriable: true });
     }
+  }
+
+  /** Counters for statistics reporting. */
+  get stats(): { requests: number; bytesSent: number; bytesReceived: number } {
+    return { requests: this.#requests, bytesSent: this.#bytesSent, bytesReceived: this.#bytesReceived };
   }
 
   async #prepare(socket: Bun.Socket, apiKey: number, apiVersion: number, timeoutMs: number): Promise<void> {
@@ -216,6 +226,8 @@ export class Connection {
     const frame = new Writer();
     frame.i32(0).i16(apiKey).i16(apiVersion).i32(correlation).string(this.#options.clientId).raw(body.result());
     frame.patchI32(0, frame.length - 4);
+    this.#requests++;
+    this.#bytesSent += frame.length;
 
     return new Promise<Reader>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -301,6 +313,7 @@ export class Connection {
         const frame = this.#frame;
         this.#frame = undefined;
         this.#frameOffset = 0;
+        this.#bytesReceived += frame.byteLength;
         const correlation = new DataView(frame.buffer, frame.byteOffset, 4).getInt32(0);
         const pending = this.#pending.get(correlation);
         if (pending) {

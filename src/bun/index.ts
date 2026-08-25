@@ -30,7 +30,8 @@ export type {
   ConfigResource,
 } from "./client.ts";
 export type { BunKafkaSasl, BunKafkaTls } from "./connection.ts";
-export { KafkaError } from "../errors.ts";
+export { KafkaError, kafkaErrorName, kafkaErrorNames } from "../errors.ts";
+export type { Logger, ClusterStats, ConnectionStats, HealthReport, BrokerHealth } from "./client.ts";
 export type {
   AbortedTransaction,
   Bytes,
