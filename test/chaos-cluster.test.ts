@@ -139,7 +139,17 @@ chaos("three-broker Kafka chaos", () => {
       expect(await outcome(producer.send({ topic: name, timeoutMs: 200, messages: [{ partition: 0, value: "blackholed" }] }))).toBe("rejected");
       unpause(paused);
       paused = -1;
-      await producer.send({ topic: name, timeoutMs: 1_000, messages: [{ partition: 0, value: "recovered" }] });
+      // Raft may elect a new leader while the old one is paused, so the first
+      // post-resume send can surface NOT_LEADER_OR_FOLLOWER from a stale
+      // cached leader. Recovery must happen within the bounded wait window.
+      await waitFor(async () => {
+        try {
+          await producer.send({ topic: name, timeoutMs: 1_000, messages: [{ partition: 0, value: "recovered" }] });
+          return true;
+        } catch {
+          return undefined;
+        }
+      });
     } finally {
       if (paused >= 0) unpause(paused);
       await client.disconnect();

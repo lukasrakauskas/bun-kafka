@@ -2,7 +2,7 @@
 
 All features listed in docs/feature-completeness.md are implemented and tested.
 
-## Completed (commits e46f149..ae0fa53)
+## Completed (commits e46f149..HEAD)
 
 - OffsetCommit v2 INT64 retention / no-v2-throttle fix
 - Transactions end-to-end: FindCoordinator v2 (key-first wire order), InitProducerId,
@@ -16,6 +16,20 @@ All features listed in docs/feature-completeness.md are implemented and tested.
 - Cooperative-sticky assignor (KIP-429): subscription v1 owned partitions, sticky leader
   assignment up to fair share, retained in-memory positions across rebalances.
 - Docs updated: README matrix + docs/feature-completeness.md.
+
+## Qualification evidence (2026-08-25)
+
+- Three-broker chaos suite passes end to end (18 pass / 0 fail), including the
+  blackholed-leader pause/resume scenario that needed a bounded recovery window after a
+  raft leader election during the pause. Artifacts in out/chaos/.
+- Long-running soak harness added at scripts/soak.ts (`bun run test:soak`): samples every
+  required metric per docs/performance-validation.md every 10 s, injects bursts, validates a
+  per-partition sequence oracle, evaluates release gates, and writes JSON+MD artifacts to
+  out/soak/. BunProducer exposes `queuedMessages` for the queue-depth gate.
+- Recorded passing soak: 30 min at 1,000 msg/s of 1 KiB acks=all across 6 partitions with
+  1.5x bursts — 1,959,750 offered = acknowledged = consumed, zero failures/duplicates/
+  order violations/missing, RSS stable (+7.5 MiB range), no throughput decay. The 24-hour
+  and 72-hour release soaks remain outstanding by design.
 
 ## Broker notes
 

@@ -153,7 +153,7 @@ The fixed API versions require Kafka 0.11 or newer. Use a current Kafka or Redpa
 - [Broker failure and chaos testing](docs/chaos-testing.md)
 - [Kafka feature completeness and client comparison](docs/feature-completeness.md)
 
-The native client has short-run benchmark and integration evidence. It does not yet have the soak and chaos evidence required by these release gates.
+The native client has short-run benchmark evidence, a passing three-broker chaos qualification (`out/chaos/`), and a passing 30-minute soak run (`out/soak/`). The 24-hour release soak gates defined in the performance validation doc remain outstanding.
 
 ## Test
 
@@ -162,9 +162,14 @@ bun test test/bun-native.test.ts
 KAFKA_BROKERS=127.0.0.1:9092 bun test test/bun-integration.test.ts
 bun run test:chaos:mock
 bun run test:chaos
+bun run test:soak
 ```
 
 The unit test includes a Bun TCP mock broker. The integration test reuses the producer, metadata, record, and consumer acceptance cases against a real broker.
+
+## Soak
+
+`SOAK_DURATION_S=1800 SOAK_RATE=1000 bun run test:soak` runs one long-lived Bun process that produces at a fixed offered rate, drains with a consumer, samples latency/memory/socket/CPU metrics every 10 seconds, injects periodic bursts, validates per-partition sequence integrity, evaluates release-gate checks, and writes JSON and Markdown artifacts to `out/soak/`. See [performance validation](docs/performance-validation.md) for the full gate definitions.
 
 ## Benchmark
 

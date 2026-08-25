@@ -515,6 +515,11 @@ export class BunProducer {
     return (await Promise.all(input.topicMessages.map((batch) => this.send(batch)))).flat();
   }
 
+  /** Messages queued in memory that have not been acknowledged yet. */
+  get queuedMessages(): number {
+    return this.#queuedMessages;
+  }
+
   async flush(): Promise<void> {
     while (this.#flushing || this.#pending.length) {
       if (this.#flushing) {

@@ -182,8 +182,8 @@ Each connection uses ApiVersions to verify that the broker supports the fixed re
 | OpenTelemetry hooks | No | Use the logging hooks to bridge |
 | Broker throttle event | Yes | Emitted through `KafkaOptions.onEvent` |
 | Health check API | Yes | `healthCheck()` pings every broker via ApiVersions and reports latency/errors |
-| Performance soak evidence | No | Short benchmark exists; see performance validation plan |
-| Chaos qualification | Partial | Deterministic mock chaos suite passes; three-broker chaos is planned |
+| Performance soak harness and evidence | Partial | `bun run test:soak` records all required measurements; a passing 30-minute run is recorded in `out/soak/`. The 24-hour release soak remains outstanding |
+| Chaos qualification | Yes | Deterministic mock suite plus three-broker Docker chaos pass; results in `out/chaos/` |
 
 ## Comparison with other clients
 
@@ -255,7 +255,7 @@ Required features:
 - Chaos Gate A and Gate B completion
 - Twenty-four-hour performance soak
 
-Status: implemented except soak duration.
+Status: implemented; Gates A and B pass on the deterministic and three-broker suites. The soak duration beyond the recorded 30-minute run remains.
 
 ### Milestone 2: standard service client
 
@@ -291,7 +291,7 @@ Status: complete except tracing hooks beyond the logging bridge.
 |---|---|
 | Narrow manual produce/consume feature set | Implemented |
 | Short-run speed | Competitive in the recorded benchmark |
-| Long-run performance proof | Not complete |
-| Broker-failure proof | Partial (deterministic chaos suite) |
+| Long-run performance proof | Short soak passes all applicable gates (`out/soak/`); 24-hour and 72-hour soaks remain |
+| Broker-failure proof | Three-broker chaos suite passes (`out/chaos/`) |
 | General Kafka feature completeness | Complete for the supported API surface above |
 | Zero-dependency Bun-native goal | Met |

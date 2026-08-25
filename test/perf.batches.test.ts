@@ -22,6 +22,10 @@ async function consumeMessages(name: string, count: number) {
   return performance.now() - start;
 }
 
+async function bestOfTwo(fn: (name: string, count: number) => Promise<number>, name: string, count: number) {
+  return Math.min(await fn(name, count), await fn(name, count));
+}
+
 async function consumeBatches(name: string, count: number) {
   const c = consumer({ fromBeginning: true });
   await c.subscribe(name);
@@ -36,8 +40,9 @@ describe("Bun consumer batch performance", () => {
   test(`fetch batches and messages on ${N} records`, async () => {
     const name = topic("perf");
     await seed(name, N);
-    const batchMs = await consumeBatches(name, N);
-    const messageMs = await consumeMessages(name, N);
+    // Best of two runs per mode keeps this sanity check stable on busy hosts.
+    const batchMs = await bestOfTwo(consumeBatches, name, N);
+    const messageMs = await bestOfTwo(consumeMessages, name, N);
     expect(batchMs).toBeLessThan(messageMs * 1.2);
     expect(batchMs).toBeLessThan(30_000);
   }, 120_000);

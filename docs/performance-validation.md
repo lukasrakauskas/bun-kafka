@@ -2,11 +2,11 @@
 
 ## Status
 
-**Current status: benchmarked, but not soak-proven.**
+**Current status: benchmarked, short soak qualified, not 24-hour soak-proven.**
 
-The repository has short hyperfine tests and a real-broker integration test. These tests show that the client can process the measured load. They do not prove stable performance for a long-running service.
+The repository has short hyperfine tests and a real-broker integration test, plus a long-running soak harness (`bun run test:soak`, implemented in `scripts/soak.ts`). The harness runs one Bun process for the configured duration, produces at a fixed offered rate with periodic bursts, drains with a consumer, samples every metric listed under [required measurements](#required-measurements) each interval, validates a per-partition sequence oracle (order, duplicates, missing records), evaluates automated release gates, and writes JSON and Markdown artifacts to `out/soak/`.
 
-Do not use the term **performance-proven** until all release gates in this document pass on the target deployment platform.
+A recorded short soak passes all gates that apply to its duration. The 24-hour and 72-hour release soaks defined below remain outstanding before any performance-proven claim.
 
 ## Current baseline
 
@@ -227,7 +227,44 @@ The long-running soak harness must record these values at least every 10 seconds
 - CPU use
 - Open file descriptors and sockets
 
-The current repository does not have this long-running metrics harness. Retry and broker-throttle events are public, but producer-queue, reconnect, and request counters are not. Add the harness and the remaining diagnostics needed by these gates before making a performance-proven claim.
+The harness samples these values at least every `SOAK_SAMPLE_INTERVAL_S` (default 10) seconds:
+
+- Offered, accepted, acknowledged, and failed producer messages
+- Produced bytes per second
+- Consumed messages and bytes per second
+- Producer latency p50, p95, p99, and maximum
+- Fetch latency p50, p95, p99, and maximum
+- Consumer lag (total across assigned partitions)
+- Pending sends and queued producer messages (`producer.queuedMessages`)
+- Active broker connections
+- Request totals, retry counts, reconnect-triggering failures, and throttle counts
+- Process resident memory
+- JavaScript heap use
+- CPU use
+- Open file descriptors
+
+## Recorded qualification results
+
+### Soak: 30-minute run (2026-08-25)
+
+Environment: Bun 1.4.0, Linux x64, 4 CPUs, single-node Redpanda dev container, plaintext, commit `72b01a4` plus this harness.
+
+| Measurement | Result |
+|---|---:|
+| Duration | 1,800 s |
+| Workload | 1 KiB values, 6 partitions, acks=all, 1,000 msg/s base rate, 1.5x/60 s bursts every 300 s |
+| Offered / acknowledged / consumed | 1,959,750 / 1,959,750 / 1,959,750 |
+| Failed acks / duplicates / order violations / missing | 0 / 0 / 0 / 0 |
+| Send latency p50/p95/p99/max | 10 / 20 / 20 / ~20 ms |
+| Fetch latency p50/p95/p99/max | 50 / 100 / 100 / 252 ms |
+| RSS start -> end, post-warmup range | 50 MiB -> 54 MiB, 7.5 MiB range |
+| CPU use | ~10-13% |
+
+All gates applicable to the run duration passed: zero failed acknowledgements, zero duplicates, per-partition ordering intact, zero missing records after drain, no unhandled rejections, memory growth below 64 MiB, throughput decay below 5% (first quarter 1,025 msg/s vs final quarter 1,093 msg/s), p95/p99 drift within limits, and lag recovery after every burst.
+
+### Chaos: three-broker suite (2026-08-25)
+
+Commit `72b01a4` plus the blackhole-recovery fix. 18 pass / 0 fail across the deterministic mock suite, TLS chaos, and three-broker Docker scenarios (leader kill, blackholed leader pause/resume, rolling restart, leader transfer, topic deletion/recreation, netem delay and loss profiles), with 1,000 socket-leak fault cycles. Raw JSON and Markdown artifacts are written to `out/chaos/` on each run; `bun run test:chaos` reproduces them.
 
 ## Result artifact
 

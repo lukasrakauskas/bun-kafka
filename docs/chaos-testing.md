@@ -2,9 +2,9 @@
 
 ## Status
 
-**Current status: the chaos suite is implemented, but release qualification results are not recorded.**
+**Current status: the full chaos suite passes and results are recorded in `out/chaos/`.**
 
-Run the deterministic mock-broker suite with `bun run test:chaos:mock`. Run the full three-broker Docker suite, including `tc netem` profiles, with `bun run test:chaos`. Set `CHAOS_NETEM=0` to omit those profiles or `CHAOS_TLS_EXTERNAL=1` to include the external expired-certificate check. Results are written to `out/chaos/`.
+Run the deterministic mock-broker suite with `bun run test:chaos:mock`. Run the full three-broker Docker suite, including `tc netem` profiles, with `bun run test:chaos` (requires the host `fs.aio-max-nr` sysctl to be at least 66563 for the Redpanda containers). Set `CHAOS_NETEM=0` to omit those profiles or `CHAOS_TLS_EXTERNAL=1` to include the external expired-certificate check. Results are written to `out/chaos/`.
 
 The client reconnects a closed TCP connection when a later request uses that connection. Active requests reject when the socket closes. Retriable Produce and Fetch failures use bounded retries and refresh leader metadata. Set producer `idempotent: true` to attach broker-managed sequence state; the default non-idempotent mode can create duplicates after a lost response.
 
