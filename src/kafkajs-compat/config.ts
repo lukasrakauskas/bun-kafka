@@ -6,7 +6,13 @@ export interface KafkaConfig {
   brokers: string[] | (() => string[] | Promise<string[]>);
   ssl?: boolean | Record<string, unknown>;
   sasl?: Record<string, any>;
-  retry?: { maxRetryTime?: number; initialRetryTime?: number; factor?: number; multiplier?: number; retries?: number };
+  retry?: {
+    maxRetryTime?: number;
+    initialRetryTime?: number;
+    factor?: number;
+    multiplier?: number;
+    retries?: number;
+  };
   logLevel?: number;
   logCreator?: (entry: import("./logger.ts").LoggerEntry) => void;
   connectionTimeout?: number;
@@ -24,11 +30,20 @@ export interface MappedConfig {
   retry: { maxRetries: number; initialBackoffMs: number; maxBackoffMs: number };
 }
 
-export function mapConfig(config: KafkaConfig, brokers: string[]): ConstructorParameters<typeof Cluster>[0] {
+export function mapConfig(
+  config: KafkaConfig,
+  brokers: string[],
+): ConstructorParameters<typeof Cluster>[0] {
   const saslConfig = config.sasl;
-  if (saslConfig?.mechanism !== undefined
-    && !["plain", "scram-sha-256", "scram-sha-512", "oauthbearer"].includes(String(saslConfig.mechanism))) {
-    throw new KafkaJSNonRetriableError(`SASL mechanism ${saslConfig.mechanism} is not supported by bun-kafka`);
+  if (
+    saslConfig?.mechanism !== undefined &&
+    !["plain", "scram-sha-256", "scram-sha-512", "oauthbearer"].includes(
+      String(saslConfig.mechanism),
+    )
+  ) {
+    throw new KafkaJSNonRetriableError(
+      `SASL mechanism ${saslConfig.mechanism} is not supported by bun-kafka`,
+    );
   }
   let token: unknown = saslConfig?.oauthBearerToken ?? saslConfig?.token;
   if (!token && typeof saslConfig?.oauthBearerProvider === "function") {
@@ -62,7 +77,7 @@ export function mapConfig(config: KafkaConfig, brokers: string[]): ConstructorPa
 }
 
 /** @confluentinc/kafka-javascript nests real options under `kafkaJS`; accept both shapes. */
-export function unwrapKafkaJs<T>(options: T & { kafkaJS?: T } | undefined): T {
+export function unwrapKafkaJs<T>(options: (T & { kafkaJS?: T }) | undefined): T {
   return ((options as { kafkaJS?: T })?.kafkaJS ?? options) as T;
 }
 
@@ -87,7 +102,10 @@ export class ClusterHub {
 
   resolve(): Promise<MappedConfig & { brokers: string[] }> {
     this.#mapped ??= (async () => {
-      const brokers = typeof this.config.brokers === "function" ? await this.config.brokers() : this.config.brokers;
+      const brokers =
+        typeof this.config.brokers === "function"
+          ? await this.config.brokers()
+          : this.config.brokers;
       return { ...(mapConfig(this.config, brokers) as MappedConfig), brokers };
     })();
     return this.#mapped;
@@ -100,8 +118,14 @@ export class ClusterHub {
 
   sync(): Cluster {
     if (!this.#cluster) {
-      const mapped = typeof this.config.brokers === "function" ? undefined : mapConfig(this.config, this.config.brokers);
-      if (!mapped) throw new KafkaJSNonRetriableError("Broker list is resolving asynchronously; await an async method first");
+      const mapped =
+        typeof this.config.brokers === "function"
+          ? undefined
+          : mapConfig(this.config, this.config.brokers);
+      if (!mapped)
+        throw new KafkaJSNonRetriableError(
+          "Broker list is resolving asynchronously; await an async method first",
+        );
       this.#cluster = new Cluster(mapped);
     }
     return this.#cluster;

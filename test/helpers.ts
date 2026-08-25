@@ -41,10 +41,13 @@ export async function waitFor<T>(
 export async function waitTopic(name: string, timeoutMs = 15_000) {
   const client = admin();
   try {
-    return await waitFor(async () => {
-      const metadata = await client.metadata([name]);
-      return metadata.topics.find((item) => item.name === name && item.partitions.length) ?? null;
-    }, { timeoutMs, intervalMs: 150 });
+    return await waitFor(
+      async () => {
+        const metadata = await client.metadata([name]);
+        return metadata.topics.find((item) => item.name === name && item.partitions.length) ?? null;
+      },
+      { timeoutMs, intervalMs: 150 },
+    );
   } finally {
     await client.close();
   }

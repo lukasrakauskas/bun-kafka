@@ -16,13 +16,35 @@ describe("ACLs (real broker)", () => {
         permissionType: 3, // ALLOW
       };
       await a.createAcls([binding]);
-      const listed = await a.describeAcls({ resourceType: 2, resourceName, operation: 3, permissionType: 3 });
+      const listed = await a.describeAcls({
+        resourceType: 2,
+        resourceName,
+        operation: 3,
+        permissionType: 3,
+      });
       expect(listed.error).toBe(0);
-      expect(listed.acls.some((acl) => acl.principal === "User:bun-kafka-test" && acl.resourceName === resourceName)).toBe(true);
-      const removed = await a.deleteAcls([{ resourceType: 2, resourceName, principal: "User:bun-kafka-test", operation: 3, permissionType: 3 }]);
+      expect(
+        listed.acls.some(
+          (acl) => acl.principal === "User:bun-kafka-test" && acl.resourceName === resourceName,
+        ),
+      ).toBe(true);
+      const removed = await a.deleteAcls([
+        {
+          resourceType: 2,
+          resourceName,
+          principal: "User:bun-kafka-test",
+          operation: 3,
+          permissionType: 3,
+        },
+      ]);
       expect(removed[0]?.error).toBe(0);
       expect(removed[0]?.acls.length).toBeGreaterThanOrEqual(1);
-      const after = await a.describeAcls({ resourceType: 2, resourceName, operation: 3, permissionType: 3 });
+      const after = await a.describeAcls({
+        resourceType: 2,
+        resourceName,
+        operation: 3,
+        permissionType: 3,
+      });
       expect(after.acls.some((acl) => acl.principal === "User:bun-kafka-test")).toBe(false);
       await a.close();
     } finally {

@@ -1,6 +1,6 @@
 # kafkajs-compat external suite results & test-gap audit
 
-Companion to `docs/feature-completeness.md` (which tracks *implementation*
+Companion to `docs/feature-completeness.md` (which tracks _implementation_
 coverage). This document records (a) what the external compatibility suites
 prove and (b) where bun-kafka's **own test suites** still have gaps against
 the full Kafka feature set.
@@ -13,12 +13,12 @@ Adaptation is dependency-injection only: stub packages `kafkajs` and
 `@confluentinc/kafka-javascript` resolve to `bun-kafka/kafkajs-compat`, so the
 vendored application code runs unmodified under Bun.
 
-| Suite | Vendored project | What it exercises |
-|---|---|---|
-| node-red-kafka-suite | blanpa/node-red-contrib-kafka-suite | Full client matrix: adapter lifecycle events, send/sendBatch, per-key ordering, commit offsets across consumer restarts, pause/resume, seek semantics, admin surface (describeCluster, createTopics w/ configEntries, fetchTopicOffsets, resetOffsets, list/describe/delete groups), codec-gating parity, native snappy/lz4/zstd batches |
-| railway-kafka-package | Pritam-25/distributed_railway_booking_platform `packages/kafka` | `@confluentinc/kafka-javascript` nested-config shape, idempotent producer singleton, consumer-runner with OTel span propagation headers, DLQ routing for SyntaxError/ZodError poison messages with metadata headers, retry-policy presets |
-| trench-kafka-service | FrigadeHQ/trench | NestJS KafkaService as shipped: env-driven SSL/SASL config branches, topic bootstrap via admin, JSON event ingestion at scale through `eachBatch` + `autoCommitInterval` + `partitionsConsumedConcurrently=4`, batched vs one-by-one callbacks, per-key ordering |
-| otel-orders-contract | open-telemetry/opentelemetry-demo | Cross-language wire contract: hand-encoded `OrderResult` protobufs (demo.proto) byte-exact round trip, keyed murmur2 affinity, fraud-detection consumption pattern |
+| Suite                 | Vendored project                                                | What it exercises                                                                                                                                                                                                                                                                                                                        |
+| --------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| node-red-kafka-suite  | blanpa/node-red-contrib-kafka-suite                             | Full client matrix: adapter lifecycle events, send/sendBatch, per-key ordering, commit offsets across consumer restarts, pause/resume, seek semantics, admin surface (describeCluster, createTopics w/ configEntries, fetchTopicOffsets, resetOffsets, list/describe/delete groups), codec-gating parity, native snappy/lz4/zstd batches |
+| railway-kafka-package | Pritam-25/distributed_railway_booking_platform `packages/kafka` | `@confluentinc/kafka-javascript` nested-config shape, idempotent producer singleton, consumer-runner with OTel span propagation headers, DLQ routing for SyntaxError/ZodError poison messages with metadata headers, retry-policy presets                                                                                                |
+| trench-kafka-service  | FrigadeHQ/trench                                                | NestJS KafkaService as shipped: env-driven SSL/SASL config branches, topic bootstrap via admin, JSON event ingestion at scale through `eachBatch` + `autoCommitInterval` + `partitionsConsumedConcurrently=4`, batched vs one-by-one callbacks, per-key ordering                                                                         |
+| otel-orders-contract  | open-telemetry/opentelemetry-demo                               | Cross-language wire contract: hand-encoded `OrderResult` protobufs (demo.proto) byte-exact round trip, keyed murmur2 affinity, fraud-detection consumption pattern                                                                                                                                                                       |
 
 Current status: 22 pass / 0 fail (`REPORT.md`). PostHog was evaluated and
 excluded for now: its Node ingestion moved to node-rdkafka, not kafkajs; its
@@ -51,7 +51,7 @@ test today.
 - **ListGroups v4/v5**: no suite pins the flexible v4+ encoding (per-group
   state, error message, pagination token in v5). Impl currently targets v1;
   when v4 support lands it needs fixture tests against both encodings.
-  *(Found by external suite — see above.)*
+  _(Found by external suite — see above.)_
 - **OffsetFetch v5 nullable-topics** ("all topics for group"): suites only
   cover explicit topic lists; the compat admin approximates all-topic queries
   by scanning cluster metadata. A dedicated OffsetFetch v5 flexible test is

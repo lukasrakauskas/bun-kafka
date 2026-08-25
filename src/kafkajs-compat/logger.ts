@@ -7,7 +7,13 @@ export interface LoggerEntry {
   log: Record<string, unknown>;
 }
 
-const LEVEL_LABELS: Record<number, string> = { 0: "NOTHING", 1: "ERROR", 2: "WARN", 3: "INFO", 4: "DEBUG" };
+const LEVEL_LABELS: Record<number, string> = {
+  0: "NOTHING",
+  1: "ERROR",
+  2: "WARN",
+  3: "INFO",
+  4: "DEBUG",
+};
 
 export class Logger {
   #level: number;
@@ -31,7 +37,9 @@ export class Logger {
       return;
     }
     const target = level <= 1 ? console.error : level === 2 ? console.warn : console.log;
-    target(`{"level":"${entry.label}","timestamp":${Date.now()},"logger":"${entry.namespace}","message":${JSON.stringify(message)}}`);
+    target(
+      `{"level":"${entry.label}","timestamp":${Date.now()},"logger":"${entry.namespace}","message":${JSON.stringify(message)}}`,
+    );
   }
   debug(message: string, extra: Record<string, unknown> = {}): void {
     this.#write(logLevel.DEBUG, message, extra);

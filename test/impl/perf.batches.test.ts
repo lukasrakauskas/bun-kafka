@@ -7,7 +7,10 @@ async function seed(name: string, count: number) {
   const p = producer();
   await p.send({
     topic: name,
-    messages: Array.from({ length: count }, (_, i) => ({ key: String(i % 64), value: "x".repeat(100) })),
+    messages: Array.from({ length: count }, (_, i) => ({
+      key: String(i % 64),
+      value: "x".repeat(100),
+    })),
   });
   await p.close();
 }
@@ -22,7 +25,11 @@ async function consumeMessages(name: string, count: number) {
   return performance.now() - start;
 }
 
-async function bestOfTwo(fn: (name: string, count: number) => Promise<number>, name: string, count: number) {
+async function bestOfTwo(
+  fn: (name: string, count: number) => Promise<number>,
+  name: string,
+  count: number,
+) {
   return Math.min(await fn(name, count), await fn(name, count));
 }
 

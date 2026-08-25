@@ -1,13 +1,26 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka, KafkaError } from "../../index.ts";
-import { Reader, RecordSetDecoder, Writer, crc32c, encodeRecordBatch } from "../../src/bun/protocol.ts";
+import {
+  Reader,
+  RecordSetDecoder,
+  Writer,
+  crc32c,
+  encodeRecordBatch,
+} from "../../src/bun/protocol.ts";
 
 type Request = { apiKey: number; correlation: number; count: number; socket: Bun.Socket };
 type MockBroker = { address: string; close(): void; active(): number };
-type Handler = (request: Request, reply: (body: Writer | Uint8Array, correlation?: number) => void) => boolean | void;
+type Handler = (
+  request: Request,
+  reply: (body: Writer | Uint8Array, correlation?: number) => void,
+) => boolean | void;
 
 const topic = "chaos";
-const apiVersions = () => new Writer().i16(0).array(Array.from({ length: 64 }, (_, key) => key), (writer, key) => writer.i16(key).i16(0).i16(20));
+const apiVersions = () =>
+  new Writer().i16(0).array(
+    Array.from({ length: 64 }, (_, key) => key),
+    (writer, key) => writer.i16(key).i16(0).i16(20),
+  );
 const recordBatch = (value: string, offset = 0n) => {
   const batch = encodeRecordBatch([{ value }]);
   new DataView(batch.buffer, batch.byteOffset, batch.byteLength).setBigInt64(0, offset);
@@ -15,7 +28,10 @@ const recordBatch = (value: string, offset = 0n) => {
 };
 
 function response(correlation: number, body: Writer | Uint8Array): Uint8Array {
-  const frame = new Writer().i32(0).i32(correlation).raw(body instanceof Writer ? body.result() : body);
+  const frame = new Writer()
+    .i32(0)
+    .i32(correlation)
+    .raw(body instanceof Writer ? body.result() : body);
   frame.patchI32(0, frame.length - 4);
   return frame.result();
 }
@@ -24,25 +40,70 @@ function metadataBody(brokers: MockBroker[], leader = 1, error = 0): Writer {
   return new Writer()
     .array(brokers, (writer, broker) => {
       const url = new URL(`tcp://${broker.address}`);
-      writer.i32(brokers.indexOf(broker) + 1).string(url.hostname).i32(Number(url.port)).string(null);
+      writer
+        .i32(brokers.indexOf(broker) + 1)
+        .string(url.hostname)
+        .i32(Number(url.port))
+        .string(null);
     })
     .string(null)
     .i32(1)
-    .array([topic], (writer, name) => writer.i16(error).string(name).bool(false).array(error ? [] : [0], (partitionWriter) => {
-      partitionWriter.i16(0).i32(0).i32(leader)
-        .array(brokers.map((_, index) => index + 1), (item, id) => item.i32(id))
-        .array(brokers.map((_, index) => index + 1), (item, id) => item.i32(id));
-    }));
+    .array([topic], (writer, name) =>
+      writer
+        .i16(error)
+        .string(name)
+        .bool(false)
+        .array(error ? [] : [0], (partitionWriter) => {
+          partitionWriter
+            .i16(0)
+            .i32(0)
+            .i32(leader)
+            .array(
+              brokers.map((_, index) => index + 1),
+              (item, id) => item.i32(id),
+            )
+            .array(
+              brokers.map((_, index) => index + 1),
+              (item, id) => item.i32(id),
+            );
+        }),
+    );
 }
 
 function defaultBody(apiKey: number, broker: MockBroker, fetchOffset = 0n): Writer {
   if (apiKey === 18) return apiVersions();
   if (apiKey === 3) return metadataBody([broker]);
-  if (apiKey === 2) return new Writer().array([topic], (writer, name) => writer.string(name).array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(0).i64(0)));
-  if (apiKey === 0) return new Writer().array([topic], (writer, name) => writer.string(name).array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(fetchOffset).i64(-1))).i32(0);
-  if (apiKey === 1) return new Writer().i32(0).i16(0).i32(0).array([topic], (writer, name) => writer.string(name).array([0], (partitionWriter) => {
-    partitionWriter.i32(0).i16(0).i64(fetchOffset + 1n).i64(fetchOffset + 1n).i64(0).array([], () => {}).bytes(recordBatch(`value-${fetchOffset}`, fetchOffset));
-  }));
+  if (apiKey === 2)
+    return new Writer().array([topic], (writer, name) =>
+      writer
+        .string(name)
+        .array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(0).i64(0)),
+    );
+  if (apiKey === 0)
+    return new Writer()
+      .array([topic], (writer, name) =>
+        writer
+          .string(name)
+          .array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(fetchOffset).i64(-1)),
+      )
+      .i32(0);
+  if (apiKey === 1)
+    return new Writer()
+      .i32(0)
+      .i16(0)
+      .i32(0)
+      .array([topic], (writer, name) =>
+        writer.string(name).array([0], (partitionWriter) => {
+          partitionWriter
+            .i32(0)
+            .i16(0)
+            .i64(fetchOffset + 1n)
+            .i64(fetchOffset + 1n)
+            .i64(0)
+            .array([], () => {})
+            .bytes(recordBatch(`value-${fetchOffset}`, fetchOffset));
+        }),
+      );
   if (apiKey === 22) return new Writer().i32(0).i16(0).i64(1).i16(0);
   return new Writer();
 }
@@ -56,8 +117,12 @@ function mockBroker(handler: Handler = () => false): MockBroker {
     hostname: "127.0.0.1",
     port: 0,
     socket: {
-      open() { open++; },
-      close() { open--; },
+      open() {
+        open++;
+      },
+      close() {
+        open--;
+      },
       data(socket, chunk) {
         const previous = buffers.get(socket) ?? new Uint8Array();
         const input = new Uint8Array(previous.byteLength + chunk.byteLength);
@@ -73,8 +138,10 @@ function mockBroker(handler: Handler = () => false): MockBroker {
           const correlation = view.getInt32(8);
           const count = (counts.get(apiKey) ?? 0) + 1;
           counts.set(apiKey, count);
-          const reply = (body: Writer | Uint8Array, responseCorrelation = correlation) => socket.write(response(responseCorrelation, body));
-          if (handler({ apiKey, correlation, count, socket }, reply) === false) reply(defaultBody(apiKey, broker, BigInt(Math.max(0, count - 1))));
+          const reply = (body: Writer | Uint8Array, responseCorrelation = correlation) =>
+            socket.write(response(responseCorrelation, body));
+          if (handler({ apiKey, correlation, count, socket }, reply) === false)
+            reply(defaultBody(apiKey, broker, BigInt(Math.max(0, count - 1))));
           at += size + 4;
         }
         buffers.set(socket, input.slice(at));
@@ -89,13 +156,17 @@ function mockBroker(handler: Handler = () => false): MockBroker {
   return broker;
 }
 
-const kafka = (brokers: MockBroker[], extra: Partial<ConstructorParameters<typeof Kafka>[0]> = {}) => new Kafka({
-  requestTimeoutMs: 40,
-  connectTimeoutMs: 40,
-  retry: { maxRetries: 0, initialBackoffMs: 0, maxBackoffMs: 0 },
-  ...extra,
-  brokers: brokers.map(({ address }) => address),
-});
+const kafka = (
+  brokers: MockBroker[],
+  extra: Partial<ConstructorParameters<typeof Kafka>[0]> = {},
+) =>
+  new Kafka({
+    requestTimeoutMs: 40,
+    connectTimeoutMs: 40,
+    retry: { maxRetries: 0, initialBackoffMs: 0, maxBackoffMs: 0 },
+    ...extra,
+    brokers: brokers.map(({ address }) => address),
+  });
 
 async function rejectsQuickly(promise: Promise<unknown>, limitMs = 500): Promise<void> {
   const started = performance.now();
@@ -103,27 +174,53 @@ async function rejectsQuickly(promise: Promise<unknown>, limitMs = 500): Promise
   expect(performance.now() - started).toBeLessThan(limitMs);
 }
 
-function close(...brokers: MockBroker[]) { for (const broker of brokers) broker.close(); }
+function close(...brokers: MockBroker[]) {
+  for (const broker of brokers) broker.close();
+}
 
 describe("deterministic Kafka chaos", () => {
   test("uses a healthy bootstrap broker when the first broker is unavailable", async () => {
     const broker = mockBroker();
     const client = new Kafka({ brokers: ["127.0.0.1:1", broker.address], connectTimeoutMs: 40 });
-    try { expect((await client.admin().metadata([topic])).topics[0]?.name).toBe(topic); }
-    finally { await client.disconnect(); close(broker); }
+    try {
+      expect((await client.admin().metadata([topic])).topics[0]?.name).toBe(topic);
+    } finally {
+      await client.disconnect();
+      close(broker);
+    }
   });
 
   test("rejects a reset Produce and reconnects with clean frame state", async () => {
     const broker = mockBroker(({ apiKey, count, socket }) => {
-      if (apiKey === 0 && count === 1) { socket.terminate(); return true; }
+      if (apiKey === 0 && count === 1) {
+        socket.terminate();
+        return true;
+      }
       return false;
     });
     const client = kafka([broker]);
     const producer = client.producer({ lingerMs: 0 });
     try {
-      await rejectsQuickly(producer.send({ topic, timeoutMs: 40, messages: [{ value: "unknown-result", partition: 0 }] }));
-      expect((await producer.send({ topic, timeoutMs: 40, messages: [{ value: "after-reset", partition: 0 }] }))[0]?.topic).toBe(topic);
-    } finally { await client.disconnect(); close(broker); }
+      await rejectsQuickly(
+        producer.send({
+          topic,
+          timeoutMs: 40,
+          messages: [{ value: "unknown-result", partition: 0 }],
+        }),
+      );
+      expect(
+        (
+          await producer.send({
+            topic,
+            timeoutMs: 40,
+            messages: [{ value: "after-reset", partition: 0 }],
+          })
+        )[0]?.topic,
+      ).toBe(topic);
+    } finally {
+      await client.disconnect();
+      close(broker);
+    }
   });
 
   test("discards a partial Fetch frame and keeps old zero-copy values valid", async () => {
@@ -147,7 +244,10 @@ describe("deterministic Kafka chaos", () => {
       expect(partial).toBe(true);
       expect(new TextDecoder().decode(held.value! as Uint8Array)).toBe("value-0");
       expect(consumer.position(topic, 0)).toBe(1n);
-    } finally { await client.disconnect(); close(broker); }
+    } finally {
+      await client.disconnect();
+      close(broker);
+    }
   });
 
   test("bounds blackholed Metadata, ListOffsets, Produce, and Fetch requests", async () => {
@@ -156,14 +256,25 @@ describe("deterministic Kafka chaos", () => {
       const client = kafka([broker]);
       try {
         if (apiKey === 3) await rejectsQuickly(client.admin().metadata([topic]));
-        if (apiKey === 2) await rejectsQuickly(client.consumer().assign([{ topic, partition: 0, offset: "earliest" }]));
-        if (apiKey === 0) await rejectsQuickly(client.producer({ lingerMs: 0 }).send({ topic, timeoutMs: 40, messages: [{ value: "x", partition: 0 }] }));
+        if (apiKey === 2)
+          await rejectsQuickly(
+            client.consumer().assign([{ topic, partition: 0, offset: "earliest" }]),
+          );
+        if (apiKey === 0)
+          await rejectsQuickly(
+            client
+              .producer({ lingerMs: 0 })
+              .send({ topic, timeoutMs: 40, messages: [{ value: "x", partition: 0 }] }),
+          );
         if (apiKey === 1) {
           const consumer = client.consumer();
           await consumer.assign([{ topic, partition: 0, offset: 0n }]);
           await rejectsQuickly(consumer.fetch({ maxWaitMs: 1 }));
         }
-      } finally { await client.disconnect(); close(broker); }
+      } finally {
+        await client.disconnect();
+        close(broker);
+      }
     }
   });
 
@@ -171,19 +282,29 @@ describe("deterministic Kafka chaos", () => {
     const events: unknown[] = [];
     const broker = mockBroker(({ apiKey, count, socket }, reply) => {
       if (apiKey !== 2) return false;
-      if (count === 1) { socket.terminate(); return true; }
+      if (count === 1) {
+        socket.terminate();
+        return true;
+      }
       setTimeout(() => reply(defaultBody(2, broker)), 20);
       return true;
     });
     const client = kafka([broker], {
-      requestTimeoutMs: 100, retry: { maxRetries: 1, initialBackoffMs: 5, maxBackoffMs: 5 }, onEvent: (event) => events.push(event),
+      requestTimeoutMs: 100,
+      retry: { maxRetries: 1, initialBackoffMs: 5, maxBackoffMs: 5 },
+      onEvent: (event) => events.push(event),
     });
     try {
       const started = performance.now();
       await client.consumer().assign([{ topic, partition: 0, offset: "earliest" }]);
       expect(performance.now() - started).toBeGreaterThanOrEqual(20);
-      expect(events).toContainEqual(expect.objectContaining({ type: "retry", apiKey: 2, attempt: 1 }));
-    } finally { await client.disconnect(); close(broker); }
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: "retry", apiKey: 2, attempt: 1 }),
+      );
+    } finally {
+      await client.disconnect();
+      close(broker);
+    }
   });
 
   test("refreshes metadata and follows a transferred leader", async () => {
@@ -191,22 +312,46 @@ describe("deterministic Kafka chaos", () => {
     let firstProduce = true;
     let a: MockBroker;
     let b: MockBroker;
-    const handler = (id: number): Handler => ({ apiKey }, reply) => {
-      if (apiKey === 18) { reply(apiVersions()); return true; }
-      if (apiKey === 3) { reply(metadataBody([a, b], leader)); return true; }
-      if (apiKey === 0 && id === 1 && firstProduce) {
-        firstProduce = false;
-        leader = 2;
-        reply(new Writer().array([topic], (writer, name) => writer.string(name).array([0], (part) => part.i32(0).i16(6).i64(-1).i64(-1))).i32(0));
-        return true;
-      }
-      return false;
-    };
+    const handler =
+      (id: number): Handler =>
+      ({ apiKey }, reply) => {
+        if (apiKey === 18) {
+          reply(apiVersions());
+          return true;
+        }
+        if (apiKey === 3) {
+          reply(metadataBody([a, b], leader));
+          return true;
+        }
+        if (apiKey === 0 && id === 1 && firstProduce) {
+          firstProduce = false;
+          leader = 2;
+          reply(
+            new Writer()
+              .array([topic], (writer, name) =>
+                writer.string(name).array([0], (part) => part.i32(0).i16(6).i64(-1).i64(-1)),
+              )
+              .i32(0),
+          );
+          return true;
+        }
+        return false;
+      };
     a = mockBroker(handler(1));
     b = mockBroker(handler(2));
     const client = kafka([a], { retry: { maxRetries: 1, initialBackoffMs: 0, maxBackoffMs: 0 } });
-    try { expect((await client.producer({ lingerMs: 0 }).send({ topic, messages: [{ value: "moved", partition: 0 }] }))[0]?.topic).toBe(topic); }
-    finally { await client.disconnect(); close(a, b); }
+    try {
+      expect(
+        (
+          await client
+            .producer({ lingerMs: 0 })
+            .send({ topic, messages: [{ value: "moved", partition: 0 }] })
+        )[0]?.topic,
+      ).toBe(topic);
+    } finally {
+      await client.disconnect();
+      close(a, b);
+    }
   });
 
   test("handles broker pause, timeout, resume, and a late response", async () => {
@@ -226,27 +371,46 @@ describe("deterministic Kafka chaos", () => {
       expect((await client.admin().metadata([topic])).topics[0]?.name).toBe(topic);
       await Bun.sleep(90);
       expect((await client.admin().metadata([topic])).topics[0]?.name).toBe(topic);
-    } finally { await client.disconnect(); close(broker); }
+    } finally {
+      await client.disconnect();
+      close(broker);
+    }
   });
 
   test("surfaces broker storage errors and topic deletion without false success", async () => {
     let deleted = false;
     const broker = mockBroker(({ apiKey }, reply) => {
       if (apiKey === 0) {
-        reply(new Writer().array([topic], (writer, name) => writer.string(name).array([0], (part) => part.i32(0).i16(56).i64(-1).i64(-1))).i32(0));
+        reply(
+          new Writer()
+            .array([topic], (writer, name) =>
+              writer.string(name).array([0], (part) => part.i32(0).i16(56).i64(-1).i64(-1)),
+            )
+            .i32(0),
+        );
         return true;
       }
-      if (apiKey === 3 && deleted) { reply(metadataBody([broker], 1, 3)); return true; }
+      if (apiKey === 3 && deleted) {
+        reply(metadataBody([broker], 1, 3));
+        return true;
+      }
       return false;
     });
     const client = kafka([broker]);
     try {
-      await rejectsQuickly(client.producer({ lingerMs: 0 }).send({ topic, messages: [{ value: "disk-full", partition: 0 }] }));
+      await rejectsQuickly(
+        client
+          .producer({ lingerMs: 0 })
+          .send({ topic, messages: [{ value: "disk-full", partition: 0 }] }),
+      );
       deleted = true;
       expect((await client.admin().metadata([topic])).topics[0]?.err).toBe(3);
       deleted = false;
       expect((await client.admin().metadata([topic])).topics[0]?.err).toBe(0);
-    } finally { await client.disconnect(); close(broker); }
+    } finally {
+      await client.disconnect();
+      close(broker);
+    }
   });
 
   test("rejects malformed frames and accepts a valid frame after an unknown correlation ID", async () => {
@@ -257,8 +421,12 @@ describe("deterministic Kafka chaos", () => {
         return true;
       });
       const client = kafka([broker], { maxResponseBytes: 1024 });
-      try { await rejectsQuickly(client.admin().metadata([topic])); }
-      finally { await client.disconnect(); close(broker); }
+      try {
+        await rejectsQuickly(client.admin().metadata([topic]));
+      } finally {
+        await client.disconnect();
+        close(broker);
+      }
     }
 
     const broker = mockBroker(({ apiKey, correlation }, reply) => {
@@ -267,14 +435,22 @@ describe("deterministic Kafka chaos", () => {
       return true;
     });
     const client = kafka([broker]);
-    try { expect((await client.admin().metadata([topic])).topics[0]?.name).toBe(topic); }
-    finally { await client.disconnect(); close(broker); }
+    try {
+      expect((await client.admin().metadata([topic])).topics[0]?.name).toBe(topic);
+    } finally {
+      await client.disconnect();
+      close(broker);
+    }
   });
 
   test("rejects truncated fields, invalid arrays, varints, records, CRCs, and compression", () => {
     expect(() => new Reader(new Uint8Array([0])).i32()).toThrow(KafkaError);
-    expect(() => new Reader(new Uint8Array([0, 0, 0, 2])).array((reader) => reader.i8())).toThrow(KafkaError);
-    expect(() => new Reader(new Uint8Array([0x80, 0x80, 0x80, 0x80, 0x80])).varInt()).toThrow(KafkaError);
+    expect(() => new Reader(new Uint8Array([0, 0, 0, 2])).array((reader) => reader.i8())).toThrow(
+      KafkaError,
+    );
+    expect(() => new Reader(new Uint8Array([0x80, 0x80, 0x80, 0x80, 0x80])).varInt()).toThrow(
+      KafkaError,
+    );
     expect(() => new Reader(new Uint8Array(10).fill(0x80)).varLong()).toThrow(KafkaError);
 
     const invalidRecord = recordBatch("x");
@@ -303,10 +479,15 @@ describe("deterministic Kafka chaos", () => {
     const client = kafka([broker]);
     try {
       for (let i = 0; i < cycles; i++) {
-        await client.admin().metadata([topic]).catch((error) => expect(error).toBeInstanceOf(KafkaError));
+        await client
+          .admin()
+          .metadata([topic])
+          .catch((error) => expect(error).toBeInstanceOf(KafkaError));
         await Bun.sleep(0);
       }
-    } finally { await client.disconnect(); }
+    } finally {
+      await client.disconnect();
+    }
     await Bun.sleep(20);
     expect(broker.active()).toBe(0);
     close(broker);
@@ -319,16 +500,43 @@ describe("Kafka TLS chaos", () => {
     const key = await Bun.file(new URL("fixtures/chaos-key.pem", import.meta.url)).text();
     let kafkaBytes = 0;
     const listener = Bun.listen({
-      hostname: "127.0.0.1", port: 0, tls: { cert, key },
-      socket: { data(_socket, data) { kafkaBytes += data.byteLength; } },
+      hostname: "127.0.0.1",
+      port: 0,
+      tls: { cert, key },
+      socket: {
+        data(_socket, data) {
+          kafkaBytes += data.byteLength;
+        },
+      },
     });
     const mutual = Bun.listen({
-      hostname: "127.0.0.1", port: 0, tls: { cert, key, ca: cert, requestCert: true, rejectUnauthorized: true },
-      socket: { data() { kafkaBytes++; } },
+      hostname: "127.0.0.1",
+      port: 0,
+      tls: { cert, key, ca: cert, requestCert: true, rejectUnauthorized: true },
+      socket: {
+        data() {
+          kafkaBytes++;
+        },
+      },
     });
-    const untrusted = new Kafka({ brokers: [`localhost:${listener.port}`], tls: true, connectTimeoutMs: 100, requestTimeoutMs: 100 });
-    const wrongName = new Kafka({ brokers: [`127.0.0.1:${listener.port}`], tls: { ca: cert }, connectTimeoutMs: 100, requestTimeoutMs: 100 });
-    const noClientCertificate = new Kafka({ brokers: [`localhost:${mutual.port}`], tls: { ca: cert }, connectTimeoutMs: 100, requestTimeoutMs: 100 });
+    const untrusted = new Kafka({
+      brokers: [`localhost:${listener.port}`],
+      tls: true,
+      connectTimeoutMs: 100,
+      requestTimeoutMs: 100,
+    });
+    const wrongName = new Kafka({
+      brokers: [`127.0.0.1:${listener.port}`],
+      tls: { ca: cert },
+      connectTimeoutMs: 100,
+      requestTimeoutMs: 100,
+    });
+    const noClientCertificate = new Kafka({
+      brokers: [`localhost:${mutual.port}`],
+      tls: { ca: cert },
+      connectTimeoutMs: 100,
+      requestTimeoutMs: 100,
+    });
     try {
       await rejectsQuickly(untrusted.admin().metadata([topic]));
       await rejectsQuickly(wrongName.admin().metadata([topic]));
@@ -343,9 +551,20 @@ describe("Kafka TLS chaos", () => {
     }
   });
 
-  (process.env.CHAOS_TLS_EXTERNAL === "1" ? test : test.skip)("rejects an expired certificate", async () => {
-    const client = new Kafka({ brokers: ["expired.badssl.com:443"], tls: true, connectTimeoutMs: 2_000, requestTimeoutMs: 2_000 });
-    try { await rejectsQuickly(client.admin().metadata(), 3_000); }
-    finally { await client.disconnect(); }
-  });
+  (process.env.CHAOS_TLS_EXTERNAL === "1" ? test : test.skip)(
+    "rejects an expired certificate",
+    async () => {
+      const client = new Kafka({
+        brokers: ["expired.badssl.com:443"],
+        tls: true,
+        connectTimeoutMs: 2_000,
+        requestTimeoutMs: 2_000,
+      });
+      try {
+        await rejectsQuickly(client.admin().metadata(), 3_000);
+      } finally {
+        await client.disconnect();
+      }
+    },
+  );
 });

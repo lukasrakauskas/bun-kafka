@@ -12,7 +12,9 @@ describe("Producer delivery options (real broker)", () => {
     void p;
     const kafka = new Kafka({ brokers: ["127.0.0.1:9092"] });
     try {
-      const producer = kafka.producer({ partitioner: ({ partitionCount }) => Math.min(partitionCount - 1, 2) });
+      const producer = kafka.producer({
+        partitioner: ({ partitionCount }) => Math.min(partitionCount - 1, 2),
+      });
       await producer.send({
         topic: name,
         messages: [{ key: "a", value: "one" }, { value: "two" }, { key: "c", value: "three" }],
@@ -42,9 +44,13 @@ describe("Producer delivery options (real broker)", () => {
     const kafka = new Kafka({ brokers: ["127.0.0.1:9092"] });
     try {
       const producer = kafka.producer({ partitioner: () => 99 });
-      await expect(producer.send({ topic: name, messages: [{ value: "x" }] })).rejects.toBeInstanceOf(RangeError);
+      await expect(
+        producer.send({ topic: name, messages: [{ value: "x" }] }),
+      ).rejects.toBeInstanceOf(RangeError);
       const producer2 = kafka.producer({ partitioner: () => Number.NaN });
-      await expect(producer2.send({ topic: name, messages: [{ value: "x" }] })).rejects.toBeInstanceOf(RangeError);
+      await expect(
+        producer2.send({ topic: name, messages: [{ value: "x" }] }),
+      ).rejects.toBeInstanceOf(RangeError);
       expect(() => kafka.producer({ partitioner: "nope" as never })).toThrow(RangeError);
     } finally {
       await kafka.disconnect();
@@ -77,7 +83,10 @@ describe("Producer delivery options (real broker)", () => {
 
       // Every callback-fired message really exists on the broker.
       const consumer = kafka.consumer();
-      await consumer.assign([{ topic: name, partition: 0, offset: "earliest" }, { topic: name, partition: 1, offset: "earliest" }]);
+      await consumer.assign([
+        { topic: name, partition: 0, offset: "earliest" },
+        { topic: name, partition: 1, offset: "earliest" },
+      ]);
       let seen: string[] = [];
       for (let i = 0; i < 10 && seen.length < 3; i++) {
         const batch = await consumer.fetch({ maxWaitMs: 300, maxMessages: 10, copy: true });

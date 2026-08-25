@@ -81,10 +81,15 @@ const API_ADD_OFFSETS_TO_TXN = 25;
 const API_END_TXN = 26;
 const API_TXN_OFFSET_COMMIT = 28;
 
-const retriableErrors = new Set([1, 2, 3, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 19, 20, 25, 27, 32, 33, 38, 39, 41, 44, 45, 47, 49, 56, 70, 71, 74, 75, 78, 82, 86, 88, 89]);
+const retriableErrors = new Set([
+  1, 2, 3, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 19, 20, 25, 27, 32, 33, 38, 39, 41, 44, 45, 47, 49,
+  56, 70, 71, 74, 75, 78, 82, 86, 88, 89,
+]);
 
 function kafkaError(code: number, context: string, detail?: string | null): KafkaError {
-  const label = detail ? `${context}: ${kafkaErrorName(code)} (${detail})` : `${context}: ${kafkaErrorName(code)}`;
+  const label = detail
+    ? `${context}: ${kafkaErrorName(code)} (${detail})`
+    : `${context}: ${kafkaErrorName(code)}`;
   return new KafkaError(code, label, {
     retriable: retriableErrors.has(code),
     fatal: code === 58 || code === 34,

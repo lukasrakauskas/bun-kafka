@@ -11,7 +11,11 @@ try {
   const startedProduce = performance.now();
   await producer.send({
     topic,
-    messages: Array.from({ length: count }, (_, i) => ({ partition: 0, key: String(i % 64), value: payload })),
+    messages: Array.from({ length: count }, (_, i) => ({
+      partition: 0,
+      key: String(i % 64),
+      value: payload,
+    })),
   });
   const produceMs = performance.now() - startedProduce;
 
@@ -20,18 +24,26 @@ try {
   const startedConsume = performance.now();
   let consumed = 0;
   while (consumed < count) {
-    consumed += (await consumer.fetch({ maxWaitMs: 10, maxMessages: count - consumed, maxPartitionBytes: 50 * 1024 * 1024 })).length;
+    consumed += (
+      await consumer.fetch({
+        maxWaitMs: 10,
+        maxMessages: count - consumed,
+        maxPartitionBytes: 50 * 1024 * 1024,
+      })
+    ).length;
   }
   const consumeMs = performance.now() - startedConsume;
 
-  console.log(JSON.stringify({
-    lib: "bun-kafka",
-    count,
-    produce_ms: +produceMs.toFixed(2),
-    consume_ms: +consumeMs.toFixed(2),
-    produce_msg_s: Math.round(count * 1000 / produceMs),
-    consume_msg_s: Math.round(count * 1000 / consumeMs),
-  }));
+  console.log(
+    JSON.stringify({
+      lib: "bun-kafka",
+      count,
+      produce_ms: +produceMs.toFixed(2),
+      consume_ms: +consumeMs.toFixed(2),
+      produce_msg_s: Math.round((count * 1000) / produceMs),
+      consume_msg_s: Math.round((count * 1000) / consumeMs),
+    }),
+  );
 } finally {
   await kafka.disconnect();
 }

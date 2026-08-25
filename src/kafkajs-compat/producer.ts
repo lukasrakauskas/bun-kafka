@@ -3,7 +3,12 @@ import { COMPRESSION_NAMES, PRODUCER_EVENTS, CompressionTypes } from "./constant
 import { wrapError, KafkaJSNonRetriableError } from "./errors.ts";
 import type { ClusterGetter } from "./config.ts";
 import { Emitter, Logger } from "./logger.ts";
-import { toBunPartitioner, toWireMessage, type KafkaJsSendRecord, type KafkaJsSendBatchRecord } from "./messages.ts";
+import {
+  toBunPartitioner,
+  toWireMessage,
+  type KafkaJsSendRecord,
+  type KafkaJsSendBatchRecord,
+} from "./messages.ts";
 
 function producerOptions(options: Record<string, any>, logger: Logger) {
   const compressionCode = Number(options.compression ?? CompressionTypes.None);
@@ -67,12 +72,29 @@ export class CompatProducer {
 
   /** Core accepts per-send compression, so one underlying producer covers every codec. */
   #underlying(): BunProducer {
-    this.#producer ??= new BunProducer(this.#getter().acquire(), producerOptions(this.#options, this.#logger), this.#getter().release);
+    this.#producer ??= new BunProducer(
+      this.#getter().acquire(),
+      producerOptions(this.#options, this.#logger),
+      this.#getter().release,
+    );
     return this.#producer!;
   }
 
-  async send({ topic, messages, acks, timeout, compression }: KafkaJsSendRecord):
-    Promise<Array<{ topicName: string; partition: number; errorCode: number; baseOffset: string; logAppendTime: string }>> {
+  async send({
+    topic,
+    messages,
+    acks,
+    timeout,
+    compression,
+  }: KafkaJsSendRecord): Promise<
+    Array<{
+      topicName: string;
+      partition: number;
+      errorCode: number;
+      baseOffset: string;
+      logAppendTime: string;
+    }>
+  > {
     try {
       if (!messages.length) return [];
       const results = await this.#underlying().send({
@@ -94,20 +116,36 @@ export class CompatProducer {
     }
   }
 
-  async sendBatch({ topicMessages, acks, timeout, compression }: KafkaJsSendBatchRecord): Promise<
-    Array<{ topicName: string; partition: number; errorCode: number; baseOffset: string; logAppendTime: string }>
+  async sendBatch({
+    topicMessages,
+    acks,
+    timeout,
+    compression,
+  }: KafkaJsSendBatchRecord): Promise<
+    Array<{
+      topicName: string;
+      partition: number;
+      errorCode: number;
+      baseOffset: string;
+      logAppendTime: string;
+    }>
   > {
     try {
       const producer = this.#underlying();
       const compressionName = COMPRESSION_NAMES[Number(compression)] ?? undefined;
-      const results = await Promise.all(topicMessages.filter((item) => item.messages.length).map((item) =>
-        producer.send({
-          topic: item.topic,
-          messages: item.messages.map(toWireMessage),
-          acks: acksToWire(acks),
-          timeoutMs: timeout,
-          compression: compressionName,
-        })));
+      const results = await Promise.all(
+        topicMessages
+          .filter((item) => item.messages.length)
+          .map((item) =>
+            producer.send({
+              topic: item.topic,
+              messages: item.messages.map(toWireMessage),
+              acks: acksToWire(acks),
+              timeoutMs: timeout,
+              compression: compressionName,
+            }),
+          ),
+      );
       await producer.flush();
       return results.flat().map((result) => ({
         topicName: result.topic,
@@ -123,14 +161,20 @@ export class CompatProducer {
 
   async transaction(): Promise<CompatTransaction> {
     if (!this.#options.transactionalId) {
-      throw new KafkaJSNonRetriableError("Cannot use transactions without setting the transactionalId");
+      throw new KafkaJSNonRetriableError(
+        "Cannot use transactions without setting the transactionalId",
+      );
     }
     if (!this.#transaction) {
-      this.#transaction = new BunProducer(this.#getter().acquire(), {
-        ...producerOptions(this.#options, this.#logger),
-        idempotent: true,
-        lingerMs: 0,
-      }, this.#getter().release);
+      this.#transaction = new BunProducer(
+        this.#getter().acquire(),
+        {
+          ...producerOptions(this.#options, this.#logger),
+          idempotent: true,
+          lingerMs: 0,
+        },
+        this.#getter().release,
+      );
     }
     await this.#transaction.beginTransaction();
     return new CompatTransaction(this.#transaction);
@@ -161,7 +205,11 @@ export class CompatTransaction {
   async sendBatch({ topicMessages }: KafkaJsSendBatchRecord): Promise<void> {
     try {
       for (const item of topicMessages) {
-        await this.#producer.send({ topic: item.topic, messages: item.messages.map(toWireMessage), acks: "all" });
+        await this.#producer.send({
+          topic: item.topic,
+          messages: item.messages.map(toWireMessage),
+          acks: "all",
+        });
       }
       await this.#producer.flush();
     } catch (error) {
@@ -183,12 +231,16 @@ export class CompatTransaction {
     }
   }
   async sendOffsets(
-    offsets: Array<{ topic: string; partitions: Array<{ partition: number; offset: string | number | bigint }> }>,
+    offsets: Array<{
+      topic: string;
+      partitions: Array<{ partition: number; offset: string | number | bigint }>;
+    }>,
     consumerGroupId: string,
   ): Promise<void> {
     try {
       const flat = offsets.flatMap(({ topic, partitions }) =>
-        partitions.map(({ partition, offset }) => ({ topic, partition, offset: BigInt(offset) })));
+        partitions.map(({ partition, offset }) => ({ topic, partition, offset: BigInt(offset) })),
+      );
       await this.#producer.sendOffsetsToTransaction(flat, consumerGroupId);
     } catch (error) {
       throw wrapError(error);

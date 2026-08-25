@@ -9,7 +9,9 @@ const payload = "x".repeat(Number(process.env.MSG_SIZE ?? 100));
 const kafka = new Kafka({ clientId: "bench", brokers });
 const admin = kafka.admin();
 await admin.connect();
-try { await admin.createTopics({ topics: [{ topic, numPartitions: 1 }] }); } catch {}
+try {
+  await admin.createTopics({ topics: [{ topic, numPartitions: 1 }] });
+} catch {}
 await admin.disconnect();
 
 const producer = kafka.producer();
@@ -33,25 +35,29 @@ const t1 = performance.now();
 let n = 0;
 await new Promise<void>((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error("timeout")), 120_000);
-  consumer.run({
-    eachMessage: async () => {
-      n++;
-      if (n >= count) {
-        clearTimeout(timer);
-        resolve();
-      }
-    },
-  }).catch(reject);
+  consumer
+    .run({
+      eachMessage: async () => {
+        n++;
+        if (n >= count) {
+          clearTimeout(timer);
+          resolve();
+        }
+      },
+    })
+    .catch(reject);
 });
 const consumeMs = performance.now() - t1;
 await consumer.disconnect();
 
-console.log(JSON.stringify({
-  lib: "kafkajs",
-  topic,
-  count,
-  produce_ms: +produceMs.toFixed(2),
-  consume_ms: +consumeMs.toFixed(2),
-  produce_msg_s: +(count / (produceMs / 1000)).toFixed(0),
-  consume_msg_s: +(count / (consumeMs / 1000)).toFixed(0),
-}));
+console.log(
+  JSON.stringify({
+    lib: "kafkajs",
+    topic,
+    count,
+    produce_ms: +produceMs.toFixed(2),
+    consume_ms: +consumeMs.toFixed(2),
+    produce_msg_s: +(count / (produceMs / 1000)).toFixed(0),
+    consume_msg_s: +(count / (consumeMs / 1000)).toFixed(0),
+  }),
+);

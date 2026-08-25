@@ -1,4 +1,7 @@
-type Closer = { close: (timeoutMs?: number) => Promise<void> | void; flush?: (timeoutMs?: number) => Promise<void> | void };
+type Closer = {
+  close: (timeoutMs?: number) => Promise<void> | void;
+  flush?: (timeoutMs?: number) => Promise<void> | void;
+};
 
 export type ShutdownOptions = {
   /** Max time for flush/close work (default 10_000). */

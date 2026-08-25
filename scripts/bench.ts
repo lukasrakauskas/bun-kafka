@@ -30,13 +30,20 @@ try {
 
 const args = [
   "hyperfine",
-  "--warmup", "1",
-  "--runs", process.env.BENCH_RUNS ?? "3",
-  "--export-json", join(build, "hyperfine.json"),
-  "--export-markdown", join(build, "hyperfine.md"),
+  "--warmup",
+  "1",
+  "--runs",
+  process.env.BENCH_RUNS ?? "3",
+  "--export-json",
+  join(build, "hyperfine.json"),
+  "--export-markdown",
+  join(build, "hyperfine.md"),
 ];
 for (const [name, command] of cmds) args.push("--command-name", name, command);
 
-console.log("Running hyperfine:", cmds.map(([name]) => name));
+console.log(
+  "Running hyperfine:",
+  cmds.map(([name]) => name),
+);
 const result = Bun.spawnSync(args, { cwd: root, env, stdout: "inherit", stderr: "inherit" });
 process.exit(result.exitCode ?? 1);

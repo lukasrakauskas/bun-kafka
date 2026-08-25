@@ -57,13 +57,18 @@ export class CompatAdmin {
   async createTopics(input: CompatCreateTopicsInput): Promise<boolean[]> {
     try {
       const { validateOnly = false, waitForLeaders = true, timeout = 5_000, topics } = input;
-      const results = await this.#underlying().createTopics(topics.map((item) => ({
-        name: item.topic,
-        numPartitions: item.numPartitions ?? -1,
-        replicationFactor: item.replicationFactor ?? -1,
-        assignments: item.replicaAssignment,
-        configs: item.configEntries ? Object.fromEntries(item.configEntries.map((entry) => [entry.name, entry.value])) : undefined,
-      })), { validateOnly, waitForLeaders, timeoutMs: timeout });
+      const results = await this.#underlying().createTopics(
+        topics.map((item) => ({
+          name: item.topic,
+          numPartitions: item.numPartitions ?? -1,
+          replicationFactor: item.replicationFactor ?? -1,
+          assignments: item.replicaAssignment,
+          configs: item.configEntries
+            ? Object.fromEntries(item.configEntries.map((entry) => [entry.name, entry.value]))
+            : undefined,
+        })),
+        { validateOnly, waitForLeaders, timeoutMs: timeout },
+      );
       // TOPIC_ALREADY_EXISTS counts as "not created" rather than a failure.
       return results.map((result) => result.error === 0);
     } catch (error) {
@@ -71,18 +76,33 @@ export class CompatAdmin {
     }
   }
 
-  async deleteTopics(payload: { topics: Array<string | { topic: string; partitions?: number[] }>; timeout?: number }): Promise<void> {
+  async deleteTopics(payload: {
+    topics: Array<string | { topic: string; partitions?: number[] }>;
+    timeout?: number;
+  }): Promise<void> {
     try {
-      await this.#underlying().deleteTopics(payload.topics.map((entry) => (typeof entry === "string" ? entry : entry.topic)));
+      await this.#underlying().deleteTopics(
+        payload.topics.map((entry) => (typeof entry === "string" ? entry : entry.topic)),
+      );
     } catch (error) {
       throw wrapError(error);
     }
   }
 
-  async createPartitions({ validateOnly = false, topicPartitions }: { validateOnly?: boolean; topicPartitions: Array<{ topic: string; count: number; assignments?: number[][] }> }): Promise<void> {
+  async createPartitions({
+    validateOnly = false,
+    topicPartitions,
+  }: {
+    validateOnly?: boolean;
+    topicPartitions: Array<{ topic: string; count: number; assignments?: number[][] }>;
+  }): Promise<void> {
     try {
       await this.#underlying().createPartitions(
-        topicPartitions.map((item) => ({ name: item.topic, count: item.count, assignments: item.assignments })),
+        topicPartitions.map((item) => ({
+          name: item.topic,
+          count: item.count,
+          assignments: item.assignments,
+        })),
         { validateOnly },
       );
     } catch (error) {
@@ -92,12 +112,27 @@ export class CompatAdmin {
 
   async fetchTopicMetadata({ topics }: { topics?: Array<{ topic: string }> } = {}): Promise<{
     brokers: Array<{ nodeId: number; host: string; port: number }>;
-    topics: Array<{ topicName: string; partitions: Array<{ partitionErrorCode: number; partition: number; leader: number; replicas: number[]; isr: number[] }> }>;
+    topics: Array<{
+      topicName: string;
+      partitions: Array<{
+        partitionErrorCode: number;
+        partition: number;
+        leader: number;
+        replicas: number[];
+        isr: number[];
+      }>;
+    }>;
   }> {
     try {
-      const metadata = await this.#underlying().metadata(topics?.map((entry) => entry.topic) ?? null);
+      const metadata = await this.#underlying().metadata(
+        topics?.map((entry) => entry.topic) ?? null,
+      );
       return {
-        brokers: metadata.brokers.map((broker) => ({ nodeId: broker.id, host: broker.host, port: broker.port })),
+        brokers: metadata.brokers.map((broker) => ({
+          nodeId: broker.id,
+          host: broker.host,
+          port: broker.port,
+        })),
         topics: metadata.topics.map((topicMeta) => ({
           topicName: topicMeta.name,
           partitions: topicMeta.partitions.map((p) => ({
@@ -114,11 +149,19 @@ export class CompatAdmin {
     }
   }
 
-  async describeCluster(): Promise<{ brokers: Array<{ nodeId: number; host: string; port: number }>; controller: number | null; clusterId: string | null }> {
+  async describeCluster(): Promise<{
+    brokers: Array<{ nodeId: number; host: string; port: number }>;
+    controller: number | null;
+    clusterId: string | null;
+  }> {
     try {
       const metadata = await this.#underlying().metadata(null);
       return {
-        brokers: metadata.brokers.map((broker) => ({ nodeId: broker.id, host: broker.host, port: broker.port })),
+        brokers: metadata.brokers.map((broker) => ({
+          nodeId: broker.id,
+          host: broker.host,
+          port: broker.port,
+        })),
         controller: metadata.brokers.length ? metadata.brokers[0]!.id : null,
         clusterId: metadata.clusterId ?? null,
       };
@@ -127,18 +170,37 @@ export class CompatAdmin {
     }
   }
 
-  async fetchOffsets({ groupId, topics, resolveOffsets = false }: { groupId: string; topics?: string[]; resolveOffsets?: boolean }): Promise<Array<{ topic: string; partitions: Array<{ partition: number; offset: string; metadata?: string }> }>> {
+  async fetchOffsets({
+    groupId,
+    topics,
+    resolveOffsets = false,
+  }: {
+    groupId: string;
+    topics?: string[];
+    resolveOffsets?: boolean;
+  }): Promise<
+    Array<{
+      topic: string;
+      partitions: Array<{ partition: number; offset: string; metadata?: string }>;
+    }>
+  > {
     try {
       const listed = await this.#underlying().groupOffsets(groupId, topics);
-      const result: Array<{ topic: string; partitions: Array<{ partition: number; offset: string; metadata?: string }> }> = [];
+      const result: Array<{
+        topic: string;
+        partitions: Array<{ partition: number; offset: string; metadata?: string }>;
+      }> = [];
       for (const { topic, partitions } of listed) {
-        const mapped = await Promise.all(partitions.map(async ({ partition, offset, metadata }) => ({
-          partition,
-          offset: (resolveOffsets && offset < 0n
-            ? await this.#underlying().offsetByTimestamp(topic, partition, -2)
-            : offset).toString(),
-          metadata: metadata ?? undefined,
-        })));
+        const mapped = await Promise.all(
+          partitions.map(async ({ partition, offset, metadata }) => ({
+            partition,
+            offset: (resolveOffsets && offset < 0n
+              ? await this.#underlying().offsetByTimestamp(topic, partition, -2)
+              : offset
+            ).toString(),
+            metadata: metadata ?? undefined,
+          })),
+        );
         result.push({ topic, partitions: mapped });
       }
       return result;
@@ -147,7 +209,10 @@ export class CompatAdmin {
     }
   }
 
-  async listConsumerGroupOffsets(payload: { groupId: string; topics?: string[] }): Promise<Array<{ topic: string; partitions: Array<{ partition: number; offset: string }> }>> {
+  async listConsumerGroupOffsets(payload: {
+    groupId: string;
+    topics?: string[];
+  }): Promise<Array<{ topic: string; partitions: Array<{ partition: number; offset: string }> }>> {
     const fetched = await this.fetchOffsets(payload);
     return fetched.map(({ topic, partitions }) => ({
       topic,
@@ -155,7 +220,9 @@ export class CompatAdmin {
     }));
   }
 
-  async fetchTopicOffsets(topic: string): Promise<Array<{ partition: number; offset: string; high: string; low: string }>> {
+  async fetchTopicOffsets(
+    topic: string,
+  ): Promise<Array<{ partition: number; offset: string; high: string; low: string }>> {
     try {
       return (await this.#underlying().topicOffsets(topic)).map(({ partition, low, high }) => ({
         partition,
@@ -168,30 +235,59 @@ export class CompatAdmin {
     }
   }
 
-  async fetchTopicOffsetsByTimestamp(topic: string, timestamp = Date.now()): Promise<Array<{ partition: number; offset: string }>> {
+  async fetchTopicOffsetsByTimestamp(
+    topic: string,
+    timestamp = Date.now(),
+  ): Promise<Array<{ partition: number; offset: string }>> {
     try {
       const marks = await this.#underlying().topicOffsets(topic);
-      return await Promise.all(marks.map(async ({ partition }) => ({
-        partition,
-        offset: (await this.#underlying().offsetByTimestamp(topic, partition, timestamp)).toString(),
-      })));
+      return await Promise.all(
+        marks.map(async ({ partition }) => ({
+          partition,
+          offset: (
+            await this.#underlying().offsetByTimestamp(topic, partition, timestamp)
+          ).toString(),
+        })),
+      );
     } catch (error) {
       throw wrapError(error);
     }
   }
 
-  async setOffsets({ groupId, topic, partitions }: { groupId: string; topic: string; partitions: Array<{ partition: number; offset: string | number | bigint }> }): Promise<void> {
+  async setOffsets({
+    groupId,
+    topic,
+    partitions,
+  }: {
+    groupId: string;
+    topic: string;
+    partitions: Array<{ partition: number; offset: string | number | bigint }>;
+  }): Promise<void> {
     try {
-      await this.#underlying().setGroupOffsets(groupId, [{
-        topic,
-        partitions: partitions.map(({ partition, offset }) => ({ partition, offset: BigInt(offset), metadata: "" })),
-      }]);
+      await this.#underlying().setGroupOffsets(groupId, [
+        {
+          topic,
+          partitions: partitions.map(({ partition, offset }) => ({
+            partition,
+            offset: BigInt(offset),
+            metadata: "",
+          })),
+        },
+      ]);
     } catch (error) {
       throw wrapError(error);
     }
   }
 
-  async resetOffsets({ groupId, topic, earliest = true }: { groupId: string; topic: string; earliest?: boolean }): Promise<void> {
+  async resetOffsets({
+    groupId,
+    topic,
+    earliest = true,
+  }: {
+    groupId: string;
+    topic: string;
+    earliest?: boolean;
+  }): Promise<void> {
     try {
       await this.#underlying().resetGroupOffsets(groupId, topic, earliest);
     } catch (error) {
@@ -199,16 +295,26 @@ export class CompatAdmin {
     }
   }
 
-  async listGroups(statesFilter?: string[]): Promise<{ groups: Array<{ groupId: string; protocolType: string; state: string }> }> {
+  async listGroups(
+    statesFilter?: string[],
+  ): Promise<{ groups: Array<{ groupId: string; protocolType: string; state: string }> }> {
     try {
       const groups = await this.#underlying().listGroups(statesFilter ?? []);
-      return { groups: groups.map(({ groupId, protocolType, state }) => ({ groupId, protocolType, state })) };
+      return {
+        groups: groups.map(({ groupId, protocolType, state }) => ({
+          groupId,
+          protocolType,
+          state,
+        })),
+      };
     } catch (error) {
       throw wrapError(error);
     }
   }
 
-  async listConsumerGroups(statesFilter?: string[]): Promise<{ groups: Array<{ groupId: string; protocolType: string; state: string }> }> {
+  async listConsumerGroups(
+    statesFilter?: string[],
+  ): Promise<{ groups: Array<{ groupId: string; protocolType: string; state: string }> }> {
     return this.listGroups(statesFilter);
   }
 
@@ -248,24 +354,54 @@ export class CompatAdmin {
   async listTopics(): Promise<string[]> {
     try {
       const metadata = await this.#underlying().metadata(null);
-      return metadata.topics.filter((topicMeta) => !topicMeta.err && topicMeta.name).map((topicMeta) => topicMeta.name);
+      return metadata.topics
+        .filter((topicMeta) => !topicMeta.err && topicMeta.name)
+        .map((topicMeta) => topicMeta.name);
     } catch (error) {
       throw wrapError(error);
     }
   }
 
-  async describeConfigs({ resources }: { resources: Array<{ type: number; name: string; configNames?: string[] }> }): Promise<{
-    resources: Array<{ resourceName: string; resourceType: number; configEntries: Record<string, { value: string | null; isDefault: boolean; isSensitive: boolean; readOnly: boolean; configSource: number }> }>;
+  async describeConfigs({
+    resources,
+  }: {
+    resources: Array<{ type: number; name: string; configNames?: string[] }>;
+  }): Promise<{
+    resources: Array<{
+      resourceName: string;
+      resourceType: number;
+      configEntries: Record<
+        string,
+        {
+          value: string | null;
+          isDefault: boolean;
+          isSensitive: boolean;
+          readOnly: boolean;
+          configSource: number;
+        }
+      >;
+    }>;
   }> {
     try {
-      const described = await this.#underlying().describeConfigs(resources.map((resource) => ({
-        resourceType: resource.type,
-        resourceName: resource.name,
-        configNames: resource.configNames,
-      })));
+      const described = await this.#underlying().describeConfigs(
+        resources.map((resource) => ({
+          resourceType: resource.type,
+          resourceName: resource.name,
+          configNames: resource.configNames,
+        })),
+      );
       return {
         resources: described.map((resource) => {
-          const configEntries: Record<string, { value: string | null; isDefault: boolean; isSensitive: boolean; readOnly: boolean; configSource: number }> = {};
+          const configEntries: Record<
+            string,
+            {
+              value: string | null;
+              isDefault: boolean;
+              isSensitive: boolean;
+              readOnly: boolean;
+              configSource: number;
+            }
+          > = {};
           for (const config of resource.configs) {
             configEntries[config.name] = {
               value: config.value,
@@ -275,7 +411,11 @@ export class CompatAdmin {
               configSource: config.source,
             };
           }
-          return { resourceName: resource.resourceName, resourceType: resource.resourceType, configEntries };
+          return {
+            resourceName: resource.resourceName,
+            resourceType: resource.resourceType,
+            configEntries,
+          };
         }),
       };
     } catch (error) {
@@ -283,13 +423,22 @@ export class CompatAdmin {
     }
   }
 
-  async alterConfigs({ validateOnly = false, resources }: { validateOnly?: boolean; resources: Array<{ type: number; name: string; configEntries: Record<string, string | null> }> }): Promise<void> {
+  async alterConfigs({
+    validateOnly = false,
+    resources,
+  }: {
+    validateOnly?: boolean;
+    resources: Array<{ type: number; name: string; configEntries: Record<string, string | null> }>;
+  }): Promise<void> {
     try {
-      await this.#underlying().alterConfigs(resources.map((resource) => ({
-        resourceType: resource.type,
-        resourceName: resource.name,
-        configs: resource.configEntries,
-      })), { validateOnly });
+      await this.#underlying().alterConfigs(
+        resources.map((resource) => ({
+          resourceType: resource.type,
+          resourceName: resource.name,
+          configs: resource.configEntries,
+        })),
+        { validateOnly },
+      );
     } catch (error) {
       throw wrapError(error);
     }
@@ -297,21 +446,34 @@ export class CompatAdmin {
 
   async createAcls({ acl }: { acl: Array<Record<string, any>> }): Promise<boolean[]> {
     try {
-      const results = await this.#underlying().createAcls(acl.map((entry) => ({
-        resourceType: Number(entry.resourceType ?? entry.resourceResourceType ?? 2),
-        resourceName: String(entry.resourceName ?? entry.resourceResourceName),
-        principal: String(entry.principal),
-        host: String(entry.host),
-        operation: Number(entry.operation),
-        permissionType: Number(entry.permissionType),
-      })) as never);
+      const results = await this.#underlying().createAcls(
+        acl.map((entry) => ({
+          resourceType: Number(entry.resourceType ?? entry.resourceResourceType ?? 2),
+          resourceName: String(entry.resourceName ?? entry.resourceResourceName),
+          principal: String(entry.principal),
+          host: String(entry.host),
+          operation: Number(entry.operation),
+          permissionType: Number(entry.permissionType),
+        })) as never,
+      );
       return results.map((result) => result.error === 0);
     } catch (error) {
       throw wrapError(error);
     }
   }
 
-  async describeAcls(filter: Record<string, any>): Promise<{ resources: Array<{ resourceType: number; resourceName: string; principal: string; host: string; operation: number; permissionType: number }> }> {
+  async describeAcls(
+    filter: Record<string, any>,
+  ): Promise<{
+    resources: Array<{
+      resourceType: number;
+      resourceName: string;
+      principal: string;
+      host: string;
+      operation: number;
+      permissionType: number;
+    }>;
+  }> {
     try {
       const described = await this.#underlying().describeAcls({
         resourceType: Number(filter.resourceType ?? 1),
@@ -337,17 +499,30 @@ export class CompatAdmin {
   }
 
   async deleteAcls(filters: { filters: Array<Record<string, any>> }): Promise<{
-    entries: Array<{ errorCode: number; errorMessage?: string; resources: Array<{ resourceType: number; resourceName: string; principal: string; host: string; operation: number; permissionType: number }> }>;
+    entries: Array<{
+      errorCode: number;
+      errorMessage?: string;
+      resources: Array<{
+        resourceType: number;
+        resourceName: string;
+        principal: string;
+        host: string;
+        operation: number;
+        permissionType: number;
+      }>;
+    }>;
   }> {
     try {
-      const result = await this.#underlying().deleteAcls(filters.filters.map((filter) => ({
-        resourceType: Number(filter.resourceType ?? 1),
-        resourceName: filter.resourceName,
-        principal: filter.principal,
-        host: filter.host,
-        operation: Number(filter.operation ?? 1),
-        permissionType: Number(filter.permissionType ?? 1),
-      })) as never);
+      const result = await this.#underlying().deleteAcls(
+        filters.filters.map((filter) => ({
+          resourceType: Number(filter.resourceType ?? 1),
+          resourceName: filter.resourceName,
+          principal: filter.principal,
+          host: filter.host,
+          operation: Number(filter.operation ?? 1),
+          permissionType: Number(filter.permissionType ?? 1),
+        })) as never,
+      );
       return {
         entries: result.map((entry) => ({
           errorCode: entry.error,

@@ -13,7 +13,13 @@ describe("Transactions (real broker)", () => {
 
       const producer = client.producer({ transactionalId: `txn-${name}` });
       await producer.beginTransaction();
-      await producer.send({ topic: name, messages: [{ key: "k1", value: "v1" }, { key: "k2", value: "v2" }] });
+      await producer.send({
+        topic: name,
+        messages: [
+          { key: "k1", value: "v1" },
+          { key: "k2", value: "v2" },
+        ],
+      });
       await producer.commitTransaction();
 
       const consumer = client.consumer({ isolationLevel: "read_committed" });
@@ -33,7 +39,10 @@ describe("Transactions (real broker)", () => {
     const client = kafka(BROKERS.split(","));
     try {
       const admin = client.admin();
-      await admin.createTopics([{ name, numPartitions: 1 }, { name: committedName, numPartitions: 1 }]);
+      await admin.createTopics([
+        { name, numPartitions: 1 },
+        { name: committedName, numPartitions: 1 },
+      ]);
       await admin.close();
 
       // First commit a baseline record so offsets advance.
@@ -54,7 +63,7 @@ describe("Transactions (real broker)", () => {
       expect(visible.map((m) => dec(m.value))).toEqual(["committed-record"]);
 
       const uncommitted = client.consumer({ isolationLevel: "read_uncommitted" });
-      await uncommitted.assign([{ topic: name, partition: 0, offset: "earliest" }]); 
+      await uncommitted.assign([{ topic: name, partition: 0, offset: "earliest" }]);
       const all = await uncommitted.fetch({ maxWaitMs: 5_000, maxMessages: 10, copy: true });
       expect(all.some((m) => m.offset >= visible[visible.length - 1]!.offset + 1n)).toBe(true);
 

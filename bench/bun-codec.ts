@@ -8,7 +8,10 @@ let checksum = 0n;
 
 for (let done = 0; done < total; done += width) {
   const size = Math.min(width, total - done);
-  const batch = encodeRecordBatch(size === width ? records : records.slice(0, size), 1_700_000_000_000);
+  const batch = encodeRecordBatch(
+    size === width ? records : records.slice(0, size),
+    1_700_000_000_000,
+  );
   const decoded = decodeRecordSet(batch, "bench", 0, 1);
   checksum += BigInt(decoded.length) + decoded.at(-1)!.offset;
 }

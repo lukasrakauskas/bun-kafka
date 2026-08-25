@@ -66,10 +66,13 @@ function toBuffer(value: Uint8Array | null | undefined): Buffer | null {
 }
 
 export function toKafkajsMessage(raw: ConsumedMessage): KafkaJsConsumedMessage {
-  const size = (raw.key?.byteLength ?? 0) + (raw.value?.byteLength ?? 0)
-    + Object.values(raw.headers ?? {}).reduce((sum, header) => sum + (header?.byteLength ?? 0), 0);
+  const size =
+    (raw.key?.byteLength ?? 0) +
+    (raw.value?.byteLength ?? 0) +
+    Object.values(raw.headers ?? {}).reduce((sum, header) => sum + (header?.byteLength ?? 0), 0);
   const headers: Record<string, Buffer | undefined> = {};
-  for (const [name, value] of Object.entries(raw.headers ?? {})) headers[name] = value == null ? undefined : Buffer.from(value);
+  for (const [name, value] of Object.entries(raw.headers ?? {}))
+    headers[name] = value == null ? undefined : Buffer.from(value);
   return {
     key: toBuffer(raw.key),
     value: toBuffer(raw.value),

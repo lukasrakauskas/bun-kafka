@@ -17,7 +17,11 @@ export class Kafka {
   constructor(config: KafkaConfig) {
     const unwrapped = unwrapKafkaJs(config);
     this.#hub = new ClusterHub(unwrapped);
-    this.#logger = new Logger(unwrapped.logLevel ?? logLevel.NOTHING, unwrapped.clientId ?? "kafkajs", unwrapped.logCreator);
+    this.#logger = new Logger(
+      unwrapped.logLevel ?? logLevel.NOTHING,
+      unwrapped.clientId ?? "kafkajs",
+      unwrapped.logCreator,
+    );
   }
 
   #getter(): ClusterGetter {
@@ -30,11 +34,19 @@ export class Kafka {
   }
 
   producer(options: Record<string, any> = {}): CompatProducer {
-    return new CompatProducer(() => this.#getter(), this.#logger.namespace("producer"), unwrapKafkaJs(options));
+    return new CompatProducer(
+      () => this.#getter(),
+      this.#logger.namespace("producer"),
+      unwrapKafkaJs(options),
+    );
   }
 
   consumer(options: Record<string, any> = {}): CompatConsumer {
-    return new CompatConsumer(() => this.#getter(), this.#logger.namespace("consumer"), unwrapKafkaJs(options));
+    return new CompatConsumer(
+      () => this.#getter(),
+      this.#logger.namespace("consumer"),
+      unwrapKafkaJs(options),
+    );
   }
 
   admin(_options: Record<string, any> = {}): CompatAdmin {

@@ -27,7 +27,10 @@ export interface Watermarks {
 }
 
 /** A KafkaMessage whose key/value were replaced through consumer deserializers. Defaults describe raw messages. */
-export interface ConsumedMessage<TKey = Uint8Array | null, TValue = Uint8Array | null> extends Omit<KafkaMessage, "key" | "value"> {
+export interface ConsumedMessage<TKey = Uint8Array | null, TValue = Uint8Array | null> extends Omit<
+  KafkaMessage,
+  "key" | "value"
+> {
   key: TKey;
   value: TValue;
 }

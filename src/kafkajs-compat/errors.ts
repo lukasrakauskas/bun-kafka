@@ -3,7 +3,10 @@ import { KafkaError } from "../errors.ts";
 export class KafkaJSError extends Error {
   retriable: boolean;
   fatal?: boolean;
-  constructor(messageOrError: string | Error, options: { retriable?: boolean; fatal?: boolean } = {}) {
+  constructor(
+    messageOrError: string | Error,
+    options: { retriable?: boolean; fatal?: boolean } = {},
+  ) {
     super(typeof messageOrError === "string" ? messageOrError : messageOrError.message);
     this.name = "KafkaJSError";
     this.retriable = options.retriable ?? false;

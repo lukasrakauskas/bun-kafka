@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { consumer as makeConsumer, dec, produceN, producer as makeProducer, topic } from "../helpers.ts";
+import {
+  consumer as makeConsumer,
+  dec,
+  produceN,
+  producer as makeProducer,
+  topic,
+} from "../helpers.ts";
 
 const open: { close(): Promise<void> }[] = [];
 function track<T extends { close(): Promise<void> }>(client: T): T {
@@ -8,7 +14,9 @@ function track<T extends { close(): Promise<void> }>(client: T): T {
 }
 afterEach(async () => {
   while (open.length) {
-    try { await open.pop()!.close(); } catch {}
+    try {
+      await open.pop()!.close();
+    } catch {}
   }
 });
 

@@ -1,6 +1,13 @@
 import { KafkaError } from "../errors.ts";
 import { Cluster } from "./cluster.ts";
-import { Reader, Writer, asBytes, encodeRecordBatch, murmur2, type WireRecord } from "./protocol.ts";
+import {
+  Reader,
+  Writer,
+  asBytes,
+  encodeRecordBatch,
+  murmur2,
+  type WireRecord,
+} from "./protocol.ts";
 import {
   API_ADD_OFFSETS_TO_TXN,
   API_ADD_PARTITIONS_TO_TXN,
@@ -88,7 +95,9 @@ export class BunProducer {
   #closed = false;
   #ownsCluster: boolean;
   #onClose: () => void;
-  #options: Required<Omit<ProducerOptions, "partitioner" | "transactionalId" | "transactionTimeoutMs">>;
+  #options: Required<
+    Omit<ProducerOptions, "partitioner" | "transactionalId" | "transactionTimeoutMs">
+  >;
   #pending: PendingSend[] = [];
   #producer?: { id: bigint; epoch: number };
   #sequences = new Map<string, number>();
@@ -102,19 +111,28 @@ export class BunProducer {
   #timer?: ReturnType<typeof setTimeout>;
   #flushing?: Promise<void>;
 
-  constructor(options: KafkaOptions | Cluster, producerOptions: ProducerOptions = {}, onClose = () => {}) {
+  constructor(
+    options: KafkaOptions | Cluster,
+    producerOptions: ProducerOptions = {},
+    onClose = () => {},
+  ) {
     this.#ownsCluster = !(options instanceof Cluster);
-    this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : options as Cluster;
+    this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : (options as Cluster);
     this.#options = {
       lingerMs: producerOptions.lingerMs ?? 5,
       batchMaxMessages: producerOptions.batchMaxMessages ?? 1_000,
       compression: producerOptions.compression ?? "none",
       idempotent: producerOptions.idempotent ?? false,
     };
-    if (!Number.isFinite(this.#options.lingerMs) || this.#options.lingerMs < 0
-      || !Number.isSafeInteger(this.#options.batchMaxMessages) || this.#options.batchMaxMessages < 1
-      || !(this.#options.compression in { none: 1, gzip: 1, snappy: 1, lz4: 1, zstd: 1 })
-      || (producerOptions.partitioner !== undefined && typeof producerOptions.partitioner !== "function")) {
+    if (
+      !Number.isFinite(this.#options.lingerMs) ||
+      this.#options.lingerMs < 0 ||
+      !Number.isSafeInteger(this.#options.batchMaxMessages) ||
+      this.#options.batchMaxMessages < 1 ||
+      !(this.#options.compression in { none: 1, gzip: 1, snappy: 1, lz4: 1, zstd: 1 }) ||
+      (producerOptions.partitioner !== undefined &&
+        typeof producerOptions.partitioner !== "function")
+    ) {
       throw new RangeError("Invalid producer batching options");
     }
     this.#onClose = onClose;
@@ -127,7 +145,9 @@ export class BunProducer {
     this.#open();
     if (!input.topic) throw new TypeError("Kafka topic is required");
     if (input.acks === 0 && (this.#options.idempotent || this.#transactionalId)) {
-      throw new TypeError("A transactional or idempotent producer requires acknowledged Produce requests");
+      throw new TypeError(
+        "A transactional or idempotent producer requires acknowledged Produce requests",
+      );
     }
     if (!input.messages.length) return Promise.resolve([]);
     return new Promise((resolve, reject) => {
@@ -160,7 +180,9 @@ export class BunProducer {
       this.#timer = undefined;
       const pending = this.#pending.splice(0);
       this.#queuedMessages = 0;
-      this.#flushing = this.#flushPending(pending).finally(() => { this.#flushing = undefined; });
+      this.#flushing = this.#flushPending(pending).finally(() => {
+        this.#flushing = undefined;
+      });
       await this.#flushing;
     }
   }
@@ -171,7 +193,8 @@ export class BunProducer {
    */
   async beginTransaction(): Promise<void> {
     this.#open();
-    if (!this.#transactionalId) throw new Error("beginTransaction requires a transactionalId producer option");
+    if (!this.#transactionalId)
+      throw new Error("beginTransaction requires a transactionalId producer option");
     if (this.#txnOpen) throw new Error("A transaction is already in progress");
     if (!this.#producer) await this.initProducerId();
     this.#txnOpen = true;
@@ -196,7 +219,8 @@ export class BunProducer {
     await this.flush();
     const body = new Writer()
       .string(this.#transactionalId)
-      .i64(this.#producer!.id).i16(this.#producer!.epoch)
+      .i64(this.#producer!.id)
+      .i16(this.#producer!.epoch)
       .bool(committed);
     // EndTxn v1: same wire shape as v0 but its response carries
     // throttle_time_ms on every broker implementation.
@@ -215,26 +239,49 @@ export class BunProducer {
   }
 
   /** Commit consumer offsets inside the open transaction. */
-  async sendOffsetsToTransaction(offsets: readonly CommittedOffset[], groupId: string): Promise<void> {
+  async sendOffsetsToTransaction(
+    offsets: readonly CommittedOffset[],
+    groupId: string,
+  ): Promise<void> {
     this.#open();
-    if (!this.#transactionalId || !this.#txnOpen) throw new Error("sendOffsetsToTransaction requires an open transaction");
+    if (!this.#transactionalId || !this.#txnOpen)
+      throw new Error("sendOffsetsToTransaction requires an open transaction");
     if (!offsets.length) return;
     const topics = Map.groupBy(offsets as readonly CommittedOffset[], (o) => o.topic);
-    const body = new Writer().string(this.#transactionalId).string(groupId)
-      .i64(this.#producer!.id).i16(this.#producer!.epoch)
-      .array([...topics], (writer, [topicName, values]) => writer.string(topicName).array(values, (partitionWriter, value) =>
-        partitionWriter.i32(value.partition).i64(value.offset).string(null)));
-    const addOffsetsBody = new Writer().string(this.#transactionalId)
-      .i64(this.#producer!.id).i16(this.#producer!.epoch)
+    const body = new Writer()
+      .string(this.#transactionalId)
+      .string(groupId)
+      .i64(this.#producer!.id)
+      .i16(this.#producer!.epoch)
+      .array([...topics], (writer, [topicName, values]) =>
+        writer
+          .string(topicName)
+          .array(values, (partitionWriter, value) =>
+            partitionWriter.i32(value.partition).i64(value.offset).string(null),
+          ),
+      );
+    const addOffsetsBody = new Writer()
+      .string(this.#transactionalId)
+      .i64(this.#producer!.id)
+      .i16(this.#producer!.epoch)
       .string(groupId);
-    const addOffsetsResponse = await this.#txnCoordinatorRequest(API_ADD_OFFSETS_TO_TXN, 0, addOffsetsBody);
+    const addOffsetsResponse = await this.#txnCoordinatorRequest(
+      API_ADD_OFFSETS_TO_TXN,
+      0,
+      addOffsetsBody,
+    );
     this.#cluster.throttle(API_ADD_OFFSETS_TO_TXN, addOffsetsResponse.i32());
     const addOffsetsError = addOffsetsResponse.i16();
     if (addOffsetsError) throw kafkaError(addOffsetsError, `AddOffsetsToTxn group ${groupId}`);
     const response = await this.#txnCoordinatorRequest(API_TXN_OFFSET_COMMIT, 0, body);
     this.#cluster.throttle(API_TXN_OFFSET_COMMIT, response.i32());
-    for (const result of response.array((reader) => ({ topic: reader.string() ?? "", partitions: reader.array((p) => ({ index: p.i32(), error: p.i16() })) }))) {
-      for (const partition of result.partitions) if (partition.error) throw kafkaError(partition.error, `${result.topic}[${partition.index}]`);
+    for (const result of response.array((reader) => ({
+      topic: reader.string() ?? "",
+      partitions: reader.array((p) => ({ index: p.i32(), error: p.i16() })),
+    }))) {
+      for (const partition of result.partitions)
+        if (partition.error)
+          throw kafkaError(partition.error, `${result.topic}[${partition.index}]`);
     }
   }
 
@@ -251,18 +298,35 @@ export class BunProducer {
   /** Register newly touched partitions of the open transaction with the coordinator. */
   async #addPartitionsToTxn(partitions: PartitionRecords[]): Promise<void> {
     if (!this.#transactionalId || !this.#txnOpen || !this.#producer) return;
-    const fresh = partitions.filter((group) => !this.#txnAddedPartitions.has(partitionKey(group.topic, group.partition)));
+    const fresh = partitions.filter(
+      (group) => !this.#txnAddedPartitions.has(partitionKey(group.topic, group.partition)),
+    );
     if (!fresh.length) return;
     const byTopic = Map.groupBy(fresh, (group) => group.topic);
-    const response = await this.#txnCoordinatorRequest(API_ADD_PARTITIONS_TO_TXN, 1, new Writer()
-      .string(this.#transactionalId)
-      .i64(this.#producer.id).i16(this.#producer.epoch)
-      .array([...byTopic], (writer, [name, groups]) => writer.string(name).array(groups, (partitionWriter, g) => partitionWriter.i32(g.partition))));
+    const response = await this.#txnCoordinatorRequest(
+      API_ADD_PARTITIONS_TO_TXN,
+      1,
+      new Writer()
+        .string(this.#transactionalId)
+        .i64(this.#producer.id)
+        .i16(this.#producer.epoch)
+        .array([...byTopic], (writer, [name, groups]) =>
+          writer
+            .string(name)
+            .array(groups, (partitionWriter, g) => partitionWriter.i32(g.partition)),
+        ),
+    );
     this.#cluster.throttle(API_ADD_PARTITIONS_TO_TXN, response.i32());
-    for (const topic of response.array((reader) => ({ name: reader.string() ?? "", partitions: reader.array((p) => ({ index: p.i32(), error: p.i16() })) }))) {
-      for (const partition of topic.partitions) if (partition.error) throw kafkaError(partition.error, `AddPartitionsToTxn ${topic.name}[${partition.index}]`);
+    for (const topic of response.array((reader) => ({
+      name: reader.string() ?? "",
+      partitions: reader.array((p) => ({ index: p.i32(), error: p.i16() })),
+    }))) {
+      for (const partition of topic.partitions)
+        if (partition.error)
+          throw kafkaError(partition.error, `AddPartitionsToTxn ${topic.name}[${partition.index}]`);
     }
-    for (const group of fresh) this.#txnAddedPartitions.add(partitionKey(group.topic, group.partition));
+    for (const group of fresh)
+      this.#txnAddedPartitions.add(partitionKey(group.topic, group.partition));
   }
 
   async initProducerId(): Promise<void> {
@@ -291,10 +355,19 @@ export class BunProducer {
       lastError = kafkaError(error, "Initialize idempotent producer");
       // Fresh transactional ids can briefly answer NOT_COORDINATOR while the
       // coordinator is being elected; retry those like transport failures.
-      if (!(lastError instanceof KafkaError && lastError.retriable) || attempt === maxRetries) break;
-      const delay = Math.round(Math.min(maxBackoffMs, initialBackoffMs * 2 ** attempt) * (0.5 + Math.random()));
+      if (!(lastError instanceof KafkaError && lastError.retriable) || attempt === maxRetries)
+        break;
+      const delay = Math.round(
+        Math.min(maxBackoffMs, initialBackoffMs * 2 ** attempt) * (0.5 + Math.random()),
+      );
       this.#cluster.log("warn", `retrying InitProducerId attempt ${attempt + 1} in ${delay}ms`);
-      this.#cluster.event({ type: "retry", apiKey: API_INIT_PRODUCER_ID, attempt: attempt + 1, delayMs: delay, error: lastError });
+      this.#cluster.event({
+        type: "retry",
+        apiKey: API_INIT_PRODUCER_ID,
+        attempt: attempt + 1,
+        delayMs: delay,
+        error: lastError,
+      });
       await Bun.sleep(delay);
     }
     throw lastError;
@@ -308,8 +381,13 @@ export class BunProducer {
           if (!message.onDelivery || notified.has(message.onDelivery)) continue;
           notified.add(message.onDelivery);
           try {
-            message.onDelivery(error instanceof KafkaError ? error : new KafkaError(-1, String(error)), null);
-          } catch { /* Delivery callbacks must not break flushing. */ }
+            message.onDelivery(
+              error instanceof KafkaError ? error : new KafkaError(-1, String(error)),
+              null,
+            );
+          } catch {
+            /* Delivery callbacks must not break flushing. */
+          }
         }
       }
     };
@@ -318,7 +396,11 @@ export class BunProducer {
         await this.initProducerId();
       }
 
-      const configs = Map.groupBy(pending, ({ input }) => `${input.acks ?? 1}\0${input.timeoutMs ?? 30_000}\0${input.compression ?? this.#options.compression}`);
+      const configs = Map.groupBy(
+        pending,
+        ({ input }) =>
+          `${input.acks ?? 1}\0${input.timeoutMs ?? 30_000}\0${input.compression ?? this.#options.compression}`,
+      );
       for (const group of configs.values()) {
         const topics = Map.groupBy(group, ({ input }) => input.topic);
         const first = group[0]!.input;
@@ -328,45 +410,97 @@ export class BunProducer {
         let routedPartitions: PartitionRecords[] = [];
         for (let attempt = 0; attempt <= this.#cluster.retryOptions.maxRetries; attempt++) {
           try {
-            routedPartitions = (await Promise.all([...topics].map(async ([topic, sends]) => {
-              const messages = sends.flatMap(({ input }) => input.messages);
-              return this.#route(topic, messages, sends[0]!.input.timeoutMs ?? 30_000, attempt > 0);
-            }))).flat();
+            routedPartitions = (
+              await Promise.all(
+                [...topics].map(async ([topic, sends]) => {
+                  const messages = sends.flatMap(({ input }) => input.messages);
+                  return this.#route(
+                    topic,
+                    messages,
+                    sends[0]!.input.timeoutMs ?? 30_000,
+                    attempt > 0,
+                  );
+                }),
+              )
+            ).flat();
             await this.#addPartitionsToTxn(routedPartitions);
             if ((first.acks ?? 1) === 0) {
               // Fire-and-forget: brokers never answer acks=0 Produce requests.
               const leaders = Map.groupBy(routedPartitions, (partition) => partition.leader);
-              await Promise.all([...leaders].map(([leader, leaderPartitions]) =>
-                this.#cluster.fireAndForget(leader, API_PRODUCE, 3,
-                  this.#produceRequestBody(leaderPartitions, 0, first.timeoutMs ?? 30_000, compression))));
-              results = routedPartitions.map((group) => ({ topic: group.topic, partition: group.partition, baseOffset: -1n, logAppendTime: -1n }));
+              await Promise.all(
+                [...leaders].map(([leader, leaderPartitions]) =>
+                  this.#cluster.fireAndForget(
+                    leader,
+                    API_PRODUCE,
+                    3,
+                    this.#produceRequestBody(
+                      leaderPartitions,
+                      0,
+                      first.timeoutMs ?? 30_000,
+                      compression,
+                    ),
+                  ),
+                ),
+              );
+              results = routedPartitions.map((group) => ({
+                topic: group.topic,
+                partition: group.partition,
+                baseOffset: -1n,
+                logAppendTime: -1n,
+              }));
             } else {
-              const acks = this.#options.idempotent || this.#transactionalId || first.acks === "all" ? -1 : 1;
-              results = await this.#produce(routedPartitions, acks, first.timeoutMs ?? 30_000, compression);
+              const acks =
+                this.#options.idempotent || this.#transactionalId || first.acks === "all" ? -1 : 1;
+              results = await this.#produce(
+                routedPartitions,
+                acks,
+                first.timeoutMs ?? 30_000,
+                compression,
+              );
             }
             break;
           } catch (error) {
             lastError = error;
-            if (!(error instanceof KafkaError && error.retriable) || attempt === this.#cluster.retryOptions.maxRetries) throw error;
+            if (
+              !(error instanceof KafkaError && error.retriable) ||
+              attempt === this.#cluster.retryOptions.maxRetries
+            )
+              throw error;
             this.#cluster.bumpRetries();
             const delay = retryDelay(this.#cluster.retryOptions, attempt);
-            this.#cluster.log("warn", `retrying produce attempt ${attempt + 1} in ${delay}ms: ${String(error)}`);
-            this.#cluster.event({ type: "retry", apiKey: API_PRODUCE, attempt: attempt + 1, delayMs: delay, error });
+            this.#cluster.log(
+              "warn",
+              `retrying produce attempt ${attempt + 1} in ${delay}ms: ${String(error)}`,
+            );
+            this.#cluster.event({
+              type: "retry",
+              apiKey: API_PRODUCE,
+              attempt: attempt + 1,
+              delayMs: delay,
+              error,
+            });
             if (delay) await Bun.sleep(delay);
           }
         }
-        if (!results) throw lastError ?? new KafkaError(-1, "Kafka produce failed", { retriable: true });
+        if (!results)
+          throw lastError ?? new KafkaError(-1, "Kafka produce failed", { retriable: true });
         const byTopic = Map.groupBy(results, (result) => result.topic);
         for (const item of group) item.resolve(byTopic.get(item.input.topic) ?? []);
         // Per-message delivery callbacks use the authoritative partition routing.
-        const byPartition = new Map(results.map((result) => [partitionKey(result.topic, result.partition), result]));
+        const byPartition = new Map(
+          results.map((result) => [partitionKey(result.topic, result.partition), result]),
+        );
         for (const routed of routedPartitions) {
           const result = byPartition.get(partitionKey(routed.topic, routed.partition));
           if (!result) continue;
           for (const message of routed.messages) {
             if (!message.onDelivery || notified.has(message.onDelivery)) continue;
             notified.add(message.onDelivery);
-            try { message.onDelivery(null, result); } catch { /* Delivery callbacks must not break flushing. */ }
+            try {
+              message.onDelivery(null, result);
+            } catch {
+              /* Delivery callbacks must not break flushing. */
+            }
           }
         }
       }
@@ -377,7 +511,12 @@ export class BunProducer {
     }
   }
 
-  async #route(topic: string, messages: readonly ProducerMessage[], timeoutMs: number, refresh = false): Promise<PartitionRecords[]> {
+  async #route(
+    topic: string,
+    messages: readonly ProducerMessage[],
+    timeoutMs: number,
+    refresh = false,
+  ): Promise<PartitionRecords[]> {
     let metadata: TopicMetadata | undefined;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -388,16 +527,24 @@ export class BunProducer {
     }
     if (!metadata?.partitions.length || metadata.err) throw kafkaError(metadata?.err ?? 3, topic);
 
-    const partitionMetadata = new Map(metadata.partitions.map((partition) => [partition.id, partition]));
+    const partitionMetadata = new Map(
+      metadata.partitions.map((partition) => [partition.id, partition]),
+    );
     const partitions = new Map<number, PartitionRecords>();
     for (const message of messages) {
       const key = asBytes(message.key);
       let partition = message.partition;
       if (partition === undefined) {
         if (this.#producerPartitioner) {
-          const chosen = this.#producerPartitioner({ topic, partitionCount: metadata.partitions.length, key });
+          const chosen = this.#producerPartitioner({
+            topic,
+            partitionCount: metadata.partitions.length,
+            key,
+          });
           if (!Number.isInteger(chosen) || chosen < 0 || chosen >= metadata.partitions.length) {
-            throw new RangeError(`Custom partitioner returned invalid partition ${chosen} for ${topic}`);
+            throw new RangeError(
+              `Custom partitioner returned invalid partition ${chosen} for ${topic}`,
+            );
           }
           partition = chosen;
         } else if (key) partition = (murmur2(key) & 0x7fffffff) % metadata.partitions.length;
@@ -420,43 +567,79 @@ export class BunProducer {
     return [...partitions.values()];
   }
 
-  #produceRequestBody(leaderPartitions: PartitionRecords[], acks: number, timeoutMs: number, compression = this.#options.compression): Writer {
+  #produceRequestBody(
+    leaderPartitions: PartitionRecords[],
+    acks: number,
+    timeoutMs: number,
+    compression = this.#options.compression,
+  ): Writer {
     const topics = Map.groupBy(leaderPartitions, (partition) => partition.topic);
     // Produce v3+: brokers reject transactional batches whose request omits the
     // matching transactional_id, so it must ride along on every produce.
-    return new Writer().string(this.#transactionalId ?? null).i16(acks).i32(timeoutMs).array([...topics], (writer, [topic, topicPartitions]) => {
-      writer.string(topic).array(topicPartitions, (partitionWriter, value) => {
-        const key = partitionKey(value.topic, value.partition);
-        const producer = this.#producer && { ...this.#producer, sequence: this.#sequences.get(key) ?? 0, transactional: Boolean(this.#transactionalId && this.#txnOpen) };
-        partitionWriter.i32(value.partition).bytes(encodeRecordBatch(value.records, Date.now(), this.#options.compression, producer));
+    return new Writer()
+      .string(this.#transactionalId ?? null)
+      .i16(acks)
+      .i32(timeoutMs)
+      .array([...topics], (writer, [topic, topicPartitions]) => {
+        writer.string(topic).array(topicPartitions, (partitionWriter, value) => {
+          const key = partitionKey(value.topic, value.partition);
+          const producer = this.#producer && {
+            ...this.#producer,
+            sequence: this.#sequences.get(key) ?? 0,
+            transactional: Boolean(this.#transactionalId && this.#txnOpen),
+          };
+          partitionWriter
+            .i32(value.partition)
+            .bytes(
+              encodeRecordBatch(value.records, Date.now(), this.#options.compression, producer),
+            );
+        });
       });
-    });
   }
 
-  async #produce(partitions: PartitionRecords[], acks: number, timeoutMs: number, compression?: ProducerOptions["compression"]): Promise<ProduceResult[]> {
+  async #produce(
+    partitions: PartitionRecords[],
+    acks: number,
+    timeoutMs: number,
+    compression?: ProducerOptions["compression"],
+  ): Promise<ProduceResult[]> {
     const leaders = Map.groupBy(partitions, (partition) => partition.leader);
-    const responses = await Promise.all([...leaders].map(async ([leader, leaderPartitions]) => {
-      const body = this.#produceRequestBody(leaderPartitions, acks, timeoutMs, compression);
-      const response = await this.#cluster.request(leader, API_PRODUCE, 3, body, timeoutMs, false);
-      const results = response.array((topicReader) => {
-        const topic = topicReader.string() ?? "";
-        return topicReader.array((partitionReader) => {
-          const partition = partitionReader.i32();
-          const error = partitionReader.i16();
-          const baseOffset = partitionReader.i64();
-          const logAppendTime = partitionReader.i64();
-          if (error) throw kafkaError(error, `${topic}[${partition}]`);
-          return { topic, partition, baseOffset, logAppendTime };
-        });
-      }).flat();
-      this.#cluster.throttle(API_PRODUCE, response.i32());
-      return results;
-    }));
+    const responses = await Promise.all(
+      [...leaders].map(async ([leader, leaderPartitions]) => {
+        const body = this.#produceRequestBody(leaderPartitions, acks, timeoutMs, compression);
+        const response = await this.#cluster.request(
+          leader,
+          API_PRODUCE,
+          3,
+          body,
+          timeoutMs,
+          false,
+        );
+        const results = response
+          .array((topicReader) => {
+            const topic = topicReader.string() ?? "";
+            return topicReader.array((partitionReader) => {
+              const partition = partitionReader.i32();
+              const error = partitionReader.i16();
+              const baseOffset = partitionReader.i64();
+              const logAppendTime = partitionReader.i64();
+              if (error) throw kafkaError(error, `${topic}[${partition}]`);
+              return { topic, partition, baseOffset, logAppendTime };
+            });
+          })
+          .flat();
+        this.#cluster.throttle(API_PRODUCE, response.i32());
+        return results;
+      }),
+    );
     const results = responses.flat();
     if (this.#producer) {
       for (const partition of partitions) {
         const key = partitionKey(partition.topic, partition.partition);
-        this.#sequences.set(key, ((this.#sequences.get(key) ?? 0) + partition.records.length) % 0x80000000);
+        this.#sequences.set(
+          key,
+          ((this.#sequences.get(key) ?? 0) + partition.records.length) % 0x80000000,
+        );
       }
     }
     return results;
@@ -466,13 +649,21 @@ export class BunProducer {
     if (this.#closed) return;
     await this.flush();
     if (this.#txnOpen) {
-      try { await this.abortTransaction(); } catch { /* Best-effort abort during shutdown. */ }
+      try {
+        await this.abortTransaction();
+      } catch {
+        /* Best-effort abort during shutdown. */
+      }
     }
     this.#closed = true;
     if (this.#ownsCluster) this.#cluster.close();
     this.#onClose();
   }
 
-  disconnect(): Promise<void> { return this.close(); }
-  #open(): void { if (this.#closed) throw new Error("Producer is closed"); }
+  disconnect(): Promise<void> {
+    return this.close();
+  }
+  #open(): void {
+    if (this.#closed) throw new Error("Producer is closed");
+  }
 }

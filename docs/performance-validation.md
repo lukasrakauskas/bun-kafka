@@ -12,12 +12,12 @@ A recorded short soak passes all gates that apply to its duration. The 24-hour a
 
 The recorded local baseline uses Bun 1.4.0, TypeScript 7.0.2, Redpanda 25.2.1, one partition, 5,000 messages, 100-byte values, and leader acknowledgements.
 
-| Measurement | Result |
-|---|---:|
-| End-to-end wall time | 239.5 ms |
-| Produce median | 22,691 msg/s |
-| Consume median | 621,956 msg/s |
-| Difference from franz-go end to end | 14% slower |
+| Measurement                         |        Result |
+| ----------------------------------- | ------------: |
+| End-to-end wall time                |      239.5 ms |
+| Produce median                      |  22,691 msg/s |
+| Consume median                      | 621,956 msg/s |
+| Difference from franz-go end to end |    14% slower |
 
 See [benchmarks.md](benchmarks.md) for the method and the full comparison.
 
@@ -59,23 +59,23 @@ Run all required service profiles. Do not use one 100-byte, one-partition result
 
 ### Message profiles
 
-| Profile | Value size | Key | Headers |
-|---|---:|---:|---:|
-| Small event | 100 B | 16 B | None |
-| Normal event | 1 KiB | 16 B | 4 × 32 B |
-| Large event | 10 KiB | 32 B | 4 × 64 B |
-| Very large event | 100 KiB | 32 B | 8 × 64 B |
+| Profile          | Value size |  Key |  Headers |
+| ---------------- | ---------: | ---: | -------: |
+| Small event      |      100 B | 16 B |     None |
+| Normal event     |      1 KiB | 16 B | 4 × 32 B |
+| Large event      |     10 KiB | 32 B | 4 × 64 B |
+| Very large event |    100 KiB | 32 B | 8 × 64 B |
 
 Add the real service schema as a separate profile.
 
 ### Partition and concurrency profiles
 
-| Profile | Partitions | Producers | Active consumer partitions |
-|---|---:|---:|---:|
-| Minimum | 1 | 1 | 1 |
-| Normal | 12 | 4 | 12 |
-| High parallelism | 48 | 16 | 48 |
-| Connection pressure | 48 | 64 | 48 |
+| Profile             | Partitions | Producers | Active consumer partitions |
+| ------------------- | ---------: | --------: | -------------------------: |
+| Minimum             |          1 |         1 |                          1 |
+| Normal              |         12 |         4 |                         12 |
+| High parallelism    |         48 |        16 |                         48 |
+| Connection pressure |         48 |        64 |                         48 |
 
 The current consumer uses manual assignment. The harness must assign each partition exactly once.
 
@@ -249,16 +249,16 @@ The harness samples these values at least every `SOAK_SAMPLE_INTERVAL_S` (defaul
 
 Environment: Bun 1.4.0, Linux x64, 4 CPUs, single-node Redpanda dev container, plaintext, commit `72b01a4` plus this harness.
 
-| Measurement | Result |
-|---|---:|
-| Duration | 1,800 s |
-| Workload | 1 KiB values, 6 partitions, acks=all, 1,000 msg/s base rate, 1.5x/60 s bursts every 300 s |
-| Offered / acknowledged / consumed | 1,959,750 / 1,959,750 / 1,959,750 |
-| Failed acks / duplicates / order violations / missing | 0 / 0 / 0 / 0 |
-| Send latency p50/p95/p99/max | 10 / 20 / 20 / ~20 ms |
-| Fetch latency p50/p95/p99/max | 50 / 100 / 100 / 252 ms |
-| RSS start -> end, post-warmup range | 50 MiB -> 54 MiB, 7.5 MiB range |
-| CPU use | ~10-13% |
+| Measurement                                           |                                                                                    Result |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------: |
+| Duration                                              |                                                                                   1,800 s |
+| Workload                                              | 1 KiB values, 6 partitions, acks=all, 1,000 msg/s base rate, 1.5x/60 s bursts every 300 s |
+| Offered / acknowledged / consumed                     |                                                         1,959,750 / 1,959,750 / 1,959,750 |
+| Failed acks / duplicates / order violations / missing |                                                                             0 / 0 / 0 / 0 |
+| Send latency p50/p95/p99/max                          |                                                                     10 / 20 / 20 / ~20 ms |
+| Fetch latency p50/p95/p99/max                         |                                                                   50 / 100 / 100 / 252 ms |
+| RSS start -> end, post-warmup range                   |                                                           50 MiB -> 54 MiB, 7.5 MiB range |
+| CPU use                                               |                                                                                   ~10-13% |
 
 All gates applicable to the run duration passed: zero failed acknowledgements, zero duplicates, per-partition ordering intact, zero missing records after drain, no unhandled rejections, memory growth below 64 MiB, throughput decay below 5% (first quarter 1,025 msg/s vs final quarter 1,093 msg/s), p95/p99 drift within limits, and lag recovery after every burst.
 

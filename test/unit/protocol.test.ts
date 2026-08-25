@@ -1,8 +1,17 @@
 import { describe, expect, test } from "bun:test";
 import { KafkaError } from "../../index.ts";
-import { Reader, RecordSetDecoder, Writer, crc32c, decodeRecordSet, encodeRecordBatch, murmur2 } from "../../src/bun/protocol.ts";
+import {
+  Reader,
+  RecordSetDecoder,
+  Writer,
+  crc32c,
+  decodeRecordSet,
+  encodeRecordBatch,
+  murmur2,
+} from "../../src/bun/protocol.ts";
 
-const decode = (value: Uint8Array | null) => value === null ? null : new TextDecoder().decode(value);
+const decode = (value: Uint8Array | null) =>
+  value === null ? null : new TextDecoder().decode(value);
 
 describe("Kafka wire protocol primitives", () => {
   test("record batches preserve values, keys, headers, offsets, and timestamps", () => {
@@ -24,7 +33,10 @@ describe("Kafka wire protocol primitives", () => {
   });
 
   test("grows record batches beyond the initial writer buffer", () => {
-    const records = Array.from({ length: 500 }, (_, i) => ({ key: String(i), value: new Uint8Array(100) }));
+    const records = Array.from({ length: 500 }, (_, i) => ({
+      key: String(i),
+      value: new Uint8Array(100),
+    }));
     expect(decodeRecordSet(encodeRecordBatch(records), "large", 0, 1)).toHaveLength(500);
   });
 
@@ -34,7 +46,9 @@ describe("Kafka wire protocol primitives", () => {
     const messages = [];
     while (!decoder.done) messages.push(...decoder.read(7));
     expect(messages).toHaveLength(25);
-    expect(messages.map((message) => message.offset)).toEqual(Array.from({ length: 25 }, (_, i) => BigInt(i)));
+    expect(messages.map((message) => message.offset)).toEqual(
+      Array.from({ length: 25 }, (_, i) => BigInt(i)),
+    );
     expect(messages[0]!.value!.buffer).toBe(batch.buffer);
 
     const copied = new RecordSetDecoder(batch, "paged", 0, 1, { copy: true }).read(1);
@@ -46,8 +60,16 @@ describe("Kafka wire protocol primitives", () => {
     for (const value of [-2147483648, -1, 0, 1, 2147483647]) writer.varInt(value);
     for (const value of [-9007199254740991n, -1n, 0n, 1n, 9007199254740991n]) writer.varLong(value);
     const reader = new Reader(writer.result());
-    expect(Array.from({ length: 5 }, () => reader.varInt())).toEqual([-2147483648, -1, 0, 1, 2147483647]);
-    expect(Array.from({ length: 5 }, () => reader.varLong())).toEqual([-9007199254740991n, -1n, 0n, 1n, 9007199254740991n]);
+    expect(Array.from({ length: 5 }, () => reader.varInt())).toEqual([
+      -2147483648, -1, 0, 1, 2147483647,
+    ]);
+    expect(Array.from({ length: 5 }, () => reader.varLong())).toEqual([
+      -9007199254740991n,
+      -1n,
+      0n,
+      1n,
+      9007199254740991n,
+    ]);
   });
 
   test("CRC32C uses the Kafka polynomial and rejects corruption", () => {
@@ -65,11 +87,17 @@ describe("Kafka wire protocol primitives", () => {
     batches.set(zstd, gzip.byteLength);
     expect(new DataView(gzip.buffer, gzip.byteOffset, gzip.byteLength).getInt16(21)).toBe(1);
     expect(new DataView(zstd.buffer, zstd.byteOffset, zstd.byteLength).getInt16(21)).toBe(4);
-    expect(decodeRecordSet(batches, "compressed", 0, 1).map((message) => decode(message.value))).toEqual(["one", "two"]);
+    expect(
+      decodeRecordSet(batches, "compressed", 0, 1).map((message) => decode(message.value)),
+    ).toEqual(["one", "two"]);
   });
 
   test("idempotent batches carry producer identity and sequence", () => {
-    const batch = encodeRecordBatch([{ value: "one" }], 1, "none", { id: 42n, epoch: 3, sequence: 9 });
+    const batch = encodeRecordBatch([{ value: "one" }], 1, "none", {
+      id: 42n,
+      epoch: 3,
+      sequence: 9,
+    });
     const view = new DataView(batch.buffer, batch.byteOffset, batch.byteLength);
     expect(view.getBigInt64(43)).toBe(42n);
     expect(view.getInt16(51)).toBe(3);

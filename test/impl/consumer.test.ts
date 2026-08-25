@@ -12,7 +12,12 @@ describe("Consumer", () => {
     try {
       await c.subscribe(name);
       const got: string[] = [];
-      while (got.length < 25) got.push(...(await c.fetch({ maxWaitMs: 200, maxMessages: 25 - got.length })).map((m) => dec(m.value)!));
+      while (got.length < 25)
+        got.push(
+          ...(await c.fetch({ maxWaitMs: 200, maxMessages: 25 - got.length })).map((m) =>
+            dec(m.value)!,
+          ),
+        );
       expect(got[0]).toBe("hello-0");
       expect(got[24]).toBe("hello-24");
     } finally {
@@ -51,7 +56,9 @@ describe("Consumer", () => {
     const c = consumer();
     try {
       await c.assign([{ topic: name, partition: 0, offset: "earliest" }]);
-      const first = (await waitFor(() => c.fetch({ maxWaitMs: 500, maxMessages: 1 }).then((messages) => messages[0])));
+      const first = await waitFor(() =>
+        c.fetch({ maxWaitMs: 500, maxMessages: 1 }).then((messages) => messages[0]),
+      );
       expect(first.partition).toBe(0);
       const start = first.offset;
       await c.fetch({ maxWaitMs: 500, maxMessages: 4 });

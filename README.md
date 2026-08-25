@@ -38,9 +38,7 @@ Manual assignment is available without a group:
 ```ts
 const consumer = kafka.consumer({ fromBeginning: true });
 
-await consumer.assign([
-  { topic: "events", partition: 0, offset: "earliest" },
-]);
+await consumer.assign([{ topic: "events", partition: 0, offset: "earliest" }]);
 
 for await (const message of consumer) {
   console.log(new TextDecoder().decode(message.value!));
@@ -74,7 +72,7 @@ Set `partitionAssigner: "cooperative-sticky"` for KIP-429 incremental rebalancin
 const producer = kafka.producer({ transactionalId: "orders-1" });
 await producer.beginTransaction();
 await producer.send({ topic: "events", messages: [{ value: "batch-1" }] });
-await producer.commitTransaction();   // or abortTransaction()
+await producer.commitTransaction(); // or abortTransaction()
 ```
 
 Transactional producers resolve their transaction coordinator, force all-replica acknowledgements, register touched partitions with `AddPartitionsToTxn`, and bump the producer epoch after every transaction. Consumers pair with them through `kafka.consumer({ isolationLevel: "read_committed" })`, which filters aborted transaction records and control markers.
@@ -87,7 +85,7 @@ Fetches use incremental sessions (KIP-227): idle partitions are pruned from requ
 
 ```ts
 const admin = kafka.admin();
-const metadata = await admin.metadata();       // all topics
+const metadata = await admin.metadata(); // all topics
 const one = await admin.metadata(["events"]); // selected topics
 await admin.createTopics([{ name: "audit", numPartitions: 3 }]);
 await admin.createPartitions([{ name: "audit", count: 6 }]);
@@ -116,33 +114,33 @@ const kafka = new Kafka({
 
 ## Current protocol support
 
-| Feature | Status |
-|---|---|
-| Bun TCP and TLS | Yes |
-| Metadata API | Yes |
-| Produce with acks 0/1/all and automatic batching | Yes |
-| Gzip, Zstandard, Snappy, and LZ4 record-batch compression | Yes |
-| Bounded request retries, events, and metadata refresh | Partial |
-| Kafka record batches (magic 2) | Yes |
-| Keys, values, timestamps, and headers | Yes |
-| CRC32C validation | Yes |
-| Kafka-compatible Murmur2 partitioning and custom partitioners | Yes |
-| Bounded, zero-copy manual consume and offset lookup | Yes |
-| Topic and config administration | Yes |
-| Consumer groups with static membership (KIP-345) | Yes |
-| Cooperative-sticky rebalancing (KIP-429) | Yes |
-| Incremental fetch sessions (KIP-227) | Yes |
-| Read-committed isolation | Yes |
-| SASL/PLAIN and SCRAM-SHA-256/512 | Yes |
-| SASL/OAUTHBEARER static or provider token | Yes |
-| Timed OAuth reauthentication (KIP-368) | Yes |
-| Kerberos/GSSAPI | Not yet |
-| Idempotent produce | Yes |
-| Transactions | Yes |
-| Admin topic, config, group, ACL, quota, and delegation-token changes | Yes |
-| Health/stats hooks and logging | Yes |
-| Proxy support | No |
-| Per-message delivery callbacks | Yes |
+| Feature                                                              | Status  |
+| -------------------------------------------------------------------- | ------- |
+| Bun TCP and TLS                                                      | Yes     |
+| Metadata API                                                         | Yes     |
+| Produce with acks 0/1/all and automatic batching                     | Yes     |
+| Gzip, Zstandard, Snappy, and LZ4 record-batch compression            | Yes     |
+| Bounded request retries, events, and metadata refresh                | Partial |
+| Kafka record batches (magic 2)                                       | Yes     |
+| Keys, values, timestamps, and headers                                | Yes     |
+| CRC32C validation                                                    | Yes     |
+| Kafka-compatible Murmur2 partitioning and custom partitioners        | Yes     |
+| Bounded, zero-copy manual consume and offset lookup                  | Yes     |
+| Topic and config administration                                      | Yes     |
+| Consumer groups with static membership (KIP-345)                     | Yes     |
+| Cooperative-sticky rebalancing (KIP-429)                             | Yes     |
+| Incremental fetch sessions (KIP-227)                                 | Yes     |
+| Read-committed isolation                                             | Yes     |
+| SASL/PLAIN and SCRAM-SHA-256/512                                     | Yes     |
+| SASL/OAUTHBEARER static or provider token                            | Yes     |
+| Timed OAuth reauthentication (KIP-368)                               | Yes     |
+| Kerberos/GSSAPI                                                      | Not yet |
+| Idempotent produce                                                   | Yes     |
+| Transactions                                                         | Yes     |
+| Admin topic, config, group, ACL, quota, and delegation-token changes | Yes     |
+| Health/stats hooks and logging                                       | Yes     |
+| Proxy support                                                        | No      |
+| Per-message delivery callbacks                                       | Yes     |
 
 The fixed API versions require Kafka 0.11 or newer. Use a current Kafka or Redpanda release.
 
