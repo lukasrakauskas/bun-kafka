@@ -255,6 +255,7 @@ export class Connection {
     frame.patchI32(0, frame.length - 4);
     this.#requests++;
     this.#bytesSent += frame.length;
+    if (process.env.DEBUG_TXKEYS) console.error("TX", apiKey, "v"+apiVersion);
 
     return new Promise<Reader>((resolve, reject) => {
       const timer = setTimeout(() => {

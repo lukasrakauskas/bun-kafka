@@ -63,7 +63,7 @@ describe("Static group membership", () => {
             else if (key === 11) body = new Writer().i32(0).i16(0).i32(1).string("range").string("member-static").string("member-static").array(["member-static"], (writer, member) => writer.string(member).bytes(memberMetadata));
             else if (key === 14) body = new Writer().i32(0).i16(0).bytes(assignment);
             else if (key === 9) body = new Writer().array(["events"], (writer, topicName) => writer.string(topicName).array([0], (item, partition) => item.i32(partition).i64(7).string(null).i16(0))).i16(0);
-            else if (key === 8) body = new Writer().i32(0).array(["events"], (writer, topicName) => writer.string(topicName).array([0], (item, partition) => item.i32(partition).i16(0)));
+            else if (key === 8) body = new Writer().array(["events"], (writer, topicName) => writer.string(topicName).array([0], (item, partition) => item.i32(partition).i16(0)));
             else body = new Writer().i16(0);
             const response = new Writer().i32(0).i32(correlation).raw(body.result());
             response.patchI32(0, response.length - 4);
@@ -132,7 +132,7 @@ describe("Static group membership", () => {
                 : key === 11 ? new Writer().i32(0).i16(0).i32(1).string("range").string("m1").string("m1").array(["m1"], (w, m) => w.string(m).bytes(memberMetadata))
                   : key === 14 ? new Writer().i16(0).bytes(assignment)
                     : key === 9 ? new Writer().array(["events"], (w, t) => w.string(t).array([0], (item, p) => item.i32(p).i64(7).string(null).i16(0))).i16(0)
-                      : key === 8 ? new Writer().i32(0).array(["events"], (w, t) => w.string(t).array([0], (item, p) => item.i32(p).i16(0)))
+                      : key === 8 ? new Writer().array(["events"], (w, t) => w.string(t).array([0], (item, p) => item.i32(p).i16(0)))
                         : new Writer().i16(0);
           const response = new Writer().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);

@@ -231,7 +231,7 @@ describe("Bun native Kafka protocol", () => {
               : key === 11 ? new Writer().i32(0).i16(0).i32(1).string("range").string("member-1").string("member-1").array(["member-1"], (writer, member) => writer.string(member).bytes(memberMetadata))
                 : key === 14 ? new Writer().i16(0).bytes(assignment)
                   : key === 9 ? new Writer().array(["events"], (writer, topic) => writer.string(topic).array([0], (item, partition) => item.i32(partition).i64(12).string(null).i16(0))).i16(0)
-                    : key === 8 ? new Writer().i32(0).array(["events"], (writer, topic) => writer.string(topic).array([0], (item, partition) => item.i32(partition).i16(0)))
+                    : key === 8 ? new Writer().array(["events"], (writer, topic) => writer.string(topic).array([0], (item, partition) => item.i32(partition).i16(0)))
                       : new Writer().i16(0);
           const response = new Writer().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);

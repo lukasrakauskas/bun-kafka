@@ -863,10 +863,11 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
     if (!this.#groupId) throw new Error("Consumer groupId is required for offset commits");
     const coordinator = await this.#findCoordinator();
     const topics = Map.groupBy(assignments, (assignment) => assignment.topic);
-    const body = new Writer().string(this.#groupId).i32(this.#generationId).string(this.#memberId).i32(-1)
+    // OffsetCommit v2 carries retention_period_ms as INT64 (not INT32) and its
+    // response only gained throttle_time_ms in v3.
+    const body = new Writer().string(this.#groupId).i32(this.#generationId).string(this.#memberId).i64(-1n)
       .array([...topics], (writer, [topic, values]) => writer.string(topic).array(values, (partitionWriter, value) => partitionWriter.i32(value.partition).i64(typeof value.offset === "bigint" ? value.offset : this.#positions.get(partitionKey(topic, value.partition)) ?? 0n).string(null)));
     const response = await this.#cluster.request(coordinator, API_OFFSET_COMMIT, 2, body);
-    this.#cluster.throttle(API_OFFSET_COMMIT, response.i32());
     for (const result of response.array((reader) => ({ topic: reader.string() ?? "", partitions: reader.array((reader) => ({ partition: reader.i32(), error: reader.i16() })) }))) {
       for (const partition of result.partitions) if (partition.error) throw kafkaError(partition.error, `${result.topic}[${partition.partition}]`);
     }
