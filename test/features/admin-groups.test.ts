@@ -103,5 +103,61 @@ describe("Admin: group and record management", () => {
       listener.stop(true);
     }
   }, 15_000);
+
+  test("createAcls, describeAcls, and deleteAcls decode responses", async () => {
+    let sawCreate = false;
+    let sawDescribe = false;
+    let sawDelete = false;
+    const listener = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data(socket, request) {
+          let offset = 0;
+          while (offset < request.byteLength) {
+            const size = new DataView(request.buffer, request.byteOffset + offset).getInt32(0);
+            const frameView = new DataView(request.buffer, request.byteOffset + offset + 4, 8);
+            const key = frameView.getInt16(0);
+            const correlation = new DataView(request.buffer, request.byteOffset + offset + 4 + 8 - 4, 4).getInt32(0);
+            if (key === 30) sawCreate = true;
+            if (key === 29) sawDescribe = true;
+            if (key === 31) sawDelete = true;
+            let body: Writer;
+            if (key === 18) body = apiVersions();
+            else if (key === 3) body = metadataBody(listener.port);
+            else if (key === 30) body = new Writer().i32(0).array(["acl"], (writer) => writer.i16(0).string(null));
+            else if (key === 29) body = new Writer().i32(0).i16(0).string(null)
+              .array([{ type: 2, name: "acl-topic" }], (writer, r) => writer.i8(r.type).string(r.name)
+                .array([{ principal: "User:bun-kafka-test", host: "*" }], (aclWriter, acl) => aclWriter.string(acl.principal).string(acl.host).i8(3).i8(3)));
+            else if (key === 31) body = new Writer().i32(0)
+              .array([true], (writer) => writer.i16(0).string(null)
+                .array([{ error: 0, principal: "User:bun-kafka-test" }], (aclWriter, acl) => aclWriter.i16(acl.error).string(null).i8(2).string("acl-topic").string(acl.principal).string("*").i8(3).i8(3)));
+            else body = new Writer().i16(0);
+            const response = new Writer().i32(0).i32(correlation).raw(body.result());
+            response.patchI32(0, response.length - 4);
+            socket.write(response.result());
+            offset += 4 + size;
+          }
+        },
+      },
+    });
+    const kafka = new Kafka({ brokers: [`127.0.0.1:${listener.port}`] });
+    try {
+      const a = kafka.admin();
+      const binding = { resourceType: 2, resourceName: "acl-topic", principal: "User:bun-kafka-test", host: "*", operation: 3, permissionType: 3 };
+      expect(await a.createAcls([binding])).toEqual([{ error: 0, message: null }]);
+      const listed = await a.describeAcls({ resourceType: 2, resourceName: "acl-topic", operation: 3, permissionType: 3 });
+      expect(listed).toMatchObject({ error: 0, message: null });
+      expect(listed.acls[0]).toEqual({ resourceType: 2, resourceName: "acl-topic", principal: "User:bun-kafka-test", host: "*", operation: 3, permissionType: 3 });
+      const removed = await a.deleteAcls([{ resourceType: 2, resourceName: "acl-topic", principal: "User:bun-kafka-test", operation: 3, permissionType: 3 }]);
+      expect(removed[0]).toMatchObject({ error: 0 });
+      expect(removed[0]?.acls[0]).toMatchObject({ error: 0, resourceType: 2, resourceName: "acl-topic", principal: "User:bun-kafka-test" });
+      expect(sawCreate && sawDescribe && sawDelete).toBe(true);
+      await a.close();
+    } finally {
+      await kafka.disconnect();
+      listener.stop(true);
+    }
+  }, 15_000);
 });
 
