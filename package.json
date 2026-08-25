@@ -10,9 +10,12 @@
     ".": "./index.ts"
   },
   "scripts": {
-    "test": "bun test test/bun-native.test.ts",
-    "test:integration": "bun test test/bun-integration.test.ts",
-    "test:chaos:mock": "bun test test/chaos.test.ts",
+    "test": "bun test test/unit test/features",
+    "test:unit": "bun test test/unit",
+    "test:features": "bun test test/features",
+    "test:coverage": "bun test --coverage test/unit test/features",
+    "test:integration": "bun test test/impl/bun-integration.test.ts",
+    "test:chaos:mock": "bun test test/impl/chaos.test.ts",
     "test:chaos": "bun scripts/chaos.ts",
     "test:soak": "bun scripts/soak.ts",
     "typecheck": "bunx tsc --noEmit",

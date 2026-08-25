@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Kafka } from "../index.ts";
+import { Kafka } from "../../index.ts";
 
 const brokers = process.env.KAFKA_BROKERS?.split(",");
 const integration = brokers ? describe : describe.skip;

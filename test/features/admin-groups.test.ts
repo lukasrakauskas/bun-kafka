@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { Kafka } from "../index.ts";
-import { Writer } from "../src/bun/protocol.ts";
-import { admin, topic } from "./helpers.ts";
+import { Kafka } from "../../index.ts";
+import { Writer } from "../../src/bun/protocol.ts";
+import { admin, topic } from "../helpers.ts";
 
 const apiVersions = () => new Writer().i16(0).array(Array.from({ length: 64 }, (_, key) => key), (writer, key) => writer.i16(key).i16(0).i16(20));
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Kafka, KafkaError } from "../index.ts";
-import { Reader, RecordSetDecoder, Writer, crc32c, encodeRecordBatch } from "../src/bun/protocol.ts";
+import { Kafka, KafkaError } from "../../index.ts";
+import { Reader, RecordSetDecoder, Writer, crc32c, encodeRecordBatch } from "../../src/bun/protocol.ts";
 
 type Request = { apiKey: number; correlation: number; count: number; socket: Bun.Socket };
 type MockBroker = { address: string; close(): void; active(): number };

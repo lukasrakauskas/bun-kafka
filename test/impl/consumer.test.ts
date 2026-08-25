@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { consumer, dec, produceN, producer, topic, waitFor } from "./helpers.ts";
+import { consumer, dec, produceN, producer, topic, waitFor } from "../helpers.ts";
 
 describe("Consumer", () => {
   test("subscribe + fetch consumes all messages", async () => {

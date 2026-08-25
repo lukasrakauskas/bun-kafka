@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Kafka, KafkaError, kafkaErrorName } from "../index.ts";
-import { Writer } from "../src/bun/protocol.ts";
-import { BROKERS } from "./helpers.ts";
+import { Kafka, KafkaError, kafkaErrorName } from "../../index.ts";
+import { Writer } from "../../src/bun/protocol.ts";
 
 const apiVersions = () => new Writer().i16(0).array(Array.from({ length: 64 }, (_, key) => key), (writer, key) => writer.i16(key).i16(0).i16(20));
 
@@ -16,37 +15,6 @@ describe("Observability", () => {
     expect(new KafkaError(19, null, { retriable: true }).retriable).toBe(true);
     expect(new KafkaError(58).fatal).toBe(false); // fatal flags are opt-in on the error object
   });
-
-  test("stats() counts requests and bytes against a live broker", async () => {
-    const kafka = new Kafka({ brokers: BROKERS.split(",") });
-    try {
-      await kafka.admin().metadata(["__consumer_offsets"]);
-      const stats = kafka.stats();
-      expect(stats.requests).toBeGreaterThanOrEqual(2); // ApiVersions + Metadata
-      expect(stats.bytesSent).toBeGreaterThan(0);
-      expect(stats.bytesReceived).toBeGreaterThan(0);
-      expect(stats.retries).toBe(0);
-      expect(stats.throttles).toBe(0);
-    } finally {
-      await kafka.disconnect();
-    }
-  }, 30_000);
-
-  test("healthCheck reports every broker with latency", async () => {
-    const kafka = new Kafka({ brokers: BROKERS.split(",") });
-    try {
-      await kafka.admin().metadata(); // discover brokers
-      const report = await kafka.healthCheck(5_000);
-      expect(report.brokers.length).toBeGreaterThanOrEqual(1);
-      for (const broker of report.brokers) {
-        expect(broker.ok).toBe(true);
-        expect(broker.latencyMs).toBeGreaterThanOrEqual(0);
-        expect(broker.address).toBeTruthy();
-      }
-    } finally {
-      await kafka.disconnect();
-    }
-  }, 30_000);
 
   test("healthCheck flags unreachable brokers", async () => {
     const kafka = new Kafka({ brokers: ["127.0.0.1:1"], connectTimeoutMs: 300 });

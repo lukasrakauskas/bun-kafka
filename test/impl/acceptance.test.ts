@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Kafka } from "../index.ts";
-import { BROKERS, dec, topic } from "./helpers.ts";
+import { Kafka } from "../../index.ts";
+import { BROKERS, dec, topic } from "../helpers.ts";
 
 describe("acceptance", () => {
   test("full produce/consume pipeline", async () => {

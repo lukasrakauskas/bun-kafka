@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { admin, produceN, producer, topic } from "./helpers.ts";
+import { admin, produceN, producer, topic } from "../helpers.ts";
 
 describe("Admin", () => {
   test("metadata returns brokers and topics", async () => {
