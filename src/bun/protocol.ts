@@ -234,10 +234,12 @@ export function encodeRecordBatch(
   records: readonly WireRecord[],
   now = Date.now(),
   compression: RecordCompression = "none",
-  producer: { id: bigint; epoch: number; sequence: number; control?: boolean } = { id: -1n, epoch: -1, sequence: -1 },
+  producer: { id: bigint; epoch: number; sequence: number; control?: boolean; transactional?: boolean } = { id: -1n, epoch: -1, sequence: -1 },
   baseOffset = 0n,
 ): Uint8Array {
   const recordAttributes = producer.control ? 0x20 : 0;
+  // Batch-header attributes bit 4 marks a transactional data batch.
+  const batchAttributes = compressionAttributes[compression] | (producer.transactional && !producer.control ? 0x10 : 0);
   if (!records.length) throw new RangeError("A record batch cannot be empty");
   if (!(compression in compressionAttributes)) throw new RangeError(`Unsupported Kafka compression: ${compression}`);
   const baseTimestamp = BigInt(records[0]!.timestamp ?? now);
@@ -283,7 +285,7 @@ export function encodeRecordBatch(
         : compression === "lz4" ? lz4Compress(rawRecords)
           : rawRecords;
   const writer = new Writer(61 + recordBytes.byteLength);
-  writer.i64(baseOffset).i32(0).i32(-1).i8(2).u32(0).i16(compressionAttributes[compression]).i32(records.length - 1)
+  writer.i64(baseOffset).i32(0).i32(-1).i8(2).u32(0).i16(batchAttributes).i32(records.length - 1)
     .i64(baseTimestamp).i64(maxTimestamp).i64(producer.id).i16(producer.epoch).i32(producer.sequence).i32(records.length)
     .raw(recordBytes);
   writer.patchI32(8, writer.length - 12);
@@ -369,8 +371,9 @@ export class RecordSetDecoder {
       }
       if (reader.offset !== recordEnd) throw new KafkaError(-1, "Invalid Kafka record fields");
       this.#recordsRemaining--;
-      // Transaction control records (KIP-98) carry abort/commit markers in the value.
-      if (recordAttributes & 0x20) {
+      // Transaction control records (KIP-98) carry abort/commit markers in the
+      // value; brokers flag them either per record or on the batch header.
+      if ((recordAttributes & 0x20) || (this.#attributes & 0x20)) {
         const firstControlByte = valueView?.[0];
         if (this.#aborted.has(this.#batchProducerId) && firstControlByte === 1 && (absoluteOffset >= (this.#aborted.get(this.#batchProducerId) ?? 0n))) {
           this.#aborted.delete(this.#batchProducerId);

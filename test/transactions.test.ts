@@ -24,10 +24,11 @@ describe("Transactions (mock broker)", () => {
             .array([{ name: "events" }], (writer, t) => writer.i16(0).string(t.name).bool(false).array([0], (pw) => pw.i16(0).i32(0).i32(1).array([1], (w) => w.i32(1)).array([1], (w) => w.i32(1))));
           let body: Writer;
           if (key === 18) body = apiVersions();
+          else if (key === 10) body = new Writer().i32(0).i16(0).string(null).i32(1).string("127.0.0.1").i32(listener.port); // FindCoordinator v2: txn coordinator is this mock broker
           else if (key === 3) body = metadata;
           else if (key === 22) body = new Writer().i32(0).i16(0).i64(500).i16(1); // pid=500 epoch=1
           else if (key === 24) body = new Writer().i32(0).array(["events"], (writer, t) => writer.string(t).array([0], (p) => p.i32(p.index ?? 0).i16(0)));
-          else if (key === 28) {
+          else if (key === 26) {
             // EndTxn body starts after header + client_id string; commit flag follows txn_id string + pid i64 + epoch i16.
             const clientIdLen = view.getInt16(12);
             const bodyStart = 14 + clientIdLen;
@@ -35,7 +36,8 @@ describe("Transactions (mock broker)", () => {
             const at = bodyStart + 2 + txnIdLen + 8 + 2;
             apiCalls.push({ key, flags: [new DataView(request.buffer, request.byteOffset + at, 1).getInt8(0)] });
             body = new Writer().i32(0).i16(0);
-          } else if (key === 0) {
+          } else if (key === 28) body = new Writer().i32(0).i16(0); // TxnOffsetCommit
+          else if (key === 0) {
             body = new Writer().i32(0).array(["events"], (writer, t) => writer.string(t).array([0], (p) => p.i32(0).i16(0).i64(10).i64(-1)));
           } else body = new Writer().i32(0).i16(0);
           if (!apiCalls.some((c) => c.key === key)) apiCalls.push({ key });
@@ -52,8 +54,8 @@ describe("Transactions (mock broker)", () => {
       await producer.beginTransaction();
       await producer.send({ topic: "events", messages: [{ value: "one" }] });
       await producer.commitTransaction();
-      expect(apiCalls.map((call) => call.key)).toEqual(expect.arrayContaining([22, 24, 0, 28]));
-      expect(apiCalls.find((call) => call.key === 28)?.flags).toEqual([1]);
+      expect(apiCalls.map((call) => call.key)).toEqual(expect.arrayContaining([22, 24, 0, 26]));
+      expect(apiCalls.find((call) => call.key === 26)?.flags).toEqual([1]);
       await producer.close();
     } finally {
       await kafka.disconnect();
@@ -78,11 +80,12 @@ describe("Transactions (mock broker)", () => {
             .array([{ name: "events" }], (writer, t) => writer.i16(0).string(t.name).bool(false).array([0], (pw) => pw.i16(0).i32(0).i32(1).array([1], (w) => w.i32(1)).array([1], (w) => w.i32(1))));
           let body: Writer;
           if (key === 18) body = apiVersions();
+          else if (key === 10) body = new Writer().i32(0).i16(0).string(null).i32(1).string("127.0.0.1").i32(listener.port); // FindCoordinator v2: txn coordinator is this mock broker
           else if (key === 3) body = metadata;
           else if (key === 22) body = new Writer().i32(0).i16(0).i64(500).i16(1);
           else if (key === 24) body = new Writer().i32(0).array(["events"], (writer, t) => writer.string(t).array([0], (p) => p.i32(0).i16(0)));
           else if (key === 0) body = new Writer().i32(0).array(["events"], (writer, t) => writer.string(t).array([0], (p) => p.i32(0).i16(0).i64(10).i64(-1)));
-          else if (key === 28) {
+          else if (key === 26) {
             const clientIdLen = view.getInt16(12);
             const bodyStart = 14 + clientIdLen;
             const txnIdLen = new DataView(request.buffer, request.byteOffset + bodyStart, 2).getInt16(0);
@@ -127,11 +130,12 @@ describe("Transactions (mock broker)", () => {
             .array([{ name: "events" }], (writer, t) => writer.i16(0).string(t.name).bool(false).array([0], (pw) => pw.i16(0).i32(0).i32(1).array([1], (w) => w.i32(1)).array([1], (w) => w.i32(1))));
           let body: Writer;
           if (key === 18) body = apiVersions();
+          else if (key === 10) body = new Writer().i32(0).i16(0).string(null).i32(1).string("127.0.0.1").i32(listener.port); // FindCoordinator v2: txn coordinator is this mock broker
           else if (key === 3) body = metadata;
           else if (key === 22) body = new Writer().i32(0).i16(0).i64(9).i16(2);
           else if (key === 25 || key === 26 || key === 28) {
             seenKeys.push(key);
-            body = key === 26
+            body = key === 28
               ? new Writer().i32(0).array(["events"], (w, t) => w.string(t).array([0], (p) => p.i32(0).i16(0)))
               : new Writer().i32(0).i16(0);
           } else body = new Writer().i32(0).i16(0);
@@ -146,9 +150,9 @@ describe("Transactions (mock broker)", () => {
       const producer = kafka.producer({ transactionalId: "txn-producer-3" });
       await producer.beginTransaction();
       await producer.sendOffsetsToTransaction([{ topic: "events", partition: 0, offset: 42n }], "workers");
-      expect(seenKeys).toEqual([25, 26]);
+      expect(seenKeys).toEqual([25, 28]);
       await producer.commitTransaction();
-      expect(seenKeys).toContain(28);
+      expect(seenKeys).toContain(26);
       await producer.close();
     } finally {
       await kafka.disconnect();
