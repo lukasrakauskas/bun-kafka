@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Incremental config updates: `admin.incrementalAlterConfigs()` (IncrementalAlterConfigs v1,
+  set/delete/append/subtract individual entries with validate-only support), mock and real-broker
+  verified
 - Documentation website: nine usage guides (getting started, producing, consuming, transactions,
   administration, security, configuration reference, observability, kafkajs migration) rendered
   into a static site by `bun run docs:build` / `docs:serve`

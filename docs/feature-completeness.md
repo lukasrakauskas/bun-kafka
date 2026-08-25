@@ -50,6 +50,7 @@ Use this document as a release snapshot. Other libraries can add or change featu
 | DescribeAcls / CreateAcls / DeleteAcls | 29-31 |       0 | ACL administration                                                    |
 | DescribeConfigs                        |    32 |       0 | Read resource configs                                                 |
 | AlterConfigs                           |    33 |       0 | Replace resource configs                                              |
+| IncrementalAlterConfigs                |    44 |       1 | Set/delete/append/subtract individual configs without clobbering      |
 | SaslAuthenticate                       |    36 |       1 | Exchange SASL data                                                    |
 | CreatePartitions                       |    37 |       2 | Increase partition counts                                             |
 | CreateDelegationToken                  |    38 |       2 | Delegate authentication tokens                                        |
@@ -139,20 +140,20 @@ Each connection uses ApiVersions to verify that the broker supports the fixed re
 
 ### Administration
 
-| Feature                       | Status | Notes                                                                                   |
-| ----------------------------- | ------ | --------------------------------------------------------------------------------------- |
-| Broker metadata               | Yes    | IDs, hosts, ports, and controller                                                       |
-| Cluster ID                    | Yes    | Metadata v2                                                                             |
-| Topic metadata                | Yes    | Errors, partitions, leaders, and replicas/isr                                           |
-| Create topics                 | Yes    | Fixed CreateTopics v4 request                                                           |
-| Delete topics                 | Yes    | Fixed DeleteTopics v3 request                                                           |
-| Create partitions             | Yes    | Fixed CreatePartitions v2 request                                                       |
-| Describe or alter configs     | Yes    | Fixed v0 config APIs                                                                    |
-| ACL operations                | Yes    | Describe/Create/Delete ACLs v0 with real-broker round-trip coverage                     |
-| Consumer group administration | Yes    | ListGroups, DescribeGroups, DeleteGroups                                                |
-| Topic offset administration   | Yes    | Watermarks plus DeleteRecords truncation                                                |
-| Delegation tokens             | Yes    | Create/Renew/Expire/Describe v2 (mock wire-shape tests; requires SASL + broker support) |
-| Quota administration          | Yes    | DescribeClientQuotas/AlterClientQuotas v1 flexible encoding                             |
+| Feature                       | Status | Notes                                                                                                |
+| ----------------------------- | ------ | ---------------------------------------------------------------------------------------------------- |
+| Broker metadata               | Yes    | IDs, hosts, ports, and controller                                                                    |
+| Cluster ID                    | Yes    | Metadata v2                                                                                          |
+| Topic metadata                | Yes    | Errors, partitions, leaders, and replicas/isr                                                        |
+| Create topics                 | Yes    | Fixed CreateTopics v4 request                                                                        |
+| Delete topics                 | Yes    | Fixed DeleteTopics v3 request                                                                        |
+| Create partitions             | Yes    | Fixed CreatePartitions v2 request                                                                    |
+| Describe or alter configs     | Yes    | Fixed v0 config APIs plus IncrementalAlterConfigs v1 (set/append/subtract/delete individual entries) |
+| ACL operations                | Yes    | Describe/Create/Delete ACLs v0 with real-broker round-trip coverage                                  |
+| Consumer group administration | Yes    | ListGroups, DescribeGroups, DeleteGroups                                                             |
+| Topic offset administration   | Yes    | Watermarks plus DeleteRecords truncation                                                             |
+| Delegation tokens             | Yes    | Create/Renew/Expire/Describe v2 (mock wire-shape tests; requires SASL + broker support)              |
+| Quota administration          | Yes    | DescribeClientQuotas/AlterClientQuotas v1 flexible encoding                                          |
 
 ### Security
 

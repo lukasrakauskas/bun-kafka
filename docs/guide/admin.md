@@ -24,13 +24,39 @@ success is visible.
 
 ```ts
 await admin.describeConfigs([{ resource: 2 /* TOPIC */, name: "events" }]);
+
+// Replace-mode: entries not included are removed for that resource.
 await admin.alterConfigs([
   { resource: 2, name: "events", entries: [{ name: "retention.ms", value: "604800000" }] },
 ]);
+
+// Incremental (preferred; Apache Kafka 2.3+): change individual entries without clobbering.
+await admin.incrementalAlterConfigs([
+  {
+    resourceType: 2,
+    resourceName: "events",
+    ops: [
+      { name: "retention.ms", operation: "set", value: "604800000" }, // set | delete | append | subtract
+    ],
+  },
+]);
+await admin.incrementalAlterConfigs(
+  [
+    {
+      resourceType: 2,
+      resourceName: "events",
+      ops: [{ name: "cleanup.policy", operation: "append", value: "compact" }],
+    },
+  ],
+  { validateOnly: true }, // dry run
+);
 ```
 
-Note: AlterConfigs is replace-mode per resource — include every entry you want kept. The gap
-audit tracks incremental config edits as future work.
+`incrementalAlterConfigs` resolves per-resource results (`{ name, error, message? }`), so a bad
+entry never hides the others. `delete` reverts an entry to its cluster default. Note that some
+brokers restrict specific operations — Redpanda, for example, rejects APPEND/SUBTRACT on
+`cleanup.policy` and broker properties on named brokers (use the empty resource name for
+cluster-wide broker configs).
 
 ## Consumer groups
 
