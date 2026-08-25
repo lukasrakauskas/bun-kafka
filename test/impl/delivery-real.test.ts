@@ -53,7 +53,6 @@ describe("Producer delivery options (real broker)", () => {
       await expect(
         producer2.send({ topic: name, messages: [{ value: "x" }] }),
       ).rejects.toBeInstanceOf(RangeError);
-// SAFETY: the surrounding test fixture provides the documented shape.
       expect(() => kafka.producer({ partitioner: "nope" as never })).toThrow(RangeError);
     } finally {
       await kafka.disconnect();

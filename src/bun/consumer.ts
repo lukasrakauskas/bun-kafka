@@ -52,7 +52,8 @@ export type DeserializerContext = {
 };
 
 export interface ConsumerSubscribe {
-  topics: string | RegExp | Array<string | RegExp>;
+  topics?: string | RegExp | Array<string | RegExp>;
+  topic?: string | RegExp;
   fromBeginning?: boolean;
   groupId?: string;
 }
@@ -120,8 +121,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     onClose = () => {},
   ) {
     this.#ownsCluster = !(options instanceof Cluster);
-// SAFETY: the surrounding protocol invariant validates this representation.
-    this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : (options as Cluster);
+    this.#cluster = options instanceof Cluster ? options : new Cluster(options);
     this.#options = consumerOptions;
     const session = consumerOptions.sessionTimeoutMs ?? 45_000;
     const rebalance = consumerOptions.rebalanceTimeoutMs ?? 60_000;
@@ -481,8 +481,8 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     this.#open();
     const request = isConsumerSubscribe(input) ? input : { topics: input };
     // Accept both `topics` and the singular `topic` spelling used by kafkajs.
-    // SAFETY: the compatibility input has been narrowed to an object above.
-    const requested = request.topics ?? (request as { topic?: string | RegExp }).topic;
+    const requested = request.topics ?? request.topic;
+    if (requested === undefined) throw new TypeError("subscribe requires a topic");
     let topics = await this.#resolveTopicPatterns(
       isString(requested) || requested instanceof RegExp ? [requested] : requested,
     );
@@ -512,17 +512,14 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   async #resolveTopicPatterns(topics: Array<string | RegExp>): Promise<string[]> {
     const patterns = topics.filter((topic): topic is RegExp => topic instanceof RegExp);
     if (!patterns.length) {
-      // SAFETY: no RegExp entries remain, so every topic is a string.
-      return [...new Set(topics as string[])];
+      return [...new Set(topics.filter(isString))];
     }
     const metadata = await this.#cluster.metadata(null);
     const resolved = new Set<string>();
     for (const entry of metadata.topics) {
       if (entry.err || !entry.name) continue;
       const matchesPattern = patterns.some((pattern) => pattern.test(entry.name));
-      const listedLiteral = topics.some(
-        (topic) => isString(topic) && topic === entry.name,
-      );
+      const listedLiteral = topics.some((topic) => isString(topic) && topic === entry.name);
       if (matchesPattern || listedLiteral) resolved.add(entry.name);
     }
     return [...resolved];
@@ -798,7 +795,6 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
         this.#positions.set(partitionKey(message.topic, message.partition), message.offset + 1n);
         if (!this.#options.keyDeserializer && !this.#options.valueDeserializer) {
           // Raw path only runs with no deserializers, so key/value really are bytes.
-// SAFETY: the surrounding protocol invariant validates this representation.
           messages.push(message as ConsumedMessage<K, V>);
           continue;
         }
@@ -808,7 +804,6 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
           offset: message.offset,
           timestamp: message.timestamp,
         };
-// SAFETY: the surrounding protocol invariant validates this representation.
         messages.push({
           ...message,
           key: this.#options.keyDeserializer?.(message.key, context) ?? null,

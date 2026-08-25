@@ -1,5 +1,5 @@
 import { KafkaError } from "../errors.ts";
-import { isString } from "../type-guards.ts";
+import { arrayBufferBytes, isString } from "../type-guards.ts";
 import type {
   AbortedTransaction,
   Bytes,
@@ -472,8 +472,7 @@ export function encodeRecordBatch(
       if (header.value) recordsWriter.raw(header.value);
     }
   }
-// SAFETY: the surrounding protocol invariant validates this representation.
-  const rawRecords = recordsWriter.result() as Uint8Array<ArrayBuffer>;
+  const rawRecords = arrayBufferBytes(recordsWriter.result());
   const recordBytes =
     compression === "gzip"
       ? Bun.gzipSync(rawRecords)
@@ -653,8 +652,7 @@ export class RecordSetDecoder {
     if (crc32c(reader.data.subarray(crcStart, this.#batchEnd)) !== expectedCrc)
       throw new KafkaError(-1, "Kafka record CRC mismatch");
     if (compression) {
-// SAFETY: the surrounding protocol invariant validates this representation.
-      const records = reader.raw(this.#batchEnd - reader.offset) as Uint8Array<ArrayBuffer>;
+      const records = arrayBufferBytes(reader.raw(this.#batchEnd - reader.offset));
       let decompressed: Uint8Array;
       try {
         decompressed =

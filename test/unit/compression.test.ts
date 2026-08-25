@@ -148,7 +148,6 @@ describe("record batch compression codecs", () => {
   });
 
   test("rejects unknown compression names", () => {
-// SAFETY: the surrounding test fixture provides the documented shape.
     expect(() => encodeRecordBatch(records, Date.now(), "brotli" as never)).toThrow(RangeError);
   });
 });

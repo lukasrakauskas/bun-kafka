@@ -83,17 +83,7 @@ async function start(id: number): Promise<void> {
       await client.disconnect();
     }
   }, 30_000);
-  compose(
-    "exec",
-    "-T",
-    service(id),
-    "rpk",
-    "cluster",
-    "health",
-    "-e",
-    "-X",
-    BROKER_CONFIG,
-  );
+  compose("exec", "-T", service(id), "rpk", "cluster", "health", "-e", "-X", BROKER_CONFIG);
 }
 
 function stop(id: number): void {
@@ -189,8 +179,7 @@ chaos("three-broker Kafka chaos", () => {
         }),
       );
       await outcome(consumer.fetch({ maxWaitMs: 10, maxMessages: 1 }));
-// SAFETY: the surrounding test fixture provides the documented shape.
-      expect(decode(held.value as Uint8Array | null)).toBe("before-kill");
+      expect(decode(held.value)).toBe("before-kill");
 
       await start(killed);
       killed = -1;
@@ -199,14 +188,12 @@ chaos("three-broker Kafka chaos", () => {
         await waitFor(async () => {
           await recovered.admin().metadata([name]);
           try {
-            await recovered
-              .producer({ lingerMs: 0, idempotent: true })
-              .send({
-                topic: name,
-                timeoutMs: 1_000,
-                acks: "all",
-                messages: [{ partition: 0, value: "after-kill" }],
-              });
+            await recovered.producer({ lingerMs: 0, idempotent: true }).send({
+              topic: name,
+              timeoutMs: 1_000,
+              acks: "all",
+              messages: [{ partition: 0, value: "after-kill" }],
+            });
             return true;
           } catch {
             return undefined;
@@ -216,8 +203,7 @@ chaos("three-broker Kafka chaos", () => {
         await resumed.assign([{ topic: name, partition: 0, offset: held.offset + 1n }]);
         await waitFor(async () =>
           (await resumed.fetch({ maxWaitMs: 50 })).some(
-// SAFETY: the surrounding test fixture provides the documented shape.
-            (message) => decode(message.value as Uint8Array | null) === "after-kill",
+            (message) => decode(message.value) === "after-kill",
           )
             ? true
             : undefined,
@@ -312,24 +298,19 @@ chaos("three-broker Kafka chaos", () => {
         await waitFor(async () => {
           await recovered.admin().metadata([name]);
           try {
-            await recovered
-              .producer({ lingerMs: 0 })
-              .send({
-                topic: name,
-                timeoutMs: 1_000,
-                acks: "all",
-                messages: [{ partition: 0, value: finalId }],
-              });
+            await recovered.producer({ lingerMs: 0 }).send({
+              topic: name,
+              timeoutMs: 1_000,
+              acks: "all",
+              messages: [{ partition: 0, value: finalId }],
+            });
             return true;
           } catch {
             return undefined;
           }
         });
         acknowledged.push(finalId);
-        const values = (await scan(recovered, name, 3)).map((message) =>
-// SAFETY: the surrounding test fixture provides the documented shape.
-          decode(message.value as Uint8Array | null),
-        );
+        const values = (await scan(recovered, name, 3)).map((message) => decode(message.value));
         for (const id of acknowledged)
           expect(values.filter((value) => value === id)).toHaveLength(1);
       } finally {
@@ -387,17 +368,7 @@ chaos("three-broker Kafka chaos", () => {
       await client
         .producer({ lingerMs: 0 })
         .send({ topic: name, messages: [{ partition: 0, value: "old-topic" }] });
-      compose(
-        "exec",
-        "-T",
-        REDPANDA_ZERO,
-        "rpk",
-        "topic",
-        "delete",
-        name,
-        "-X",
-        BROKER_CONFIG,
-      );
+      compose("exec", "-T", REDPANDA_ZERO, "rpk", "topic", "delete", name, "-X", BROKER_CONFIG);
       await waitFor(async () =>
         !compose("exec", "-T", REDPANDA_ZERO, "rpk", "topic", "list", "-X", BROKER_CONFIG)
           .split("\n")
@@ -409,10 +380,9 @@ chaos("three-broker Kafka chaos", () => {
       await client
         .producer({ lingerMs: 0 })
         .send({ topic: name, messages: [{ partition: 0, value: "new-topic" }] });
-      expect(
-// SAFETY: the surrounding test fixture provides the documented shape.
-        (await scan(client, name, 1)).map((message) => decode(message.value as Uint8Array | null)),
-      ).toEqual(["new-topic"]);
+      expect((await scan(client, name, 1)).map((message) => decode(message.value))).toEqual([
+        "new-topic",
+      ]);
     } finally {
       await client.disconnect();
     }
@@ -441,13 +411,11 @@ chaos("three-broker Kafka chaos", () => {
             `tc qdisc replace dev eth0 root netem delay ${delay}ms ${jitter}ms loss ${loss}%`,
           );
           await outcome(
-            client
-              .producer({ lingerMs: 0 })
-              .send({
-                topic: name,
-                timeoutMs: 1_000,
-                messages: [{ partition: 0, value: `netem-${delay}` }],
-              }),
+            client.producer({ lingerMs: 0 }).send({
+              topic: name,
+              timeoutMs: 1_000,
+              messages: [{ partition: 0, value: `netem-${delay}` }],
+            }),
             3_000,
           );
         }

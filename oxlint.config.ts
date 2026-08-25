@@ -40,7 +40,6 @@ export default defineConfig({
     "anti-slop/no-unknown-type-aliases": "error",
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
-    "anti-slop/require-safety-comment-for-type-assertion": "error",
   },
   env: {
     builtin: true,

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Kafka, KafkaError, kafkaErrorName } from "../../index.ts";
+import { Kafka, KafkaError, kafkaErrorName, type KafkaEvent } from "../../index.ts";
 import { Writer } from "../../src/bun/protocol.ts";
 
 const apiVersions = () =>
@@ -97,9 +97,7 @@ describe("Observability", () => {
       expect(consumer.position("events", 0)).toBe(3n);
       await Bun.sleep(80);
       const statsEvents = events.filter(
-        (e): e is { type: "stats"; stats: Record<string, number> } =>
-// SAFETY: the surrounding test fixture provides the documented shape.
-          (e as { type: string }).type === "stats",
+        (e): e is Extract<KafkaEvent, { type: "stats" }> => e.type === "stats",
       );
       expect(statsEvents.length).toBeGreaterThanOrEqual(2);
       expect(warnings.some((w) => w.includes("retry"))).toBe(true);

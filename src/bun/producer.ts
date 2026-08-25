@@ -118,8 +118,7 @@ export class BunProducer {
     onClose = () => {},
   ) {
     this.#ownsCluster = !(options instanceof Cluster);
-// SAFETY: the surrounding protocol invariant validates this representation.
-    this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : (options as Cluster);
+    this.#cluster = options instanceof Cluster ? options : new Cluster(options);
     this.#options = {
       lingerMs: producerOptions.lingerMs ?? 5,
       batchMaxMessages: producerOptions.batchMaxMessages ?? 1_000,
@@ -247,8 +246,7 @@ export class BunProducer {
     if (!this.#transactionalId || !this.#txnOpen)
       throw new Error("sendOffsetsToTransaction requires an open transaction");
     if (!offsets.length) return;
-// SAFETY: the surrounding protocol invariant validates this representation.
-    const topics = Map.groupBy(offsets as readonly CommittedOffset[], (o) => o.topic);
+    const topics = Map.groupBy(offsets, (o) => o.topic);
     const body = new Writer()
       .string(this.#transactionalId)
       .string(groupId)

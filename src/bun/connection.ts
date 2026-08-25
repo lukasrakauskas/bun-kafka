@@ -1,5 +1,5 @@
 import { KafkaError } from "../errors.ts";
-import { isFunction, isString } from "../type-guards.ts";
+import { arrayBufferBytes, isFunction, isString } from "../type-guards.ts";
 import { Reader, Writer } from "./protocol.ts";
 
 export type BunKafkaTls = boolean | Bun.TLSOptions;
@@ -47,8 +47,7 @@ function fromBase64(value: string): Uint8Array {
 }
 
 async function digest(value: Uint8Array, algorithm: "SHA-256" | "SHA-512"): Promise<Uint8Array> {
-// SAFETY: the surrounding protocol invariant validates this representation.
-  return new Uint8Array(await crypto.subtle.digest(algorithm, value as Uint8Array<ArrayBuffer>));
+  return new Uint8Array(await crypto.subtle.digest(algorithm, arrayBufferBytes(value)));
 }
 
 async function hmac(
@@ -58,22 +57,16 @@ async function hmac(
 ): Promise<Uint8Array> {
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-// SAFETY: the surrounding protocol invariant validates this representation.
-    key as Uint8Array<ArrayBuffer>,
+    arrayBufferBytes(key),
     { name: "HMAC", hash: algorithm },
     false,
     ["sign"],
   );
   return new Uint8Array(
-    // SAFETY: Web Crypto accepts only the two normalized byte representations below.
     await crypto.subtle.sign(
       "HMAC",
       cryptoKey,
-      isString(value)
-// SAFETY: the surrounding protocol invariant validates this representation.
-        ? (bytes(value) as Uint8Array<ArrayBuffer>)
-// SAFETY: the surrounding protocol invariant validates this representation.
-        : (value as Uint8Array<ArrayBuffer>),
+      isString(value) ? arrayBufferBytes(bytes(value)) : arrayBufferBytes(value),
     ),
   );
 }
@@ -86,16 +79,14 @@ async function pbkdf2(
 ): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey(
     "raw",
-// SAFETY: the surrounding protocol invariant validates this representation.
-    bytes(password) as Uint8Array<ArrayBuffer>,
+    arrayBufferBytes(bytes(password)),
     "PBKDF2",
     false,
     ["deriveBits"],
   );
   return new Uint8Array(
     await crypto.subtle.deriveBits(
-// SAFETY: the surrounding protocol invariant validates this representation.
-      { name: "PBKDF2", salt: salt as Uint8Array<ArrayBuffer>, iterations, hash: algorithm },
+      { name: "PBKDF2", salt: arrayBufferBytes(salt), iterations, hash: algorithm },
       key,
       algorithm === "SHA-256" ? 256 : 512,
     ),
@@ -325,8 +316,7 @@ export class Connection {
         bytes(`n,,\u0001auth=Bearer ${token}\u0001\u0001`),
         this.#options.requestTimeoutMs,
       );
-      if (this.#sessionLifetimeMs > 0)
-        this.scheduleReauthentication(socket);
+      if (this.#sessionLifetimeMs > 0) this.scheduleReauthentication(socket);
     } catch (error) {
       this.#fail(
         new KafkaError(58, `SASL reauthentication failed on ${this.address}: ${String(error)}`, {

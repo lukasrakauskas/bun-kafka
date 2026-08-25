@@ -65,7 +65,6 @@ const commit = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe" })
 /** Fixed-bucket latency histogram in milliseconds. */
 class Histogram {
   readonly #bounds = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000];
-// SAFETY: the surrounding protocol invariant validates this representation.
   #counts = Array.from({ length: this.#bounds.length + 1 }, () => 0);
   count = 0;
   max = 0;

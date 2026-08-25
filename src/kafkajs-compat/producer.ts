@@ -1,4 +1,5 @@
 import { BunProducer } from "../bun/producer.ts";
+import { isNumber, isString } from "../type-guards.ts";
 import { COMPRESSION_NAMES, PRODUCER_EVENTS, CompressionTypes } from "./constants.ts";
 import { wrapError, KafkaJSNonRetriableError } from "./errors.ts";
 import type { ClusterGetter } from "./config.ts";
@@ -17,18 +18,18 @@ function producerOptions(options: CompatOptions) {
     lingerMs: 5,
     compression: COMPRESSION_NAMES[compressionCode] ?? "none",
     idempotent: Boolean(options.idempotent),
-// SAFETY: the surrounding protocol invariant validates this representation.
-    transactionalId: options.transactionalId as string | undefined,
-// SAFETY: the surrounding protocol invariant validates this representation.
-    transactionTimeoutMs: options.transactionTimeout as number | undefined,
+    transactionalId: isString(options.transactionalId) ? options.transactionalId : undefined,
+    transactionTimeoutMs: isNumber(options.transactionTimeout)
+      ? options.transactionTimeout
+      : undefined,
     partitioner: toBunPartitioner(options.createPartitioner ?? options.partitioner),
   };
 }
 
 function acksToWire(acks: number | undefined): 0 | 1 | "all" {
-  if (acks === undefined || acks === -1) return "all";
-// SAFETY: the surrounding protocol invariant validates this representation.
-  return acks as 0 | 1;
+  if (acks === 0) return 0;
+  if (acks === 1) return 1;
+  return "all";
 }
 
 export class CompatProducer {
@@ -85,13 +86,7 @@ export class CompatProducer {
     return this.#producer!;
   }
 
-  async send({
-    topic,
-    messages,
-    acks,
-    timeout,
-    compression,
-  }: KafkaJsSendRecord): Promise<
+  async send({ topic, messages, acks, timeout, compression }: KafkaJsSendRecord): Promise<
     Array<{
       topicName: string;
       partition: number;
@@ -121,12 +116,7 @@ export class CompatProducer {
     }
   }
 
-  async sendBatch({
-    topicMessages,
-    acks,
-    timeout,
-    compression,
-  }: KafkaJsSendBatchRecord): Promise<
+  async sendBatch({ topicMessages, acks, timeout, compression }: KafkaJsSendBatchRecord): Promise<
     Array<{
       topicName: string;
       partition: number;

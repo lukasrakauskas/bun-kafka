@@ -2,7 +2,7 @@ import { wrapError } from "./errors.ts";
 import { ADMIN_EVENTS } from "./constants.ts";
 import type { ClusterGetter } from "./config.ts";
 import { Emitter, Logger } from "./logger.ts";
-import { BunAdmin } from "../bun/admin.ts";
+import { BunAdmin, type AclBinding, type AclFilter } from "../bun/admin.ts";
 import { isString } from "../type-guards.ts";
 import type { CompatOptions, LogFields } from "./types.ts";
 
@@ -448,26 +448,22 @@ export class CompatAdmin {
 
   async createAcls({ acl }: { acl: Array<CompatOptions> }): Promise<boolean[]> {
     try {
-      const results = await this.#underlying().createAcls(
-// SAFETY: the surrounding protocol invariant validates this representation.
-        acl.map((entry) => ({
-          resourceType: Number(entry.resourceType ?? entry.resourceResourceType ?? 2),
-          resourceName: String(entry.resourceName ?? entry.resourceResourceName),
-          principal: String(entry.principal),
-          host: String(entry.host),
-          operation: Number(entry.operation),
-          permissionType: Number(entry.permissionType),
-        })) as never,
-      );
+      const bindings: AclBinding[] = acl.map((entry) => ({
+        resourceType: Number(entry.resourceType ?? entry.resourceResourceType ?? 2),
+        resourceName: String(entry.resourceName ?? entry.resourceResourceName),
+        principal: String(entry.principal),
+        host: String(entry.host),
+        operation: Number(entry.operation),
+        permissionType: Number(entry.permissionType),
+      }));
+      const results = await this.#underlying().createAcls(bindings);
       return results.map((result) => result.error === 0);
     } catch (error) {
       throw wrapError(error);
     }
   }
 
-  async describeAcls(
-    filter: CompatOptions,
-  ): Promise<{
+  async describeAcls(filter: CompatOptions): Promise<{
     resources: Array<{
       resourceType: number;
       resourceName: string;
@@ -478,15 +474,15 @@ export class CompatAdmin {
     }>;
   }> {
     try {
-// SAFETY: the surrounding protocol invariant validates this representation.
-      const described = await this.#underlying().describeAcls({
+      const aclFilter: AclFilter = {
         resourceType: Number(filter.resourceType ?? 1),
-        resourceName: filter.resourceName,
-        principal: filter.principal,
-        host: filter.host,
+        resourceName: isString(filter.resourceName) ? filter.resourceName : undefined,
+        principal: isString(filter.principal) ? filter.principal : undefined,
+        host: isString(filter.host) ? filter.host : undefined,
         operation: Number(filter.operation ?? 1),
         permissionType: Number(filter.permissionType ?? 1),
-      } as never);
+      };
+      const described = await this.#underlying().describeAcls(aclFilter);
       return {
         resources: described.acls.map((acl) => ({
           resourceType: acl.resourceType,
@@ -517,17 +513,15 @@ export class CompatAdmin {
     }>;
   }> {
     try {
-      const result = await this.#underlying().deleteAcls(
-// SAFETY: the surrounding protocol invariant validates this representation.
-        filters.filters.map((filter) => ({
-          resourceType: Number(filter.resourceType ?? 1),
-          resourceName: filter.resourceName,
-          principal: filter.principal,
-          host: filter.host,
-          operation: Number(filter.operation ?? 1),
-          permissionType: Number(filter.permissionType ?? 1),
-        })) as never,
-      );
+      const aclFilters: AclFilter[] = filters.filters.map((filter) => ({
+        resourceType: Number(filter.resourceType ?? 1),
+        resourceName: isString(filter.resourceName) ? filter.resourceName : undefined,
+        principal: isString(filter.principal) ? filter.principal : undefined,
+        host: isString(filter.host) ? filter.host : undefined,
+        operation: Number(filter.operation ?? 1),
+        permissionType: Number(filter.permissionType ?? 1),
+      }));
+      const result = await this.#underlying().deleteAcls(aclFilters);
       return {
         entries: result.map((entry) => ({
           errorCode: entry.error,

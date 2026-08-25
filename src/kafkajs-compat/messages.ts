@@ -1,7 +1,7 @@
 import type { ConsumedMessage } from "../types.ts";
 import { KafkaJSNonRetriableError } from "./errors.ts";
 import type { Partitioner, PartitionerContext, ProducerMessage } from "../bun/producer.ts";
-import { isFunction } from "../type-guards.ts";
+import { isFunction, isNumber } from "../type-guards.ts";
 
 export interface KafkaJsMessage {
   key?: Buffer | string | null;
@@ -58,8 +58,12 @@ export function toWireMessage(message: KafkaJsMessage): ProducerMessage {
   const wire: ProducerMessage = {
     value: message.value,
     key: message.key ?? null,
-// SAFETY: the surrounding protocol invariant validates this representation.
-    headers: (message.headers ?? {}) as ProducerMessage["headers"],
+    headers: Object.fromEntries(
+      Object.entries(message.headers ?? {}).map(([key, value]) => [
+        key,
+        isNumber(value) ? String(value) : (value ?? null),
+      ]),
+    ),
   };
   if (message.partition !== undefined) wire.partition = message.partition;
   if (message.timestamp !== undefined) wire.timestamp = Number(message.timestamp);

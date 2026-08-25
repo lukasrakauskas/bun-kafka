@@ -1,12 +1,17 @@
 import { BunAdmin } from "../bun/admin.ts";
 import { BunConsumer } from "../bun/consumer.ts";
+import { hasStringName, isBoolean, isNumber, isString } from "../type-guards.ts";
 import type { ConsumedMessage } from "../types.ts";
 import { CONSUMER_EVENTS } from "./constants.ts";
 import { wrapError, KafkaJSError, KafkaJSNonRetriableError } from "./errors.ts";
 import type { ClusterGetter } from "./config.ts";
 import { Emitter, Logger } from "./logger.ts";
 import { toKafkajsMessage, type KafkaJsConsumedMessage } from "./messages.ts";
-import type { CompatOptions, LogFields } from "./types.ts";
+import type { CompatOptions, CompatValue, LogFields } from "./types.ts";
+
+function numberOption(value: CompatValue): number | undefined {
+  return isNumber(value) ? value : undefined;
+}
 
 export interface CompatEachMessagePayload {
   topic: string;
@@ -87,24 +92,19 @@ export class CompatConsumer {
       const o = this.#options;
       const assignors = Array.isArray(o.partitionAssignors) ? o.partitionAssignors : [];
       const cooperative = assignors.some(
-// SAFETY: the surrounding protocol invariant validates this representation.
-        (assignor) => (assignor as { name?: string }).name === "CooperativeStickyAssignor",
+        (assignor) => hasStringName(assignor) && assignor.name === "CooperativeStickyAssignor",
       );
       const consumerOptions = {
-// SAFETY: the surrounding protocol invariant validates this representation.
-        groupId: o.groupId as string,
-// SAFETY: the surrounding protocol invariant validates this representation.
-        sessionTimeoutMs: o.sessionTimeout as number | undefined,
-// SAFETY: the surrounding protocol invariant validates this representation.
-        rebalanceTimeoutMs: o.rebalanceTimeout as number | undefined,
-// SAFETY: the surrounding protocol invariant validates this representation.
-        heartbeatIntervalMs: o.heartbeatInterval as number | undefined,
-// SAFETY: the surrounding protocol invariant validates this representation.
-        fromBeginning: o.fromBeginning as boolean | undefined,
-// SAFETY: the surrounding protocol invariant validates this representation.
-        isolationLevel: o.isolationLevel as "read_uncommitted" | "read_committed" | undefined,
-// SAFETY: the surrounding protocol invariant validates this representation.
-        groupInstanceId: o.groupInstanceId as string | undefined,
+        groupId: isString(o.groupId) ? o.groupId : undefined,
+        sessionTimeoutMs: numberOption(o.sessionTimeout),
+        rebalanceTimeoutMs: numberOption(o.rebalanceTimeout),
+        heartbeatIntervalMs: numberOption(o.heartbeatInterval),
+        fromBeginning: isBoolean(o.fromBeginning) ? o.fromBeginning : undefined,
+        isolationLevel:
+          o.isolationLevel === "read_uncommitted" || o.isolationLevel === "read_committed"
+            ? o.isolationLevel
+            : undefined,
+        groupInstanceId: isString(o.groupInstanceId) ? o.groupInstanceId : undefined,
         partitionAssigner: cooperative ? ("cooperative-sticky" as const) : undefined,
       };
       this.#consumer = new BunConsumer(
@@ -154,8 +154,7 @@ export class CompatConsumer {
           merged.push(entry);
       }
       this.#subscribedTopics = new Set(merged);
-// SAFETY: the surrounding protocol invariant validates this representation.
-      await this.#underlying().subscribe({ topics: merged as never, fromBeginning });
+      await this.#underlying().subscribe({ topics: merged, fromBeginning });
       this.#emitter.emit(CONSUMER_EVENTS.GROUP_JOIN, { groupId: this.#options.groupId });
     } catch (error) {
       throw wrapError(error);
@@ -201,14 +200,10 @@ export class CompatConsumer {
           maxMessages: 200,
           // Capped wire wait keeps stop()/pause()/resume() responsive even when
           // applications configure multi-second maxWaitTimeInMs.
-// SAFETY: the surrounding protocol invariant validates this representation.
-          maxWaitMs: Math.min((o.maxWaitTimeInMs as number) ?? 500, 1_000),
-// SAFETY: the surrounding protocol invariant validates this representation.
-          minBytes: o.minBytes as number | undefined,
-// SAFETY: the surrounding protocol invariant validates this representation.
-          maxBytes: o.maxBytes as number | undefined,
-// SAFETY: the surrounding protocol invariant validates this representation.
-          maxPartitionBytes: o.maxBytesPerPartition as number | undefined,
+          maxWaitMs: Math.min(numberOption(o.maxWaitTimeInMs) ?? 500, 1_000),
+          minBytes: numberOption(o.minBytes),
+          maxBytes: numberOption(o.maxBytes),
+          maxPartitionBytes: numberOption(o.maxBytesPerPartition),
         });
         if (!this.#running) break;
         this.#emitter.emit(CONSUMER_EVENTS.FETCH, { numberOfMessages: messages.length });

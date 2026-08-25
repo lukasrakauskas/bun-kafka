@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { isString } from "../../src/type-guards.ts";
+import { isString, isUint8Array } from "../../src/type-guards.ts";
 import { Writer, decodeRecordSet, encodeRecordBatch } from "../../src/bun/protocol.ts";
 import type { AbortedTransaction } from "../../src/types.ts";
 import { RecordSetDecoder } from "../../src/bun/protocol.ts";
@@ -14,13 +14,10 @@ const apiVersions = () =>
   );
 
 function decode(value: Uint8Array | null | unknown): string | null {
-  // SAFETY: the test fixture provides a byte payload whenever it is not a string.
-  return value == null
-    ? null
-    : isString(value)
-      ? value
-// SAFETY: the surrounding test fixture provides the documented shape.
-      : new TextDecoder().decode(value as Uint8Array);
+  if (value == null) return null;
+  if (isString(value)) return value;
+  if (!isUint8Array(value)) throw new TypeError("Expected bytes");
+  return new TextDecoder().decode(value);
 }
 
 describe("Static group membership", () => {

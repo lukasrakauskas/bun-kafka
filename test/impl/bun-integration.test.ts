@@ -52,10 +52,8 @@ integration("Bun native Kafka integration", () => {
         );
 
       expect(received).toHaveLength(20);
-// SAFETY: the surrounding test fixture provides the documented shape.
-      expect(decode(received[0]!.value as Uint8Array | null)).toBe("value-0");
-// SAFETY: the surrounding test fixture provides the documented shape.
-      expect(decode(received[19]!.headers.index as Uint8Array)).toBe("19");
+      expect(decode(received[0]!.value)).toBe("value-0");
+      expect(decode(received[19]!.headers.index)).toBe("19");
       const batched = [];
       while (batched.length < 25)
         batched.push(
@@ -64,10 +62,8 @@ integration("Bun native Kafka integration", () => {
             maxMessages: Math.min(6, 25 - batched.length),
           })),
         );
-// SAFETY: the surrounding test fixture provides the documented shape.
-      expect(decode(batched[0]!.value as Uint8Array | null)).toBe("batched-0");
-// SAFETY: the surrounding test fixture provides the documented shape.
-      expect(decode(batched[24]!.value as Uint8Array | null)).toBe("batched-24");
+      expect(decode(batched[0]!.value)).toBe("batched-0");
+      expect(decode(batched[24]!.value)).toBe("batched-24");
 
       consumer.seek({ topic, partition: 0, offset: 10n });
       const replay = await consumer.fetch({ maxWaitMs: 100, maxMessages: 1 });

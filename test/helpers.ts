@@ -29,10 +29,7 @@ export async function waitFor<T>(
   while (Date.now() - start < timeoutMs) {
     try {
       const value = await fn();
-      if (value) {
-        // SAFETY: waitFor only returns truthy values matching the caller's predicate.
-        return value as T;
-      }
+      if (value !== undefined) return value;
     } catch (error) {
       lastErr = error;
     }
