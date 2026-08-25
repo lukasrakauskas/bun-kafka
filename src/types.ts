@@ -26,6 +26,18 @@ export interface Watermarks {
   high: bigint;
 }
 
+/** A KafkaMessage whose key/value were replaced through consumer deserializers. */
+export interface ConsumedMessage extends Omit<KafkaMessage, "key" | "value"> {
+  key: unknown;
+  value: unknown;
+}
+
+/** Aborted-transaction ranges reported by brokers under read-committed isolation. */
+export interface AbortedTransaction {
+  producerId: bigint;
+  firstOffset: bigint;
+}
+
 export interface MetadataBroker {
   id: number;
   host: string;

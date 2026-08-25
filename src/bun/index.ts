@@ -26,7 +26,9 @@ export type {
 export type { BunKafkaSasl, BunKafkaTls } from "./connection.ts";
 export { KafkaError } from "../errors.ts";
 export type {
+  AbortedTransaction,
   Bytes,
+  ConsumedMessage,
   KafkaMessage,
   MessageHeaders,
   TopicPartition,

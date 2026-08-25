@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Kafka, type KafkaMessage } from "../index.ts";
+import { Kafka, type ConsumedMessage, type KafkaMessage } from "../index.ts";
 
 const enabled = process.env.CHAOS_CLUSTER === "1";
 const chaos = enabled ? describe.serial : describe.skip;
@@ -72,12 +72,12 @@ async function leader(client: Kafka, name: string, partition = 0): Promise<numbe
   });
 }
 
-async function scan(client: Kafka, name: string, partitions: number): Promise<KafkaMessage[]> {
+async function scan(client: Kafka, name: string, partitions: number): Promise<Array<KafkaMessage | ConsumedMessage>> {
   const consumer = client.consumer();
   const assignments = Array.from({ length: partitions }, (_, partition) => ({ topic: name, partition, offset: "earliest" as const }));
   await consumer.assign(assignments);
   const highs = await Promise.all(assignments.map(({ partition }) => consumer.watermarks(name, partition).then(({ high }) => high)));
-  const messages: KafkaMessage[] = [];
+  const messages: Array<KafkaMessage | ConsumedMessage> = [];
   await waitFor(async () => {
     messages.push(...await consumer.fetch({ maxWaitMs: 50, maxMessages: 500, copy: true }));
     return assignments.every(({ partition }) => (consumer.position(name, partition) ?? 0n) >= highs[partition]!) ? true : undefined;
@@ -103,7 +103,7 @@ chaos("three-broker Kafka chaos", () => {
 
       await outcome(producer.send({ topic: name, timeoutMs: 300, acks: "all", messages: [{ partition: 0, value: "during-kill" }] }));
       await outcome(consumer.fetch({ maxWaitMs: 10, maxMessages: 1 }));
-      expect(decode(held.value)).toBe("before-kill");
+      expect(decode(held.value as Uint8Array | null)).toBe("before-kill");
 
       await start(killed);
       killed = -1;
@@ -118,7 +118,7 @@ chaos("three-broker Kafka chaos", () => {
         });
         const resumed = recovered.consumer();
         await resumed.assign([{ topic: name, partition: 0, offset: held.offset + 1n }]);
-        await waitFor(async () => (await resumed.fetch({ maxWaitMs: 50 })).some((message) => decode(message.value) === "after-kill") ? true : undefined);
+        await waitFor(async () => (await resumed.fetch({ maxWaitMs: 50 })).some((message) => decode(message.value as Uint8Array | null) === "after-kill") ? true : undefined);
       } finally { await recovered.disconnect(); }
     } finally {
       if (killed >= 0) await start(killed);
@@ -173,7 +173,7 @@ chaos("three-broker Kafka chaos", () => {
           } catch { return undefined; }
         });
         acknowledged.push(finalId);
-        const values = (await scan(recovered, name, 3)).map((message) => decode(message.value));
+        const values = (await scan(recovered, name, 3)).map((message) => decode(message.value as Uint8Array | null));
         for (const id of acknowledged) expect(values.filter((value) => value === id)).toHaveLength(1);
       } finally { await recovered.disconnect(); }
     } finally {
@@ -207,7 +207,7 @@ chaos("three-broker Kafka chaos", () => {
       await waitFor(async () => !compose("exec", "-T", "redpanda-0", "rpk", "topic", "list", "-X", "brokers=127.0.0.1:9092").split("\n").includes(name) ? true : undefined);
       await createTopic(client, name);
       await client.producer({ lingerMs: 0 }).send({ topic: name, messages: [{ partition: 0, value: "new-topic" }] });
-      expect((await scan(client, name, 1)).map((message) => decode(message.value))).toEqual(["new-topic"]);
+      expect((await scan(client, name, 1)).map((message) => decode(message.value as Uint8Array | null))).toEqual(["new-topic"]);
     } finally { await client.disconnect(); }
   }, 60_000);
 

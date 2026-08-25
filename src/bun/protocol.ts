@@ -1,5 +1,5 @@
 import { KafkaError } from "../errors.ts";
-import type { Bytes, ClusterMetadata, KafkaMessage, MessageHeaders } from "../types.ts";
+import type { AbortedTransaction, Bytes, ClusterMetadata, KafkaMessage, MessageHeaders } from "../types.ts";
 import { snappyCompress, snappyDecompress } from "./snappy.ts";
 import { lz4Compress, lz4Decompress } from "./lz4.ts";
 
@@ -234,8 +234,10 @@ export function encodeRecordBatch(
   records: readonly WireRecord[],
   now = Date.now(),
   compression: RecordCompression = "none",
-  producer: { id: bigint; epoch: number; sequence: number } = { id: -1n, epoch: -1, sequence: -1 },
+  producer: { id: bigint; epoch: number; sequence: number; control?: boolean } = { id: -1n, epoch: -1, sequence: -1 },
+  baseOffset = 0n,
 ): Uint8Array {
+  const recordAttributes = producer.control ? 0x20 : 0;
   if (!records.length) throw new RangeError("A record batch cannot be empty");
   if (!(compression in compressionAttributes)) throw new RangeError(`Unsupported Kafka compression: ${compression}`);
   const baseTimestamp = BigInt(records[0]!.timestamp ?? now);
@@ -263,7 +265,7 @@ export function encodeRecordBatch(
   const recordsWriter = new Writer(size - 61);
   for (let offset = 0; offset < prepared.length; offset++) {
     const record = prepared[offset]!;
-    recordsWriter.varInt(record.bodyLength).i8(0).varLong(record.timestamp - baseTimestamp).varInt(offset)
+    recordsWriter.varInt(record.bodyLength).i8(recordAttributes).varLong(record.timestamp - baseTimestamp).varInt(offset)
       .varInt(record.key?.byteLength ?? -1);
     if (record.key) recordsWriter.raw(record.key);
     recordsWriter.varInt(record.value?.byteLength ?? -1);
@@ -281,7 +283,7 @@ export function encodeRecordBatch(
         : compression === "lz4" ? lz4Compress(rawRecords)
           : rawRecords;
   const writer = new Writer(61 + recordBytes.byteLength);
-  writer.i64(0).i32(0).i32(-1).i8(2).u32(0).i16(compressionAttributes[compression]).i32(records.length - 1)
+  writer.i64(baseOffset).i32(0).i32(-1).i8(2).u32(0).i16(compressionAttributes[compression]).i32(records.length - 1)
     .i64(baseTimestamp).i64(maxTimestamp).i64(producer.id).i16(producer.epoch).i32(producer.sequence).i32(records.length)
     .raw(recordBytes);
   writer.patchI32(8, writer.length - 12);
@@ -289,7 +291,12 @@ export function encodeRecordBatch(
   return writer.result();
 }
 
-export type RecordDecoderOptions = { minOffset?: bigint; copy?: boolean };
+export type RecordDecoderOptions = {
+  minOffset?: bigint;
+  copy?: boolean;
+  /** Aborted transaction ranges for read-committed consumption. */
+  abortedTransactions?: readonly AbortedTransaction[];
+};
 
 export class RecordSetDecoder {
   readonly topic: string;
@@ -304,6 +311,8 @@ export class RecordSetDecoder {
   #baseOffset = 0n;
   #baseTimestamp = 0n;
   #attributes = 0;
+  #aborted = new Map<bigint, bigint>();
+  #batchProducerId = -1n;
 
   constructor(bytes: Uint8Array, topic: string, partition: number, brokerId: number, options: RecordDecoderOptions = {}) {
     this.#reader = new Reader(bytes);
@@ -312,6 +321,7 @@ export class RecordSetDecoder {
     this.#brokerId = brokerId;
     this.#minOffset = options.minOffset ?? -1n;
     this.#copy = options.copy ?? false;
+    for (const item of options.abortedTransactions ?? []) this.#aborted.set(item.producerId, item.firstOffset);
   }
 
   get done(): boolean {
@@ -335,11 +345,10 @@ export class RecordSetDecoder {
       const recordLength = reader.varInt();
       if (recordLength < 0 || recordLength > this.#batchEnd - reader.offset) throw new KafkaError(-1, "Invalid Kafka record size");
       const recordEnd = reader.offset + recordLength;
-      reader.i8();
+      const recordAttributes = reader.i8();
       const timestampDelta = reader.varLong();
       const offsetDelta = reader.varInt();
       const absoluteOffset = this.#baseOffset + BigInt(offsetDelta);
-      const include = absoluteOffset >= this.#minOffset;
       const keyLength = reader.varInt();
       if (keyLength < -1) throw new KafkaError(-1, "Invalid Kafka record key size");
       const keyView = keyLength < 0 ? null : reader.raw(keyLength);
@@ -356,10 +365,20 @@ export class RecordSetDecoder {
         const headerLength = reader.varInt();
         if (headerLength < -1) throw new KafkaError(-1, "Invalid Kafka header size");
         const headerView = headerLength < 0 ? null : reader.raw(headerLength);
-        if (include) headers[name] = headerView && this.#copy ? headerView.slice() : headerView;
+        headers[name] = headerView && this.#copy ? headerView.slice() : headerView;
       }
       if (reader.offset !== recordEnd) throw new KafkaError(-1, "Invalid Kafka record fields");
       this.#recordsRemaining--;
+      // Transaction control records (KIP-98) carry abort/commit markers in the value.
+      if (recordAttributes & 0x20) {
+        const firstControlByte = valueView?.[0];
+        if (this.#aborted.has(this.#batchProducerId) && firstControlByte === 1 && (absoluteOffset >= (this.#aborted.get(this.#batchProducerId) ?? 0n))) {
+          this.#aborted.delete(this.#batchProducerId);
+        }
+        continue;
+      }
+      const abortedStart = this.#aborted.get(this.#batchProducerId);
+      const include = absoluteOffset >= this.#minOffset && !(abortedStart !== undefined && absoluteOffset >= abortedStart);
       if (include) messages.push({
         topic: this.topic,
         partition: this.partition,
@@ -393,7 +412,7 @@ export class RecordSetDecoder {
     reader.i32();
     this.#baseTimestamp = reader.i64();
     reader.i64();
-    reader.i64();
+    this.#batchProducerId = reader.i64();
     reader.i16();
     reader.i32();
     const recordCount = reader.i32();

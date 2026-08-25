@@ -1,5 +1,5 @@
 import { KafkaError } from "../errors.ts";
-import type { Bytes, ClusterMetadata, KafkaMessage, MessageHeaders, TopicPartition, Watermarks } from "../types.ts";
+import type { Bytes, ClusterMetadata, ConsumedMessage, KafkaMessage, MessageHeaders, TopicPartition, Watermarks } from "../types.ts";
 import { Connection, type BunKafkaSasl, type BunKafkaTls, type ConnectionOptions } from "./connection.ts";
 import {
   Reader,
@@ -542,14 +542,29 @@ export interface ConsumerOptions {
   fromBeginning?: boolean;
   fetchMaxBytes?: number;
   groupId?: string;
+  /** Static group membership identity (KIP-345); requires a broker that supports JoinGroup v3+. */
+  groupInstanceId?: string;
+  /** Transaction visibility: read_committed filters aborted transaction records (default read_uncommitted). */
+  isolationLevel?: "read_uncommitted" | "read_committed";
   sessionTimeoutMs?: number;
   rebalanceTimeoutMs?: number;
   heartbeatIntervalMs?: number;
   autoCommit?: boolean;
+  /** Replaces message keys before they are returned. */
+  keyDeserializer?: (data: Uint8Array | null, context: DeserializerContext) => unknown;
+  /** Replaces message values before they are returned. */
+  valueDeserializer?: (data: Uint8Array | null, context: DeserializerContext) => unknown;
 }
 
+export type DeserializerContext = {
+  topic: string;
+  partition: number;
+  offset: bigint;
+  timestamp: bigint;
+};
+
 export interface ConsumerSubscribe {
-  topics: string | string[];
+  topics: string | RegExp | Array<string | RegExp>;
   fromBeginning?: boolean;
   groupId?: string;
 }
@@ -580,7 +595,7 @@ type Assigned = { topic: string; partition: number; leader: number };
 type GroupMember = { memberId: string; topics: string[] };
 type GroupAssignment = { topic: string; partitions: number[] };
 
-export class BunConsumer implements AsyncIterable<KafkaMessage> {
+export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage> {
   #cluster: Cluster;
   #options: ConsumerOptions;
   #assigned = new Map<string, Assigned>();
@@ -625,11 +640,17 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
 
   async #joinGroup(topics: string[], fromBeginning: boolean): Promise<void> {
     const coordinator = await this.#findCoordinator();
+    const instanceId = this.#options.groupInstanceId;
     const memberMetadata = new Writer().i16(0).array(topics, (writer, topic) => writer.string(topic)).bytes(null).result();
-    const join = new Writer().string(this.#groupId!).i32(this.#options.sessionTimeoutMs ?? 45_000)
-      .i32(this.#options.rebalanceTimeoutMs ?? 60_000).string(this.#memberId).string("consumer")
+    // JoinGroup v3+ carries the static membership identity (KIP-345).
+    const joinVersion = instanceId === undefined ? 2 : 3;
+    const join = new Writer().string(this.#groupId!)
+      .i32(this.#options.sessionTimeoutMs ?? 45_000)
+      .i32(this.#options.rebalanceTimeoutMs ?? 60_000).string(this.#memberId);
+    if (joinVersion >= 3) join.string(instanceId!);
+    join.string("consumer")
       .array([["range", memberMetadata] as const], (writer, [name, metadata]) => writer.string(name).bytes(metadata));
-    const response = await this.#cluster.request(coordinator, API_JOIN_GROUP, 2, join);
+    const response = await this.#cluster.request(coordinator, API_JOIN_GROUP, joinVersion, join);
     this.#cluster.throttle(API_JOIN_GROUP, response.i32());
     const error = response.i16();
     this.#generationId = response.i32();
@@ -661,12 +682,17 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
         });
       }
     }
-    const sync = new Writer().string(this.#groupId!).i32(this.#generationId).string(this.#memberId)
+    const syncInstance = this.#options.groupInstanceId;
+    const syncVersion = syncInstance === undefined ? 0 : 3;
+    const sync = new Writer().string(this.#groupId!).i32(this.#generationId).string(this.#memberId);
+    if (syncVersion >= 3) sync.string(syncInstance!);
+    sync
       .array([...assignments], (writer, [memberId, memberAssignments]) => {
         const assignment = new Writer().i16(0).array(memberAssignments, (assignmentWriter, item) => assignmentWriter.string(item.topic).array(item.partitions, (writer, partition) => writer.i32(partition))).bytes(null);
         writer.string(memberId).bytes(assignment.result());
       });
-    const synced = await this.#cluster.request(coordinator, API_SYNC_GROUP, 0, sync);
+    const synced = await this.#cluster.request(coordinator, API_SYNC_GROUP, syncVersion, sync);
+    if (syncVersion >= 3) synced.i32(); // throttle_time_ms added in v3
     const syncError = synced.i16();
     const syncAssignment = synced.bytes() ?? new Uint8Array();
     if (syncError) throw kafkaError(syncError, `Kafka group ${this.#groupId} sync`);
@@ -690,7 +716,12 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
   async #heartbeatOnce(coordinator: number): Promise<void> {
     if (!this.#groupId || this.#generationId < 0 || this.#rejoining) return;
     try {
-      const response = await this.#cluster.request(coordinator, API_HEARTBEAT, 0, new Writer().string(this.#groupId).i32(this.#generationId).string(this.#memberId));
+      const heartbeatInstance = this.#options.groupInstanceId;
+      const heartbeatVersion = heartbeatInstance === undefined ? 0 : 3;
+      const heartbeatBody = new Writer().string(this.#groupId).i32(this.#generationId).string(this.#memberId);
+      if (heartbeatVersion >= 3) heartbeatBody.string(heartbeatInstance!);
+      const response = await this.#cluster.request(coordinator, API_HEARTBEAT, heartbeatVersion, heartbeatBody);
+      if (heartbeatVersion >= 3) response.i32(); // throttle_time_ms added in v3
       const error = response.i16();
       if (!error) return;
       if (error === 25) this.#memberId = "";
@@ -740,12 +771,14 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
     return result;
   }
 
-  async subscribe(input: ConsumerSubscribe | string | string[]): Promise<void> {
+  async subscribe(input: ConsumerSubscribe | string | Array<string | RegExp>): Promise<void> {
     this.#open();
     const request = typeof input === "object" && !Array.isArray(input)
       ? input
       : { topics: input };
-    const topics = Array.isArray(request.topics) ? request.topics : [request.topics];
+    let topics = await this.#resolveTopicPatterns(
+      typeof request.topics === "string" || request.topics instanceof RegExp ? [request.topics] : request.topics,
+    );
     const groupId = request.groupId ?? this.#options.groupId;
     if (groupId) {
       this.#groupId = groupId;
@@ -765,6 +798,21 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
       });
     }
     await this.assign(assignments);
+  }
+
+  /** Expands RegExp topic patterns against cluster metadata into literal topic names. */
+  async #resolveTopicPatterns(topics: Array<string | RegExp>): Promise<string[]> {
+    const patterns = topics.filter((topic): topic is RegExp => topic instanceof RegExp);
+    if (!patterns.length) return [...new Set(topics as string[])];
+    const metadata = await this.#cluster.metadata(null);
+    const resolved = new Set<string>();
+    for (const entry of metadata.topics) {
+      if (entry.err || !entry.name) continue;
+      const matchesPattern = patterns.some((pattern) => pattern.test(entry.name));
+      const listedLiteral = topics.some((topic) => typeof topic === "string" && topic === entry.name);
+      if (matchesPattern || listedLiteral) resolved.add(entry.name);
+    }
+    return [...resolved];
   }
 
   async assign(assignments: ConsumerAssignment[]): Promise<void> {
@@ -813,7 +861,7 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
     }));
   }
 
-  async fetch(options: FetchOptions = {}): Promise<KafkaMessage[]> {
+  async fetch(options: FetchOptions = {}): Promise<Array<KafkaMessage | ConsumedMessage>> {
     this.#open();
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.#cluster.retryOptions.maxRetries; attempt++) {
@@ -837,7 +885,7 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
     throw lastError;
   }
 
-  async #fetchOnce(options: FetchOptions = {}): Promise<KafkaMessage[]> {
+  async #fetchOnce(options: FetchOptions = {}): Promise<Array<KafkaMessage | ConsumedMessage>> {
     this.#open();
     const maxMessages = options.maxMessages ?? 500;
     if (!Number.isSafeInteger(maxMessages) || maxMessages < 1) throw new RangeError("maxMessages must be a positive integer");
@@ -851,8 +899,9 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
     const leaders = Map.groupBy(active, ([, assignment]) => assignment.leader);
     const batches = await Promise.all([...leaders].map(async ([leader, entries]) => {
       const topics = Map.groupBy(entries, ([, assignment]) => assignment.topic);
+      const isolationLevel = this.#options.isolationLevel === "read_committed" ? 1 : 0;
       const body = new Writer().i32(-1).i32(options.maxWaitMs ?? 500).i32(options.minBytes ?? 1)
-        .i32(options.maxBytes ?? this.#options.fetchMaxBytes ?? 50 * 1024 * 1024).i8(0)
+        .i32(options.maxBytes ?? this.#options.fetchMaxBytes ?? 50 * 1024 * 1024).i8(isolationLevel)
         .array([...topics], (writer, [topic, partitions]) => {
           writer.string(topic).array(partitions, (partitionWriter, [key, assignment]) => {
             partitionWriter.i32(assignment.partition).i64(this.#positions.get(key) ?? 0n)
@@ -860,7 +909,9 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
           });
         });
       const response = await this.#cluster.request(leader, API_FETCH, 4, body, (options.maxWaitMs ?? 500) + this.#cluster.requestTimeoutMs, false);
+      if (process.env.DEBUG_FETCH) console.error("fetch resp:", Array.from(response.data.slice(0, 80)).map(b=>b.toString(16).padStart(2,"0")).join(" "));
       this.#cluster.throttle(API_FETCH, response.i32());
+      if (process.env.DEBUG_FETCH) console.error("after throttle offset:", response.offset);
       return response.array((topicReader) => {
         const topic = topicReader.string() ?? "";
         return topicReader.array((partitionReader) => {
@@ -868,12 +919,13 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
           const error = partitionReader.i16();
           partitionReader.i64();
           partitionReader.i64();
-          partitionReader.array((abortedReader) => ({ producerId: abortedReader.i64(), firstOffset: abortedReader.i64() }));
+          const abortedTransactions = partitionReader.array((abortedReader) => ({ producerId: abortedReader.i64(), firstOffset: abortedReader.i64() }));
           const records = partitionReader.bytes();
           if (error) throw kafkaError(error, `${topic}[${partition}]`);
           return records ? new RecordSetDecoder(records, topic, partition, leader, {
             minOffset: this.#positions.get(partitionKey(topic, partition)) ?? 0n,
             copy: options.copy,
+            abortedTransactions: isolationLevel === 1 ? abortedTransactions : undefined,
           }) : null;
         }).filter((decoder): decoder is RecordSetDecoder => decoder !== null);
       }).flat();
@@ -882,29 +934,37 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
     return this.#drain(maxMessages);
   }
 
-  #drain(max: number): KafkaMessage[] {
-    const messages: KafkaMessage[] = [];
+  #drain(max: number): Array<KafkaMessage | ConsumedMessage> {
+    const messages: Array<KafkaMessage | ConsumedMessage> = [];
     while (this.#decoders.length && messages.length < max) {
       const decoder = this.#decoders[0]!;
       const next = decoder.read(max - messages.length);
-      messages.push(...next);
-      if (next.length) {
-        const last = next[next.length - 1]!;
-        this.#positions.set(partitionKey(last.topic, last.partition), last.offset + 1n);
+      for (const message of next) {
+        this.#positions.set(partitionKey(message.topic, message.partition), message.offset + 1n);
+        if (!this.#options.keyDeserializer && !this.#options.valueDeserializer) {
+          messages.push(message);
+          continue;
+        }
+        const context = { topic: message.topic, partition: message.partition, offset: message.offset, timestamp: message.timestamp };
+        messages.push({
+          ...message,
+          key: this.#options.keyDeserializer?.(message.key, context) ?? null,
+          value: this.#options.valueDeserializer?.(message.value, context) ?? null,
+        });
       }
       if (decoder.done) this.#decoders.shift();
     }
     return messages;
   }
 
-  async *messages(options: FetchOptions = {}): AsyncGenerator<KafkaMessage, void, unknown> {
+  async *messages(options: FetchOptions = {}): AsyncGenerator<KafkaMessage | ConsumedMessage, void, unknown> {
     while (!this.#closed) {
       const messages = await this.fetch(options);
       for (const message of messages) yield message;
     }
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<KafkaMessage> {
+  [Symbol.asyncIterator](): AsyncIterator<KafkaMessage | ConsumedMessage> {
     return this.messages();
   }
 
@@ -972,7 +1032,15 @@ export class BunConsumer implements AsyncIterable<KafkaMessage> {
     if (this.#heartbeat) clearInterval(this.#heartbeat);
     if (this.#groupId && this.#coordinator !== undefined && this.#generationId >= 0) {
       try {
-        await this.#cluster.request(this.#coordinator, API_LEAVE_GROUP, 0, new Writer().string(this.#groupId).string(this.#memberId));
+        const instanceId = this.#options.groupInstanceId;
+        if (instanceId === undefined) {
+          await this.#cluster.request(this.#coordinator, API_LEAVE_GROUP, 0, new Writer().string(this.#groupId).string(this.#memberId));
+        } else {
+          // LeaveGroup v3+ sends a member list that carries static identity.
+          await this.#cluster.request(this.#coordinator, API_LEAVE_GROUP, 3, new Writer().string(this.#groupId).array([{ memberId: this.#memberId, instanceId }], (writer, member) => {
+            writer.string(member.memberId).string(member.instanceId ?? null);
+          }));
+        }
       } catch {
         // The broker may already be unavailable during shutdown.
       }
