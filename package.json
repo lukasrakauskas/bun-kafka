@@ -19,6 +19,7 @@
     "test:chaos:mock": "bun test test/impl/chaos.test.ts",
     "test:chaos": "bun scripts/chaos.ts",
     "test:soak": "bun scripts/soak.ts",
+    "test:soak:release": "SOAK_DURATION_S=86400 SOAK_BURST_INTERVAL_S=3600 SOAK_BURST_S=600 bun scripts/soak.ts",
     "typecheck": "bunx tsc --noEmit",
     "bench": "bun scripts/bench-bun.ts",
     "bench:build": "bun run scripts/build-benches.ts",
