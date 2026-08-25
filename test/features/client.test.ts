@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
 import { Writer } from "../../src/bun/protocol.ts";
 
+const UNREACHABLE_BROKER = "127.0.0.1:1";
+
 const apiVersions = () =>
   new Writer().i16(0).array(
     Array.from({ length: 64 }, (_, key) => key),
@@ -386,14 +388,14 @@ describe("Bun native Kafka client (mock brokers)", () => {
   });
 
   test("rejects invalid batching, retry, timeout, and fetch limits", async () => {
-    expect(() => new Kafka({ brokers: ["127.0.0.1:1"], connectTimeoutMs: 0 })).toThrow(RangeError);
+    expect(() => new Kafka({ brokers: [UNREACHABLE_BROKER], connectTimeoutMs: 0 })).toThrow(RangeError);
     expect(
-      () => new Kafka({ brokers: ["127.0.0.1:1"], maxResponseBytes: Number.POSITIVE_INFINITY }),
+      () => new Kafka({ brokers: [UNREACHABLE_BROKER], maxResponseBytes: Number.POSITIVE_INFINITY }),
     ).toThrow(RangeError);
-    expect(() => new Kafka({ brokers: ["127.0.0.1:1"], retry: { maxRetries: -1 } })).toThrow(
+    expect(() => new Kafka({ brokers: [UNREACHABLE_BROKER], retry: { maxRetries: -1 } })).toThrow(
       RangeError,
     );
-    const kafka = new Kafka({ brokers: ["127.0.0.1:1"] });
+    const kafka = new Kafka({ brokers: [UNREACHABLE_BROKER] });
     expect(() => kafka.producer({ lingerMs: -1 })).toThrow(RangeError);
     expect(() => kafka.producer({ compression: "zstd", idempotent: true })).not.toThrow();
     const consumer = kafka.consumer();

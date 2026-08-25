@@ -242,6 +242,7 @@ describe("deterministic Kafka chaos", () => {
       const held = (await consumer.fetch({ maxWaitMs: 1, maxMessages: 1 }))[0]!;
       await rejectsQuickly(consumer.fetch({ maxWaitMs: 1, maxMessages: 1 }));
       expect(partial).toBe(true);
+// SAFETY: the surrounding test fixture provides the documented shape.
       expect(new TextDecoder().decode(held.value! as Uint8Array)).toBe("value-0");
       expect(consumer.position(topic, 0)).toBe(1n);
     } finally {

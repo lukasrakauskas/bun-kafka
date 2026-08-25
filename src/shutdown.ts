@@ -11,7 +11,7 @@ export type ShutdownOptions = {
   /** Exit process after close (default true). */
   exit?: boolean;
   /** Called with errors from close/flush. */
-  onError?: (err: unknown) => void;
+  onError?: (err: Error) => void;
 };
 
 /**
@@ -34,12 +34,12 @@ export function installShutdown(
       try {
         if (c.flush) await c.flush(timeoutMs);
       } catch (e) {
-        opts.onError?.(e);
+        opts.onError?.(e instanceof Error ? e : new Error(String(e)));
       }
       try {
         await c.close(timeoutMs);
       } catch (e) {
-        opts.onError?.(e);
+        opts.onError?.(e instanceof Error ? e : new Error(String(e)));
       }
     }
     if (exit) process.exit(0);

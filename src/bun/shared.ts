@@ -97,7 +97,8 @@ function kafkaError(code: number, context: string, detail?: string | null): Kafk
 }
 
 function address(host: string, port: number): string {
-  return `${host.includes(":") ? `[${host}]` : host}:${port}`;
+  const formattedHost = host.includes(":") ? `[${host}]` : host;
+  return `${formattedHost}:${port}`;
 }
 
 function partitionKey(topic: string, partition: number): string {

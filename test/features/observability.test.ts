@@ -15,7 +15,7 @@ describe("Observability", () => {
     expect(kafkaErrorName(56)).toBe("KAFKA_STORAGE_ERROR");
     expect(kafkaErrorName(90)).toBe("PRODUCER_FENCED");
     expect(kafkaErrorName(999)).toBe("UNKNOWN_ERROR_999");
-    const e = new KafkaError(19, "context");
+    new KafkaError(19, "context");
     expect(new KafkaError(19, null, { retriable: true }).retriable).toBe(true);
     expect(new KafkaError(58).fatal).toBe(false); // fatal flags are opt-in on the error object
   });
@@ -98,6 +98,7 @@ describe("Observability", () => {
       await Bun.sleep(80);
       const statsEvents = events.filter(
         (e): e is { type: "stats"; stats: Record<string, number> } =>
+// SAFETY: the surrounding test fixture provides the documented shape.
           (e as { type: string }).type === "stats",
       );
       expect(statsEvents.length).toBeGreaterThanOrEqual(2);

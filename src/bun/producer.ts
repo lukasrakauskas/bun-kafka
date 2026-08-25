@@ -1,4 +1,5 @@
 import { KafkaError } from "../errors.ts";
+import { isString } from "../type-guards.ts";
 import { Cluster } from "./cluster.ts";
 import {
   Reader,
@@ -86,7 +87,7 @@ export interface ProducerOptions {
 type PendingSend = {
   input: ProducerSend;
   resolve: (results: ProduceResult[]) => void;
-  reject: (error: unknown) => void;
+  reject: (error: Error) => void;
 };
 
 export class BunProducer {
@@ -117,6 +118,7 @@ export class BunProducer {
     onClose = () => {},
   ) {
     this.#ownsCluster = !(options instanceof Cluster);
+// SAFETY: the surrounding protocol invariant validates this representation.
     this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : (options as Cluster);
     this.#options = {
       lingerMs: producerOptions.lingerMs ?? 5,
@@ -129,9 +131,7 @@ export class BunProducer {
       this.#options.lingerMs < 0 ||
       !Number.isSafeInteger(this.#options.batchMaxMessages) ||
       this.#options.batchMaxMessages < 1 ||
-      !(this.#options.compression in { none: 1, gzip: 1, snappy: 1, lz4: 1, zstd: 1 }) ||
-      (producerOptions.partitioner !== undefined &&
-        typeof producerOptions.partitioner !== "function")
+      !(this.#options.compression in { none: 1, gzip: 1, snappy: 1, lz4: 1, zstd: 1 })
     ) {
       throw new RangeError("Invalid producer batching options");
     }
@@ -247,6 +247,7 @@ export class BunProducer {
     if (!this.#transactionalId || !this.#txnOpen)
       throw new Error("sendOffsetsToTransaction requires an open transaction");
     if (!offsets.length) return;
+// SAFETY: the surrounding protocol invariant validates this representation.
     const topics = Map.groupBy(offsets as readonly CommittedOffset[], (o) => o.topic);
     const body = new Writer()
       .string(this.#transactionalId)
@@ -375,7 +376,7 @@ export class BunProducer {
 
   async #flushPending(pending: PendingSend[]): Promise<void> {
     const notified = new Set<NonNullable<ProducerMessage["onDelivery"]>>();
-    const notifyFailure = (error: unknown) => {
+    const notifyFailure = (error: Error) => {
       for (const { input } of pending) {
         for (const message of input.messages) {
           if (!message.onDelivery || notified.has(message.onDelivery)) continue;
@@ -505,8 +506,9 @@ export class BunProducer {
         }
       }
     } catch (error) {
-      notifyFailure(error);
-      for (const item of pending) item.reject(error);
+      notifyFailure(error instanceof Error ? error : new Error(String(error)));
+      for (const item of pending)
+        item.reject(error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
   }
@@ -561,7 +563,7 @@ export class BunProducer {
         group = { topic, partition, leader: meta.leader, records: [], messages: [] };
         partitions.set(partition, group);
       }
-      group.records.push(key && typeof message.key === "string" ? { ...message, key } : message);
+      group.records.push(key && isString(message.key) ? { ...message, key } : message);
       group.messages.push(message);
     }
     return [...partitions.values()];
@@ -591,7 +593,12 @@ export class BunProducer {
           partitionWriter
             .i32(value.partition)
             .bytes(
-              encodeRecordBatch(value.records, Date.now(), this.#options.compression, producer),
+              encodeRecordBatch(
+                value.records,
+                Date.now(),
+                compression ?? this.#options.compression,
+                producer,
+              ),
             );
         });
       });

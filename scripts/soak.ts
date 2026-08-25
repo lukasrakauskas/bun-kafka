@@ -65,7 +65,8 @@ const commit = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe" })
 /** Fixed-bucket latency histogram in milliseconds. */
 class Histogram {
   readonly #bounds = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000];
-  #counts = new Array(this.#bounds.length + 1).fill(0) as number[];
+// SAFETY: the surrounding protocol invariant validates this representation.
+  #counts = Array.from({ length: this.#bounds.length + 1 }, () => 0);
   count = 0;
   max = 0;
 
@@ -88,7 +89,7 @@ class Histogram {
     return this.max;
   }
 
-  snapshot(): { p50: number; p95: number; p99: number; max: number; count: number } {
+  snapshot() {
     return {
       p50: this.percentile(0.5),
       p95: this.percentile(0.95),
@@ -151,9 +152,9 @@ let retries = 0;
 let throttles = 0;
 let pendingSends = 0;
 
-const producedPerPartition = new Array<number>(PARTITIONS).fill(0);
-const consumedPerPartition = new Array<number>(PARTITIONS).fill(0);
-const lastSeqPerPartition = new Array<number>(PARTITIONS).fill(-1);
+const producedPerPartition = Array.from({ length: PARTITIONS }, () => 0);
+const consumedPerPartition = Array.from({ length: PARTITIONS }, () => 0);
+const lastSeqPerPartition = Array.from({ length: PARTITIONS }, () => -1);
 
 const windowSend = new Histogram();
 const windowFetch = new Histogram();
@@ -207,7 +208,7 @@ let queuedRef: { readonly queuedMessages: number } | null = null;
 
 async function producerLoop(): Promise<void> {
   const producer = kafka.producer({ lingerMs: 5, batchMaxMessages: 1_000 });
-  queuedRef = producer as unknown as { queuedMessages: number };
+  queuedRef = producer;
   const TICK_MS = 50;
   const payload = new Uint8Array(MSG_BYTES).fill(0x61);
   let seq = 0;
@@ -333,7 +334,7 @@ async function samplingLoop(): Promise<void> {
     const elapsedS = Math.max(1, (Date.now() - startedMs) / 1_000);
     const s = windowSend.snapshot();
     const f = windowFetch.snapshot();
-    const sample: Sample = {
+    const sample = {
       t_s: round(elapsedS),
       offered: counters.offered,
       acknowledged: counters.acknowledged,
@@ -361,7 +362,7 @@ async function samplingLoop(): Promise<void> {
       heap_used_bytes: mem.heapUsed,
       cpu_percent: cpuPercent(),
       fds: fdCount(),
-    };
+    } satisfies Sample;
     samples.push(sample);
     windowSend.reset();
     windowFetch.reset();
@@ -533,15 +534,25 @@ function avg(items: Sample[], pick: (item: Sample) => number): number {
 // Artifacts
 // ---------------------------------------------------------------------------
 
+type ArtifactValue = string | number | boolean;
+type ArtifactFields = { readonly [key: string]: ArtifactValue };
+
 interface SoakArtifact {
   commit: string;
   duration_seconds: number;
-  environment: Record<string, unknown>;
-  workload: Record<string, unknown>;
-  result: Record<string, unknown>;
+  environment: ArtifactFields;
+  workload: ArtifactFields;
+  result: ArtifactFields;
   samples: Sample[];
   gates: GateResult[];
   passed: boolean;
+}
+
+function burstDescription(workload: ArtifactFields): string {
+  const interval = Number(workload.burst_interval_s);
+  return interval
+    ? `${workload.burst_factor}x for ${workload.burst_length_s}s every ${interval}s`
+    : "off";
 }
 
 function renderReport(a: SoakArtifact): string {
@@ -559,7 +570,7 @@ function renderReport(a: SoakArtifact): string {
     `- Message size: ${a.workload.message_bytes} bytes`,
     `- Base offered rate: ${a.workload.producer_rate} msg/s`,
     `- Acks: ${a.workload.acks}`,
-    `- Burst: ${a.workload.burst_interval_s ? `${a.workload.burst_factor}x for ${a.workload.burst_length_s}s every ${a.workload.burst_interval_s}s` : "off"}`,
+    `- Burst: ${burstDescription(a.workload)}`,
     "",
     "## Result",
     "",
@@ -590,9 +601,12 @@ function renderReport(a: SoakArtifact): string {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<number> {
+  const burst = BURST_INTERVAL_S
+    ? `${BURST_FACTOR}x/${BURST_S}s every ${BURST_INTERVAL_S}s`
+    : "off";
   console.log(
     `soak: topic=${topic} duration=${DURATION_S}s rate=${BASE_RATE}/s partitions=${PARTITIONS} ` +
-      `msg=${MSG_BYTES}B acks=${ACKS} burst=${BURST_INTERVAL_S ? `${BURST_FACTOR}x/${BURST_S}s every ${BURST_INTERVAL_S}s` : "off"}`,
+      `msg=${MSG_BYTES}B acks=${ACKS} burst=${burst}`,
   );
   await setup();
 

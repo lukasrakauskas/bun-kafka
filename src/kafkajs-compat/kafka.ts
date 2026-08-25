@@ -9,6 +9,9 @@ import { unwrapKafkaJs, type KafkaConfig } from "./config.ts";
 import { CompatProducer } from "./producer.ts";
 import { CompatConsumer } from "./consumer.ts";
 import { CompatAdmin } from "./admin.ts";
+import type { CompatOptions } from "./types.ts";
+
+type KafkaJsOptions = CompatOptions;
 
 export class Kafka {
   #logger: Logger;
@@ -33,7 +36,7 @@ export class Kafka {
     };
   }
 
-  producer(options: Record<string, any> = {}): CompatProducer {
+  producer(options: KafkaJsOptions = {}): CompatProducer {
     return new CompatProducer(
       () => this.#getter(),
       this.#logger.namespace("producer"),
@@ -41,7 +44,7 @@ export class Kafka {
     );
   }
 
-  consumer(options: Record<string, any> = {}): CompatConsumer {
+  consumer(options: KafkaJsOptions = {}): CompatConsumer {
     return new CompatConsumer(
       () => this.#getter(),
       this.#logger.namespace("consumer"),
@@ -49,7 +52,7 @@ export class Kafka {
     );
   }
 
-  admin(_options: Record<string, any> = {}): CompatAdmin {
+  admin(_options: KafkaJsOptions = {}): CompatAdmin {
     return new CompatAdmin(() => this.#getter(), this.#logger.namespace("admin"));
   }
 

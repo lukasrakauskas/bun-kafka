@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
 import { Writer } from "../../src/bun/protocol.ts";
-import { admin } from "../helpers.ts";
+
+const TEST_PRINCIPAL = "User:bun-kafka-test";
 
 const apiVersions = () =>
   new Writer().i16(0).array(
@@ -196,7 +197,7 @@ describe("Admin: group and record management", () => {
                   writer
                     .i8(r.type)
                     .string(r.name)
-                    .array([{ principal: "User:bun-kafka-test", host: "*" }], (aclWriter, acl) =>
+                    .array([{ principal: TEST_PRINCIPAL, host: "*" }], (aclWriter, acl) =>
                       aclWriter.string(acl.principal).string(acl.host).i8(3).i8(3),
                     ),
                 );
@@ -205,7 +206,7 @@ describe("Admin: group and record management", () => {
                 writer
                   .i16(0)
                   .string(null)
-                  .array([{ error: 0, principal: "User:bun-kafka-test" }], (aclWriter, acl) =>
+                  .array([{ error: 0, principal: TEST_PRINCIPAL }], (aclWriter, acl) =>
                     aclWriter
                       .i16(acl.error)
                       .string(null)
@@ -232,7 +233,7 @@ describe("Admin: group and record management", () => {
       const binding = {
         resourceType: 2,
         resourceName: "acl-topic",
-        principal: "User:bun-kafka-test",
+        principal: TEST_PRINCIPAL,
         host: "*",
         operation: 3,
         permissionType: 3,
@@ -248,7 +249,7 @@ describe("Admin: group and record management", () => {
       expect(listed.acls[0]).toEqual({
         resourceType: 2,
         resourceName: "acl-topic",
-        principal: "User:bun-kafka-test",
+        principal: TEST_PRINCIPAL,
         host: "*",
         operation: 3,
         permissionType: 3,
@@ -257,7 +258,7 @@ describe("Admin: group and record management", () => {
         {
           resourceType: 2,
           resourceName: "acl-topic",
-          principal: "User:bun-kafka-test",
+          principal: TEST_PRINCIPAL,
           operation: 3,
           permissionType: 3,
         },
@@ -267,7 +268,7 @@ describe("Admin: group and record management", () => {
         error: 0,
         resourceType: 2,
         resourceName: "acl-topic",
-        principal: "User:bun-kafka-test",
+        principal: TEST_PRINCIPAL,
       });
       expect(sawCreate && sawDescribe && sawDelete).toBe(true);
       await a.close();

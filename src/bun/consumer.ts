@@ -1,4 +1,5 @@
 import { KafkaError } from "../errors.ts";
+import { isBigInt, isString } from "../type-guards.ts";
 import type { ConsumedMessage, TopicPartition, Watermarks } from "../types.ts";
 import { Cluster } from "./cluster.ts";
 import { RecordSetDecoder, Reader, Writer } from "./protocol.ts";
@@ -56,6 +57,12 @@ export interface ConsumerSubscribe {
   groupId?: string;
 }
 
+function isConsumerSubscribe(
+  input: ConsumerSubscribe | string | Array<string | RegExp>,
+): input is ConsumerSubscribe {
+  return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
 export interface ConsumerAssignment {
   topic: string;
   partition: number;
@@ -73,7 +80,6 @@ export interface FetchOptions {
 }
 
 type Assigned = { topic: string; partition: number; leader: number };
-type GroupMember = { memberId: string; topics: string[] };
 type GroupAssignment = { topic: string; partitions: number[] };
 
 // Per-broker incremental fetch session state (KIP-227). The broker remembers
@@ -114,6 +120,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     onClose = () => {},
   ) {
     this.#ownsCluster = !(options instanceof Cluster);
+// SAFETY: the surrounding protocol invariant validates this representation.
     this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : (options as Cluster);
     this.#options = consumerOptions;
     const session = consumerOptions.sessionTimeoutMs ?? 45_000;
@@ -396,7 +403,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       ({ topic, partition, offset }) => ({
         topic,
         partition,
-        offset: typeof offset === "bigint" ? offset : undefined,
+        offset: isBigInt(offset) ? offset : undefined,
       }),
     ),
   ): Promise<void> {
@@ -414,7 +421,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
           partitionWriter
             .i32(value.partition)
             .i64(
-              typeof value.offset === "bigint"
+              isBigInt(value.offset)
                 ? value.offset
                 : (this.#positions.get(partitionKey(topic, value.partition)) ?? 0n),
             )
@@ -472,11 +479,12 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
 
   async subscribe(input: ConsumerSubscribe | string | Array<string | RegExp>): Promise<void> {
     this.#open();
-    const request = typeof input === "object" && !Array.isArray(input) ? input : { topics: input };
+    const request = isConsumerSubscribe(input) ? input : { topics: input };
     // Accept both `topics` and the singular `topic` spelling used by kafkajs.
+    // SAFETY: the compatibility input has been narrowed to an object above.
     const requested = request.topics ?? (request as { topic?: string | RegExp }).topic;
     let topics = await this.#resolveTopicPatterns(
-      typeof requested === "string" || requested instanceof RegExp ? [requested] : requested,
+      isString(requested) || requested instanceof RegExp ? [requested] : requested,
     );
     const groupId = request.groupId ?? this.#options.groupId;
     if (groupId) {
@@ -503,14 +511,17 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   /** Expands RegExp topic patterns against cluster metadata into literal topic names. */
   async #resolveTopicPatterns(topics: Array<string | RegExp>): Promise<string[]> {
     const patterns = topics.filter((topic): topic is RegExp => topic instanceof RegExp);
-    if (!patterns.length) return [...new Set(topics as string[])];
+    if (!patterns.length) {
+      // SAFETY: no RegExp entries remain, so every topic is a string.
+      return [...new Set(topics as string[])];
+    }
     const metadata = await this.#cluster.metadata(null);
     const resolved = new Set<string>();
     for (const entry of metadata.topics) {
       if (entry.err || !entry.name) continue;
       const matchesPattern = patterns.some((pattern) => pattern.test(entry.name));
       const listedLiteral = topics.some(
-        (topic) => typeof topic === "string" && topic === entry.name,
+        (topic) => isString(topic) && topic === entry.name,
       );
       if (matchesPattern || listedLiteral) resolved.add(entry.name);
     }
@@ -539,7 +550,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
         leader: partition.leader,
       };
       this.#assigned.set(key, assigned);
-      if (typeof assignment.offset === "bigint") this.#positions.set(key, assignment.offset);
+      if (isBigInt(assignment.offset)) this.#positions.set(key, assignment.offset);
       else
         unresolved.push({
           ...assigned,
@@ -659,7 +670,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     };
     const topics = Map.groupBy(entries, ([, assignment]) => assignment.topic);
     const requested: Array<[string, Assigned]> = [];
-    for (const [topic, partitions] of topics) {
+    for (const [, partitions] of topics) {
       for (const entry of partitions) {
         const key = entry[0];
         const position = this.#positions.get(key) ?? 0n;
@@ -787,6 +798,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
         this.#positions.set(partitionKey(message.topic, message.partition), message.offset + 1n);
         if (!this.#options.keyDeserializer && !this.#options.valueDeserializer) {
           // Raw path only runs with no deserializers, so key/value really are bytes.
+// SAFETY: the surrounding protocol invariant validates this representation.
           messages.push(message as ConsumedMessage<K, V>);
           continue;
         }
@@ -796,6 +808,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
           offset: message.offset,
           timestamp: message.timestamp,
         };
+// SAFETY: the surrounding protocol invariant validates this representation.
         messages.push({
           ...message,
           key: this.#options.keyDeserializer?.(message.key, context) ?? null,

@@ -9,7 +9,7 @@ export const CompressionTypes = {
 } as const;
 
 /** Registry kept for kafkajs API parity; bun-kafka ships all five codecs natively. */
-export const CompressionCodecs: Record<number, unknown> = {};
+export const CompressionCodecs: Record<number, never> = {};
 
 /** bun-kafka produces Java-compatible murmur2 partitioning natively. */
 export const Partitioners = {

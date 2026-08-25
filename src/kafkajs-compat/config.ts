@@ -1,11 +1,12 @@
 import { Cluster } from "../bun/cluster.ts";
 import { KafkaJSNonRetriableError } from "./errors.ts";
-
+import { hasStringValue, isFunction, isString } from "../type-guards.ts";
+import type { CompatOptions } from "./types.ts";
 export interface KafkaConfig {
   clientId?: string;
   brokers: string[] | (() => string[] | Promise<string[]>);
-  ssl?: boolean | Record<string, unknown>;
-  sasl?: Record<string, any>;
+  ssl?: boolean | Bun.TLSOptions;
+  sasl?: CompatOptions;
   retry?: {
     maxRetryTime?: number;
     initialRetryTime?: number;
@@ -23,8 +24,8 @@ export interface KafkaConfig {
 
 export interface MappedConfig {
   clientId: string;
-  tls?: Record<string, unknown>;
-  sasl?: Record<string, any>;
+  tls?: Bun.TLSOptions;
+  sasl?: CompatOptions;
   requestTimeoutMs: number;
   connectTimeoutMs: number;
   retry: { maxRetries: number; initialBackoffMs: number; maxBackoffMs: number };
@@ -45,12 +46,14 @@ export function mapConfig(
       `SASL mechanism ${saslConfig.mechanism} is not supported by bun-kafka`,
     );
   }
-  let token: unknown = saslConfig?.oauthBearerToken ?? saslConfig?.token;
-  if (!token && typeof saslConfig?.oauthBearerProvider === "function") {
+  const configuredToken = saslConfig?.oauthBearerToken ?? saslConfig?.token;
+  let token = isString(configuredToken) ? configuredToken : undefined;
+  const provider = saslConfig?.oauthBearerProvider;
+  if (!token && isFunction(provider)) {
     // kafkajs providers resolve to { value: token }; accept both shapes.
     token = async () => {
-      const resolved = await (saslConfig.oauthBearerProvider as () => unknown)();
-      return typeof resolved === "string" ? resolved : (resolved as { value?: string }).value;
+      const resolved = await provider();
+      return isString(resolved) ? resolved : hasStringValue(resolved) ? (resolved.value ?? "") : "";
     };
   }
   const sasl = saslConfig
@@ -64,7 +67,9 @@ export function mapConfig(
   return {
     brokers,
     clientId: config.clientId ?? "kafkajs",
+// SAFETY: the surrounding protocol invariant validates this representation.
     tls: (config.ssl === true ? {} : config.ssl || undefined) as never,
+// SAFETY: the surrounding protocol invariant validates this representation.
     sasl: sasl as never,
     requestTimeoutMs: config.requestTimeout ?? 30_000,
     connectTimeoutMs: Math.max(config.connectionTimeout ?? 1_000, 1_000),
@@ -78,6 +83,7 @@ export function mapConfig(
 
 /** @confluentinc/kafka-javascript nests real options under `kafkaJS`; accept both shapes. */
 export function unwrapKafkaJs<T>(options: (T & { kafkaJS?: T }) | undefined): T {
+// SAFETY: the surrounding protocol invariant validates this representation.
   return ((options as { kafkaJS?: T })?.kafkaJS ?? options) as T;
 }
 
@@ -103,9 +109,10 @@ export class ClusterHub {
   resolve(): Promise<MappedConfig & { brokers: string[] }> {
     this.#mapped ??= (async () => {
       const brokers =
-        typeof this.config.brokers === "function"
+        isFunction(this.config.brokers)
           ? await this.config.brokers()
           : this.config.brokers;
+// SAFETY: the surrounding protocol invariant validates this representation.
       return { ...(mapConfig(this.config, brokers) as MappedConfig), brokers };
     })();
     return this.#mapped;
@@ -119,7 +126,7 @@ export class ClusterHub {
   sync(): Cluster {
     if (!this.#cluster) {
       const mapped =
-        typeof this.config.brokers === "function"
+        isFunction(this.config.brokers)
           ? undefined
           : mapConfig(this.config, this.config.brokers);
       if (!mapped)

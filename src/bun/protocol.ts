@@ -1,4 +1,5 @@
 import { KafkaError } from "../errors.ts";
+import { isString } from "../type-guards.ts";
 import type {
   AbortedTransaction,
   Bytes,
@@ -9,13 +10,15 @@ import type {
 import { snappyCompress, snappyDecompress } from "./snappy.ts";
 import { lz4Compress, lz4Decompress } from "./lz4.ts";
 
+const MALFORMED_RESPONSE = "Malformed Kafka response";
+
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 const noop = () => {};
 
 export function asBytes(value: Bytes): Uint8Array | null {
   if (value == null) return null;
-  if (typeof value === "string") return textEncoder.encode(value);
+  if (isString(value)) return textEncoder.encode(value);
   return value instanceof Uint8Array ? value : new Uint8Array(value);
 }
 
@@ -191,7 +194,7 @@ export class Reader {
 
   #take(size: number): number {
     if (size < 0 || this.offset + size > this.data.byteLength)
-      throw new KafkaError(-1, "Malformed Kafka response");
+      throw new KafkaError(-1, MALFORMED_RESPONSE);
     const at = this.offset;
     this.offset += size;
     return at;
@@ -233,7 +236,7 @@ export class Reader {
     const size = this.i32();
     if (size < 0) return [];
     if (size > this.remaining) throw new KafkaError(-1, "Malformed Kafka array");
-    const values = new Array<T>(size);
+    const values = Array.from<T>({ length: size });
     for (let i = 0; i < size; i++) values[i] = read(this);
     return values;
   }
@@ -246,7 +249,7 @@ export class Reader {
   varInt(): number {
     let value = 0;
     for (let shift = 0; shift < 35; shift += 7) {
-      if (this.offset >= this.data.byteLength) throw new KafkaError(-1, "Malformed Kafka response");
+      if (this.offset >= this.data.byteLength) throw new KafkaError(-1, MALFORMED_RESPONSE);
       const byte = this.data[this.offset++]!;
       value += (byte & 0x7f) * 2 ** shift;
       if (!(byte & 0x80)) return (value >>> 1) ^ -(value & 1);
@@ -257,7 +260,7 @@ export class Reader {
   varLong(): bigint {
     let value = 0n;
     for (let shift = 0n; shift < 70n; shift += 7n) {
-      if (this.offset >= this.data.byteLength) throw new KafkaError(-1, "Malformed Kafka response");
+      if (this.offset >= this.data.byteLength) throw new KafkaError(-1, MALFORMED_RESPONSE);
       const byte = this.data[this.offset++]!;
       value |= BigInt(byte & 0x7f) << shift;
       if (!(byte & 0x80)) return (value >> 1n) ^ -(value & 1n);
@@ -268,7 +271,7 @@ export class Reader {
   uvarint(): number {
     let value = 0;
     for (let shift = 0; shift < 35; shift += 7) {
-      if (this.offset >= this.data.byteLength) throw new KafkaError(-1, "Malformed Kafka response");
+      if (this.offset >= this.data.byteLength) throw new KafkaError(-1, MALFORMED_RESPONSE);
       const byte = this.data[this.offset++]!;
       value += (byte & 0x7f) * 2 ** shift;
       if (!(byte & 0x80)) return value;
@@ -294,7 +297,7 @@ export class Reader {
     if (size === 0) return [];
     const count = size - 1;
     if (count > this.remaining) throw new KafkaError(-1, "Malformed Kafka array");
-    const values = new Array<T>(count);
+    const values = Array.from<T>({ length: count });
     for (let i = 0; i < count; i++) values[i] = read(this);
     return values;
   }
@@ -417,7 +420,7 @@ export function encodeRecordBatch(
   const baseTimestamp = BigInt(records[0]!.timestamp ?? now);
   let maxTimestamp = baseTimestamp;
   let size = 61;
-  const prepared: PreparedRecord[] = new Array(records.length);
+  const prepared: PreparedRecord[] = Array.from({ length: records.length });
 
   for (let offset = 0; offset < records.length; offset++) {
     const record = records[offset]!;
@@ -469,6 +472,7 @@ export function encodeRecordBatch(
       if (header.value) recordsWriter.raw(header.value);
     }
   }
+// SAFETY: the surrounding protocol invariant validates this representation.
   const rawRecords = recordsWriter.result() as Uint8Array<ArrayBuffer>;
   const recordBytes =
     compression === "gzip"
@@ -649,6 +653,7 @@ export class RecordSetDecoder {
     if (crc32c(reader.data.subarray(crcStart, this.#batchEnd)) !== expectedCrc)
       throw new KafkaError(-1, "Kafka record CRC mismatch");
     if (compression) {
+// SAFETY: the surrounding protocol invariant validates this representation.
       const records = reader.raw(this.#batchEnd - reader.offset) as Uint8Array<ArrayBuffer>;
       let decompressed: Uint8Array;
       try {

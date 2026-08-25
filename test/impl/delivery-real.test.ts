@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
+
+const BROKER = "127.0.0.1:9092";
 import { admin, dec, topic } from "../helpers.ts";
 
 describe("Producer delivery options (real broker)", () => {
@@ -10,7 +12,7 @@ describe("Producer delivery options (real broker)", () => {
     await client.close();
     const p = admin();
     void p;
-    const kafka = new Kafka({ brokers: ["127.0.0.1:9092"] });
+    const kafka = new Kafka({ brokers: [BROKER] });
     try {
       const producer = kafka.producer({
         partitioner: ({ partitionCount }) => Math.min(partitionCount - 1, 2),
@@ -41,7 +43,7 @@ describe("Producer delivery options (real broker)", () => {
     const client = admin();
     await client.createTopics([{ name, numPartitions: 1 }]);
     await client.close();
-    const kafka = new Kafka({ brokers: ["127.0.0.1:9092"] });
+    const kafka = new Kafka({ brokers: [BROKER] });
     try {
       const producer = kafka.producer({ partitioner: () => 99 });
       await expect(
@@ -51,6 +53,7 @@ describe("Producer delivery options (real broker)", () => {
       await expect(
         producer2.send({ topic: name, messages: [{ value: "x" }] }),
       ).rejects.toBeInstanceOf(RangeError);
+// SAFETY: the surrounding test fixture provides the documented shape.
       expect(() => kafka.producer({ partitioner: "nope" as never })).toThrow(RangeError);
     } finally {
       await kafka.disconnect();
@@ -61,7 +64,7 @@ describe("Producer delivery options (real broker)", () => {
     const client = admin();
     await client.createTopics([{ name, numPartitions: 2 }]);
     await client.close();
-    const kafka = new Kafka({ brokers: ["127.0.0.1:9092"] });
+    const kafka = new Kafka({ brokers: [BROKER] });
     try {
       const delivered: string[] = [];
       const producer = kafka.producer({ lingerMs: 0 });

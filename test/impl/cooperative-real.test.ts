@@ -2,15 +2,17 @@ import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
 import { producer, topic } from "../helpers.ts";
 
+const BROKER = "127.0.0.1:9092";
+
 describe("Cooperative-sticky assignor (real broker)", () => {
   test("two members split a topic and a rejoining survivor retains its partitions", async () => {
     const group = `coop-${Date.now()}`;
     const name = topic("coop");
-    const setupAdmin = new Kafka({ brokers: ["127.0.0.1:9092"] }).admin();
+    const setupAdmin = new Kafka({ brokers: [BROKER] }).admin();
     await setupAdmin.createTopics([{ name, numPartitions: 2 }]);
     await setupAdmin.close();
 
-    const k1 = new Kafka({ brokers: ["127.0.0.1:9092"] });
+    const k1 = new Kafka({ brokers: [BROKER] });
     const c1 = k1.consumer({
       groupId: group,
       partitionAssigner: "cooperative-sticky",
@@ -33,7 +35,7 @@ describe("Cooperative-sticky assignor (real broker)", () => {
     });
     await p.close();
 
-    const k2 = new Kafka({ brokers: ["127.0.0.1:9092"] });
+    const k2 = new Kafka({ brokers: [BROKER] });
     const c2 = k2.consumer({
       groupId: group,
       partitionAssigner: "cooperative-sticky",
@@ -66,7 +68,7 @@ describe("Cooperative-sticky assignor (real broker)", () => {
         messages.push(
           ...(await consumer
             .fetch({ maxWaitMs: 200 })
-            .then((all) => all.filter((m) => m.partition === target.partition ?? true))),
+            .then((all) => all.filter((m) => m.partition === target.partition))),
         );
       }
       void messages;

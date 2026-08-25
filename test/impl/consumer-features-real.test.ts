@@ -2,11 +2,15 @@ import { describe, expect, test } from "bun:test";
 import { Kafka, type KafkaMessage } from "../../index.ts";
 import { admin, topic } from "../helpers.ts";
 
+const BROKER = "127.0.0.1:9092";
+import { isString } from "../../src/type-guards.ts";
 function decode(value: Uint8Array | null | unknown): string | null {
+  // SAFETY: the test fixture provides a byte payload whenever it is not a string.
   return value == null
     ? null
-    : typeof value === "string"
+    : isString(value)
       ? value
+// SAFETY: the surrounding test fixture provides the documented shape.
       : new TextDecoder().decode(value as Uint8Array);
 }
 
@@ -19,7 +23,7 @@ describe("Regex subscription and deserializers", () => {
       { name: `${name}-two`, numPartitions: 1 },
     ]);
     await client.close();
-    const kafka = new Kafka({ brokers: ["127.0.0.1:9092"] });
+    const kafka = new Kafka({ brokers: [BROKER] });
     try {
       const consumer = kafka.consumer();
       await consumer.subscribe({ topics: [new RegExp(`^${name}`), `${name}-one`] });
@@ -36,7 +40,7 @@ describe("Regex subscription and deserializers", () => {
 
   test("key and value deserializers transform delivered messages", async () => {
     const name = topic("serde");
-    const kafka = new Kafka({ brokers: ["127.0.0.1:9092"] });
+    const kafka = new Kafka({ brokers: [BROKER] });
     try {
       const producer = kafka.producer();
       await producer.send({
@@ -65,7 +69,7 @@ describe("Regex subscription and deserializers", () => {
 
   test("plain consumers still receive zero-copy byte payloads", async () => {
     const name = topic("plain");
-    const kafka = new Kafka({ brokers: ["127.0.0.1:9092"] });
+    const kafka = new Kafka({ brokers: [BROKER] });
     try {
       const producer = kafka.producer();
       await producer.send({ topic: name, messages: [{ value: "bytes" }] });

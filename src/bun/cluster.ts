@@ -225,7 +225,9 @@ export class Cluster {
     if (error)
       throw kafkaError(
         error,
-        `Find transaction coordinator ${transactionalId}${message ? `: ${message}` : ""}`,
+        message
+          ? `Find transaction coordinator ${transactionalId}: ${message}`
+          : `Find transaction coordinator ${transactionalId}`,
       );
     const coordinatorId = response.i32();
     response.string(); // host

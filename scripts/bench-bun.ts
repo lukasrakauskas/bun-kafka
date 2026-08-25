@@ -4,6 +4,7 @@ const hyperfine = Bun.which("hyperfine");
 if (!hyperfine) throw new Error("hyperfine is required: https://github.com/sharkdp/hyperfine");
 
 await Bun.$`mkdir -p native/build`;
+const COMMAND_NAME = "--command-name";
 const runs = process.env.BENCH_RUNS ?? "10";
 const total = process.env.BENCH_COUNT ?? "100000";
 const args = [
@@ -15,10 +16,10 @@ const args = [
   "native/build/bun-native-hyperfine.json",
   "--export-markdown",
   "native/build/bun-native-hyperfine.md",
-  "--command-name",
+  COMMAND_NAME,
   "one record per batch",
   `bun bench/bun-codec.ts 1 ${total}`,
-  "--command-name",
+  COMMAND_NAME,
   "100 records per batch",
   `bun bench/bun-codec.ts 100 ${total}`,
 ];
@@ -27,19 +28,19 @@ if (process.env.KAFKA_BROKERS) {
   const count = process.env.BENCH_KAFKA_COUNT ?? "10000";
   const topic = `bun-kafka-bench-${Date.now()}`;
   args.push(
-    "--command-name",
+    COMMAND_NAME,
     "bun-kafka",
     `bun bench/bun-produce-consume.ts ${topic}-bun-$(date +%s%N) ${count}`,
   );
   if (await Bun.file("native/build/bench-go").exists())
     args.push(
-      "--command-name",
+      COMMAND_NAME,
       "franz-go",
       `native/build/bench-go ${topic}-go-$(date +%s%N) ${count}`,
     );
   if (await Bun.file("native/build/bench-rust").exists())
     args.push(
-      "--command-name",
+      COMMAND_NAME,
       "rdkafka-rust",
       `native/build/bench-rust ${topic}-rust-$(date +%s%N) ${count}`,
     );

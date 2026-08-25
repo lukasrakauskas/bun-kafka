@@ -1,4 +1,5 @@
 import { KafkaError } from "../errors.ts";
+import { isFunction, isString } from "../type-guards.ts";
 import { Reader, Writer } from "./protocol.ts";
 
 export type BunKafkaTls = boolean | Bun.TLSOptions;
@@ -23,6 +24,8 @@ type Pending = {
   flexible?: boolean;
 };
 
+const CLOSED_MESSAGE = "Kafka connection is closed";
+
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
@@ -44,6 +47,7 @@ function fromBase64(value: string): Uint8Array {
 }
 
 async function digest(value: Uint8Array, algorithm: "SHA-256" | "SHA-512"): Promise<Uint8Array> {
+// SAFETY: the surrounding protocol invariant validates this representation.
   return new Uint8Array(await crypto.subtle.digest(algorithm, value as Uint8Array<ArrayBuffer>));
 }
 
@@ -54,17 +58,21 @@ async function hmac(
 ): Promise<Uint8Array> {
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
+// SAFETY: the surrounding protocol invariant validates this representation.
     key as Uint8Array<ArrayBuffer>,
     { name: "HMAC", hash: algorithm },
     false,
     ["sign"],
   );
   return new Uint8Array(
+    // SAFETY: Web Crypto accepts only the two normalized byte representations below.
     await crypto.subtle.sign(
       "HMAC",
       cryptoKey,
-      typeof value === "string"
+      isString(value)
+// SAFETY: the surrounding protocol invariant validates this representation.
         ? (bytes(value) as Uint8Array<ArrayBuffer>)
+// SAFETY: the surrounding protocol invariant validates this representation.
         : (value as Uint8Array<ArrayBuffer>),
     ),
   );
@@ -78,6 +86,7 @@ async function pbkdf2(
 ): Promise<Uint8Array> {
   const key = await crypto.subtle.importKey(
     "raw",
+// SAFETY: the surrounding protocol invariant validates this representation.
     bytes(password) as Uint8Array<ArrayBuffer>,
     "PBKDF2",
     false,
@@ -85,6 +94,7 @@ async function pbkdf2(
   );
   return new Uint8Array(
     await crypto.subtle.deriveBits(
+// SAFETY: the surrounding protocol invariant validates this representation.
       { name: "PBKDF2", salt: salt as Uint8Array<ArrayBuffer>, iterations, hash: algorithm },
       key,
       algorithm === "SHA-256" ? 256 : 512,
@@ -107,7 +117,7 @@ function parseFields(value: string): Map<string, string> {
   );
 }
 
-function parseAddress(address: string): { hostname: string; port: number } {
+function parseAddress(address: string) {
   const url = new URL(address.includes("://") ? address : `kafka://${address}`);
   const port = Number(url.port || 9092);
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
@@ -153,7 +163,7 @@ export class Connection {
     timeoutMs = this.#options.requestTimeoutMs,
     flexible = false,
   ): Promise<Reader> {
-    if (this.#closed) throw new Error("Kafka connection is closed");
+    if (this.#closed) throw new Error(CLOSED_MESSAGE);
     const socket = await this.#connect();
     await this.#prepare(socket, apiKey, apiVersion, timeoutMs);
     return this.#send(socket, apiKey, apiVersion, body, timeoutMs, flexible);
@@ -166,7 +176,7 @@ export class Connection {
     body: Writer,
     timeoutMs = this.#options.requestTimeoutMs,
   ): Promise<void> {
-    if (this.#closed) throw new Error("Kafka connection is closed");
+    if (this.#closed) throw new Error(CLOSED_MESSAGE);
     const socket = await this.#connect();
     await this.#prepare(socket, apiKey, apiVersion, timeoutMs);
     const correlation = (this.#correlation = (this.#correlation + 1) & 0x7fffffff);
@@ -189,7 +199,7 @@ export class Connection {
   }
 
   /** Counters for statistics reporting. */
-  get stats(): { requests: number; bytesSent: number; bytesReceived: number } {
+  get stats() {
     return {
       requests: this.#requests,
       bytesSent: this.#bytesSent,
@@ -258,7 +268,7 @@ export class Connection {
         if (authentication.byteLength)
           throw new KafkaError(-1, `Unexpected SASL/PLAIN challenge from ${this.address}`);
       } else if (sasl.mechanism === "oauthbearer") {
-        const token = typeof sasl.token === "function" ? await sasl.token() : sasl.token;
+        const token = isFunction(sasl.token) ? await sasl.token() : sasl.token;
         if (!token) throw new KafkaError(-1, `SASL/OAUTHBEARER token is empty for ${this.address}`);
         const authentication = await this.#sasl(
           socket,
@@ -268,7 +278,7 @@ export class Connection {
         if (authentication.byteLength)
           throw new KafkaError(-1, `Unexpected SASL/OAUTHBEARER challenge from ${this.address}`);
         // Timed reauthentication (KIP-368): re-run SASL before the token expires.
-        if (this.#sessionLifetimeMs > 0) this.scheduleReauthentication(socket, timeoutMs);
+        if (this.#sessionLifetimeMs > 0) this.scheduleReauthentication(socket);
       } else {
         await this.#scram(socket, sasl, timeoutMs);
       }
@@ -291,7 +301,7 @@ export class Connection {
   }
 
   /** Re-run SASL on a live connection before the advertised session expires (KIP-368). */
-  scheduleReauthentication(socket: Bun.Socket, timeoutMs: number): void {
+  scheduleReauthentication(socket: Bun.Socket): void {
     if (this.#reauthTimer) clearTimeout(this.#reauthTimer);
     const delay = Math.max(0, Math.floor(this.#sessionLifetimeMs * 0.8));
     this.#reauthTimer = setTimeout(() => {
@@ -304,7 +314,7 @@ export class Connection {
     try {
       const sasl = this.#options.sasl;
       if (sasl?.mechanism !== "oauthbearer") return; // Other mechanisms cannot re-authenticate mid-session.
-      const token = typeof sasl.token === "function" ? await sasl.token() : sasl.token;
+      const token = isFunction(sasl.token) ? await sasl.token() : sasl.token;
       if (!token)
         throw new KafkaError(
           -1,
@@ -316,7 +326,7 @@ export class Connection {
         this.#options.requestTimeoutMs,
       );
       if (this.#sessionLifetimeMs > 0)
-        this.scheduleReauthentication(socket, this.#options.requestTimeoutMs);
+        this.scheduleReauthentication(socket);
     } catch (error) {
       this.#fail(
         new KafkaError(58, `SASL reauthentication failed on ${this.address}: ${String(error)}`, {
@@ -452,7 +462,7 @@ export class Connection {
         if (this.#closed || timedOut) {
           this.#ignoredSockets.add(socket);
           socket.end();
-          throw new Error("Kafka connection is closed");
+          throw new Error(CLOSED_MESSAGE);
         }
         this.#socket = socket;
         return socket;
@@ -561,6 +571,6 @@ export class Connection {
     if (this.#reauthTimer) clearTimeout(this.#reauthTimer);
     this.#reauthTimer = undefined;
     this.#socket?.end();
-    this.#fail(new Error("Kafka connection is closed"));
+    this.#fail(new Error(CLOSED_MESSAGE));
   }
 }

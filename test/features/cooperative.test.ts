@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
 import { Reader, Writer } from "../../src/bun/protocol.ts";
-import { producer, topic } from "../helpers.ts";
+
+const COOPERATIVE_STICKY = "cooperative-sticky";
+const MEMBER_ID = "member-1";
 
 const apiVersions = () =>
   new Writer().i16(0).array(
@@ -93,10 +95,10 @@ describe("Cooperative-sticky assignor (mock broker)", () => {
               .i32(0)
               .i16(0)
               .i32(10)
-              .string("cooperative-sticky")
-              .string("member-1") // leader
-              .string("member-1") // member id
-              .array([["member-1", metadata.result()] as const], (writer, [memberId, md]) =>
+              .string(COOPERATIVE_STICKY)
+              .string(MEMBER_ID) // leader
+              .string(MEMBER_ID) // member id
+              .array([[MEMBER_ID, metadata.result()] as const], (writer, [memberId, md]) =>
                 writer.string(memberId).bytes(md),
               );
           } else if (key === 14) {
@@ -128,7 +130,7 @@ describe("Cooperative-sticky assignor (mock broker)", () => {
               );
           else if (key === 8)
             body = new Writer().array(["events"], (writer, topicName) =>
-              writer.string(topicName).array([0, 1], (item, partition) => item.i16(0)),
+              writer.string(topicName).array([0, 1], (item, _partition) => item.i16(0)),
             );
           else body = new Writer().i16(0);
           const response = new Writer().i32(0).i32(correlation).raw(body.result());
@@ -142,12 +144,12 @@ describe("Cooperative-sticky assignor (mock broker)", () => {
     try {
       const consumer = kafka.consumer({
         groupId: "coop-group",
-        partitionAssigner: "cooperative-sticky",
+        partitionAssigner: COOPERATIVE_STICKY,
       });
       // Pre-existing ownership must be declared as owned partitions (KIP-429).
       await consumer.assign([{ topic: "events", partition: 1, offset: 0n }]);
       await consumer.subscribe({ topics: ["events"] });
-      expect(joinProtocol).toBe("cooperative-sticky");
+      expect(joinProtocol).toBe(COOPERATIVE_STICKY);
       expect(subscriptionVersion).toBe(1);
       expect(ownedPartitions).toContain(1); // previously assigned partition declared as owned
       await consumer.close();

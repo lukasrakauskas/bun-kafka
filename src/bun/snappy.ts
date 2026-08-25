@@ -8,7 +8,7 @@
 
 const XERIAL_HEADER = new Uint8Array([0x82, 0x53, 0x4e, 0x41, 0x50, 0x50, 0x59, 0x00]);
 
-function readVarint(input: Uint8Array, offset: number): { value: number; offset: number } {
+function readVarint(input: Uint8Array, offset: number) {
   let value = 0;
   let shift = 0;
   while (true) {

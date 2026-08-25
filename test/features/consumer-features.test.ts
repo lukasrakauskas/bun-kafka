@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
+import { isString } from "../../src/type-guards.ts";
 import { Writer, decodeRecordSet, encodeRecordBatch } from "../../src/bun/protocol.ts";
 import type { AbortedTransaction } from "../../src/types.ts";
 import { RecordSetDecoder } from "../../src/bun/protocol.ts";
+
+const STATIC_MEMBER_ID = "member-static";
 
 const apiVersions = () =>
   new Writer().i16(0).array(
@@ -11,10 +14,12 @@ const apiVersions = () =>
   );
 
 function decode(value: Uint8Array | null | unknown): string | null {
+  // SAFETY: the test fixture provides a byte payload whenever it is not a string.
   return value == null
     ? null
-    : typeof value === "string"
+    : isString(value)
       ? value
+// SAFETY: the surrounding test fixture provides the documented shape.
       : new TextDecoder().decode(value as Uint8Array);
 }
 
@@ -101,9 +106,9 @@ describe("Static group membership", () => {
                 .i16(0)
                 .i32(1)
                 .string("range")
-                .string("member-static")
-                .string("member-static")
-                .array(["member-static"], (writer, member) =>
+                .string(STATIC_MEMBER_ID)
+                .string(STATIC_MEMBER_ID)
+                .array([STATIC_MEMBER_ID], (writer, member) =>
                   writer.string(member).bytes(memberMetadata),
                 );
             else if (key === 14) body = new Writer().i32(0).i16(0).bytes(assignment);

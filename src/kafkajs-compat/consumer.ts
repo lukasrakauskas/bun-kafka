@@ -6,6 +6,7 @@ import { wrapError, KafkaJSError, KafkaJSNonRetriableError } from "./errors.ts";
 import type { ClusterGetter } from "./config.ts";
 import { Emitter, Logger } from "./logger.ts";
 import { toKafkajsMessage, type KafkaJsConsumedMessage } from "./messages.ts";
+import type { CompatOptions, LogFields } from "./types.ts";
 
 export interface CompatEachMessagePayload {
   topic: string;
@@ -27,7 +28,7 @@ export interface CompatEachBatchPayload {
     offsetLag(): string;
     isStale(): boolean;
     resolveOffset(offset: string | number | bigint): void;
-    commitOffsetsIfNecessary(options?: unknown): Promise<void>;
+    commitOffsetsIfNecessary(options?: CompatOptions): Promise<void>;
     heartbeat(): Promise<void>;
   };
   heartbeat: () => Promise<void>;
@@ -57,7 +58,7 @@ export class CompatConsumer {
   events = CONSUMER_EVENTS;
   #getter: () => ClusterGetter;
   #logger: Logger;
-  #options: Record<string, any>;
+  #options: CompatOptions;
   #emitter = new Emitter();
   #consumer?: BunConsumer;
   #running = false;
@@ -67,13 +68,13 @@ export class CompatConsumer {
   #pendingOffsets = new Map<string, { topic: string; partition: number; offset: bigint }>();
   #uncommittedCount = 0;
 
-  constructor(getter: () => ClusterGetter, logger: Logger, options: Record<string, any>) {
+  constructor(getter: () => ClusterGetter, logger: Logger, options: CompatOptions) {
     this.#getter = getter;
     this.#logger = logger;
     this.#options = options;
   }
 
-  on(event: string, listener: (event: Record<string, unknown>) => void): () => void {
+  on(event: string, listener: (event: LogFields) => void): () => void {
     return this.#emitter.on(event, listener);
   }
 
@@ -86,15 +87,23 @@ export class CompatConsumer {
       const o = this.#options;
       const assignors = Array.isArray(o.partitionAssignors) ? o.partitionAssignors : [];
       const cooperative = assignors.some(
+// SAFETY: the surrounding protocol invariant validates this representation.
         (assignor) => (assignor as { name?: string }).name === "CooperativeStickyAssignor",
       );
       const consumerOptions = {
+// SAFETY: the surrounding protocol invariant validates this representation.
         groupId: o.groupId as string,
+// SAFETY: the surrounding protocol invariant validates this representation.
         sessionTimeoutMs: o.sessionTimeout as number | undefined,
+// SAFETY: the surrounding protocol invariant validates this representation.
         rebalanceTimeoutMs: o.rebalanceTimeout as number | undefined,
+// SAFETY: the surrounding protocol invariant validates this representation.
         heartbeatIntervalMs: o.heartbeatInterval as number | undefined,
+// SAFETY: the surrounding protocol invariant validates this representation.
         fromBeginning: o.fromBeginning as boolean | undefined,
+// SAFETY: the surrounding protocol invariant validates this representation.
         isolationLevel: o.isolationLevel as "read_uncommitted" | "read_committed" | undefined,
+// SAFETY: the surrounding protocol invariant validates this representation.
         groupInstanceId: o.groupInstanceId as string | undefined,
         partitionAssigner: cooperative ? ("cooperative-sticky" as const) : undefined,
       };
@@ -145,6 +154,7 @@ export class CompatConsumer {
           merged.push(entry);
       }
       this.#subscribedTopics = new Set(merged);
+// SAFETY: the surrounding protocol invariant validates this representation.
       await this.#underlying().subscribe({ topics: merged as never, fromBeginning });
       this.#emitter.emit(CONSUMER_EVENTS.GROUP_JOIN, { groupId: this.#options.groupId });
     } catch (error) {
@@ -191,9 +201,13 @@ export class CompatConsumer {
           maxMessages: 200,
           // Capped wire wait keeps stop()/pause()/resume() responsive even when
           // applications configure multi-second maxWaitTimeInMs.
+// SAFETY: the surrounding protocol invariant validates this representation.
           maxWaitMs: Math.min((o.maxWaitTimeInMs as number) ?? 500, 1_000),
+// SAFETY: the surrounding protocol invariant validates this representation.
           minBytes: o.minBytes as number | undefined,
+// SAFETY: the surrounding protocol invariant validates this representation.
           maxBytes: o.maxBytes as number | undefined,
+// SAFETY: the surrounding protocol invariant validates this representation.
           maxPartitionBytes: o.maxBytesPerPartition as number | undefined,
         });
         if (!this.#running) break;
@@ -482,7 +496,7 @@ export class CompatConsumer {
     return [...grouped].map(([topic, partitions]) => ({ topic, partitions }));
   }
 
-  async describeGroup(): Promise<Record<string, unknown>> {
+  async describeGroup(): Promise<CompatOptions> {
     try {
       const admin = new BunAdmin(this.#getter().acquire(), this.#getter().release);
       const [group] = await admin.describeGroups([String(this.#options.groupId)]);

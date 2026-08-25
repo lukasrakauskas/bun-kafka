@@ -1,6 +1,7 @@
 import type { ConsumedMessage } from "../types.ts";
 import { KafkaJSNonRetriableError } from "./errors.ts";
-import type { Partitioner, ProducerMessage } from "../bun/producer.ts";
+import type { Partitioner, PartitionerContext, ProducerMessage } from "../bun/producer.ts";
+import { isFunction } from "../type-guards.ts";
 
 export interface KafkaJsMessage {
   key?: Buffer | string | null;
@@ -38,14 +39,17 @@ export type KafkaJsConsumedMessage = {
   leaderEpoch?: number | null;
 };
 
-export function toBunPartitioner(partitioner: unknown): Partitioner | undefined {
+type KafkaJsPartitioner =
+  | ((topic: string, count: number, key: Uint8Array | null) => number)
+  | { partition: (context: PartitionerContext) => number };
+
+export function toBunPartitioner(
+  partitioner: KafkaJsPartitioner | null | undefined,
+): Partitioner | undefined {
   if (!partitioner) return undefined;
-  if (typeof partitioner === "function") {
-    const fn = partitioner as (topic: string, count: number, key: Uint8Array | null) => number;
-    return ({ topic, partitionCount, key }) => fn(topic, partitionCount, key);
-  }
-  const obj = partitioner as { partition?: (ctx: unknown) => number };
-  if (typeof obj.partition === "function") return (ctx) => obj.partition!(ctx);
+  if (isFunction(partitioner))
+    return ({ topic, partitionCount, key }) => partitioner(topic, partitionCount, key);
+  if ("partition" in partitioner) return (context) => partitioner.partition(context);
   return undefined;
 }
 
@@ -54,6 +58,7 @@ export function toWireMessage(message: KafkaJsMessage): ProducerMessage {
   const wire: ProducerMessage = {
     value: message.value,
     key: message.key ?? null,
+// SAFETY: the surrounding protocol invariant validates this representation.
     headers: (message.headers ?? {}) as ProducerMessage["headers"],
   };
   if (message.partition !== undefined) wire.partition = message.partition;

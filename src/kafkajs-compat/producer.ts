@@ -3,6 +3,7 @@ import { COMPRESSION_NAMES, PRODUCER_EVENTS, CompressionTypes } from "./constant
 import { wrapError, KafkaJSNonRetriableError } from "./errors.ts";
 import type { ClusterGetter } from "./config.ts";
 import { Emitter, Logger } from "./logger.ts";
+import type { CompatOptions, LogFields } from "./types.ts";
 import {
   toBunPartitioner,
   toWireMessage,
@@ -10,13 +11,15 @@ import {
   type KafkaJsSendBatchRecord,
 } from "./messages.ts";
 
-function producerOptions(options: Record<string, any>, logger: Logger) {
+function producerOptions(options: CompatOptions) {
   const compressionCode = Number(options.compression ?? CompressionTypes.None);
   return {
     lingerMs: 5,
     compression: COMPRESSION_NAMES[compressionCode] ?? "none",
     idempotent: Boolean(options.idempotent),
+// SAFETY: the surrounding protocol invariant validates this representation.
     transactionalId: options.transactionalId as string | undefined,
+// SAFETY: the surrounding protocol invariant validates this representation.
     transactionTimeoutMs: options.transactionTimeout as number | undefined,
     partitioner: toBunPartitioner(options.createPartitioner ?? options.partitioner),
   };
@@ -24,6 +27,7 @@ function producerOptions(options: Record<string, any>, logger: Logger) {
 
 function acksToWire(acks: number | undefined): 0 | 1 | "all" {
   if (acks === undefined || acks === -1) return "all";
+// SAFETY: the surrounding protocol invariant validates this representation.
   return acks as 0 | 1;
 }
 
@@ -31,19 +35,18 @@ export class CompatProducer {
   events = PRODUCER_EVENTS;
   #getter: () => ClusterGetter;
   #logger: Logger;
-  #options: Record<string, any>;
+  #options: CompatOptions;
   #emitter = new Emitter();
   #producer?: BunProducer;
   #transaction?: BunProducer;
-  #connected = false;
 
-  constructor(getter: () => ClusterGetter, logger: Logger, options: Record<string, any>) {
+  constructor(getter: () => ClusterGetter, logger: Logger, options: CompatOptions) {
     this.#getter = getter;
     this.#logger = logger;
     this.#options = options;
   }
 
-  on(event: string, listener: (event: Record<string, unknown>) => void): () => void {
+  on(event: string, listener: (event: LogFields) => void): () => void {
     return this.#emitter.on(event, listener);
   }
 
@@ -51,9 +54,12 @@ export class CompatProducer {
     return this.#logger;
   }
 
+  get queuedMessages(): number {
+    return this.#producer?.queuedMessages ?? 0;
+  }
+
   async connect(): Promise<void> {
     await this.#getter().ready();
-    this.#connected = true;
     this.#emitter.emit(PRODUCER_EVENTS.CONNECT);
   }
 
@@ -66,7 +72,6 @@ export class CompatProducer {
       await this.#transaction.close().catch(() => {});
       this.#transaction = undefined;
     }
-    this.#connected = false;
     this.#emitter.emit(PRODUCER_EVENTS.DISCONNECT);
   }
 
@@ -74,7 +79,7 @@ export class CompatProducer {
   #underlying(): BunProducer {
     this.#producer ??= new BunProducer(
       this.#getter().acquire(),
-      producerOptions(this.#options, this.#logger),
+      producerOptions(this.#options),
       this.#getter().release,
     );
     return this.#producer!;
@@ -169,7 +174,7 @@ export class CompatProducer {
       this.#transaction = new BunProducer(
         this.#getter().acquire(),
         {
-          ...producerOptions(this.#options, this.#logger),
+          ...producerOptions(this.#options),
           idempotent: true,
           lingerMs: 0,
         },

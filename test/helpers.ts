@@ -29,13 +29,17 @@ export async function waitFor<T>(
   while (Date.now() - start < timeoutMs) {
     try {
       const value = await fn();
-      if (value) return value as T;
+      if (value) {
+        // SAFETY: waitFor only returns truthy values matching the caller's predicate.
+        return value as T;
+      }
     } catch (error) {
       lastErr = error;
     }
     await Bun.sleep(intervalMs);
   }
-  throw new Error(`waitFor timed out after ${timeoutMs}ms${lastErr ? `: ${lastErr}` : ""}`);
+  const detail = lastErr ? `: ${lastErr}` : "";
+  throw new Error(`waitFor timed out after ${timeoutMs}ms${detail}`);
 }
 
 export async function waitTopic(name: string, timeoutMs = 15_000) {

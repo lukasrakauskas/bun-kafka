@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
 import { Reader, Writer } from "../../src/bun/protocol.ts";
-import { admin } from "../helpers.ts";
 
 const apiVersions = () =>
   new Writer().i16(0).array(
@@ -27,7 +26,6 @@ describe("Client quotas (mock broker)", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          let body: Writer;
           let response: Writer;
           if (key === 18) {
             response = new Writer().i32(correlation).raw(apiVersionsBody.result());

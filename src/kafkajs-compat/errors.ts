@@ -1,5 +1,16 @@
 import { KafkaError } from "../errors.ts";
 
+type ErrorCause =
+  | Error
+  | string
+  | number
+  | boolean
+  | bigint
+  | symbol
+  | null
+  | undefined
+  | { readonly [key: string]: ErrorCause };
+
 export class KafkaJSError extends Error {
   retriable: boolean;
   fatal?: boolean;
@@ -7,7 +18,7 @@ export class KafkaJSError extends Error {
     messageOrError: string | Error,
     options: { retriable?: boolean; fatal?: boolean } = {},
   ) {
-    super(typeof messageOrError === "string" ? messageOrError : messageOrError.message);
+    super(messageOrError instanceof Error ? messageOrError.message : messageOrError);
     this.name = "KafkaJSError";
     this.retriable = options.retriable ?? false;
     this.fatal = options.fatal;
@@ -54,8 +65,8 @@ export class KafkaJSOffsetOutOfRange extends KafkaJSProtocolError {
 }
 
 export class KafkaJSNumberOfRetriesExceeded extends KafkaJSError {
-  readonly originalError?: unknown;
-  constructor(message = "Number of retries exceeded", originalError?: unknown) {
+  readonly originalError?: ErrorCause;
+  constructor(message = "Number of retries exceeded", originalError?: ErrorCause) {
     super(message, { retriable: true });
     this.name = "KafkaJSNumberOfRetriesExceeded";
     this.originalError = originalError;
@@ -63,7 +74,7 @@ export class KafkaJSNumberOfRetriesExceeded extends KafkaJSError {
 }
 
 /** Surface bun-kafka errors through kafkajs-shaped classes, preserving codes. */
-export function wrapError(error: unknown): Error {
+export function wrapError(error: ErrorCause): Error {
   if (error instanceof KafkaError) {
     const wrapped = new KafkaJSProtocolError(error.message, error.code);
     wrapped.retriable = error.retriable;

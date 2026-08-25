@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { Kafka } from "../../index.ts";
 
 describe("Client quotas (real broker)", () => {
   test("quota alter and describe round trip", async () => {

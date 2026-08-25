@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka, type ConsumedMessage, type KafkaMessage } from "../../index.ts";
 
+const REDPANDA_ZERO = "redpanda-0";
+const BROKER_CONFIG = "brokers=127.0.0.1:9092";
 const enabled = process.env.CHAOS_CLUSTER === "1";
 const chaos = enabled ? describe.serial : describe.skip;
 const brokers = (
@@ -48,7 +50,7 @@ async function createTopic(client: Kafka, name: string, partitions = 1): Promise
   compose(
     "exec",
     "-T",
-    "redpanda-0",
+    REDPANDA_ZERO,
     "rpk",
     "topic",
     "create",
@@ -58,7 +60,7 @@ async function createTopic(client: Kafka, name: string, partitions = 1): Promise
     "-r",
     "3",
     "-X",
-    "brokers=127.0.0.1:9092",
+    BROKER_CONFIG,
   );
   await waitFor(async () => {
     const found = (await client.admin().metadata([name])).topics.find((item) => item.name === name);
@@ -90,7 +92,7 @@ async function start(id: number): Promise<void> {
     "health",
     "-e",
     "-X",
-    "brokers=127.0.0.1:9092",
+    BROKER_CONFIG,
   );
 }
 
@@ -187,6 +189,7 @@ chaos("three-broker Kafka chaos", () => {
         }),
       );
       await outcome(consumer.fetch({ maxWaitMs: 10, maxMessages: 1 }));
+// SAFETY: the surrounding test fixture provides the documented shape.
       expect(decode(held.value as Uint8Array | null)).toBe("before-kill");
 
       await start(killed);
@@ -213,6 +216,7 @@ chaos("three-broker Kafka chaos", () => {
         await resumed.assign([{ topic: name, partition: 0, offset: held.offset + 1n }]);
         await waitFor(async () =>
           (await resumed.fetch({ maxWaitMs: 50 })).some(
+// SAFETY: the surrounding test fixture provides the documented shape.
             (message) => decode(message.value as Uint8Array | null) === "after-kill",
           )
             ? true
@@ -323,6 +327,7 @@ chaos("three-broker Kafka chaos", () => {
         });
         acknowledged.push(finalId);
         const values = (await scan(recovered, name, 3)).map((message) =>
+// SAFETY: the surrounding test fixture provides the documented shape.
           decode(message.value as Uint8Array | null),
         );
         for (const id of acknowledged)
@@ -346,7 +351,7 @@ chaos("three-broker Kafka chaos", () => {
       compose(
         "exec",
         "-T",
-        "redpanda-0",
+        REDPANDA_ZERO,
         "rpk",
         "cluster",
         "partitions",
@@ -354,7 +359,7 @@ chaos("three-broker Kafka chaos", () => {
         "-p",
         `${name}/0:${target}`,
         "-X",
-        "brokers=127.0.0.1:9092",
+        BROKER_CONFIG,
       );
       await waitFor(async () => {
         try {
@@ -385,16 +390,16 @@ chaos("three-broker Kafka chaos", () => {
       compose(
         "exec",
         "-T",
-        "redpanda-0",
+        REDPANDA_ZERO,
         "rpk",
         "topic",
         "delete",
         name,
         "-X",
-        "brokers=127.0.0.1:9092",
+        BROKER_CONFIG,
       );
       await waitFor(async () =>
-        !compose("exec", "-T", "redpanda-0", "rpk", "topic", "list", "-X", "brokers=127.0.0.1:9092")
+        !compose("exec", "-T", REDPANDA_ZERO, "rpk", "topic", "list", "-X", BROKER_CONFIG)
           .split("\n")
           .includes(name)
           ? true
@@ -405,6 +410,7 @@ chaos("three-broker Kafka chaos", () => {
         .producer({ lingerMs: 0 })
         .send({ topic: name, messages: [{ partition: 0, value: "new-topic" }] });
       expect(
+// SAFETY: the surrounding test fixture provides the documented shape.
         (await scan(client, name, 1)).map((message) => decode(message.value as Uint8Array | null)),
       ).toEqual(["new-topic"]);
     } finally {

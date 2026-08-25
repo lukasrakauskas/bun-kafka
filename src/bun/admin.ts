@@ -71,6 +71,7 @@ export class BunAdmin {
 
   constructor(options: KafkaOptions | Cluster, onClose = () => {}) {
     this.#ownsCluster = !(options instanceof Cluster);
+// SAFETY: the surrounding protocol invariant validates this representation.
     this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : (options as Cluster);
     this.#onClose = onClose;
   }

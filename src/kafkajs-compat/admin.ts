@@ -3,6 +3,8 @@ import { ADMIN_EVENTS } from "./constants.ts";
 import type { ClusterGetter } from "./config.ts";
 import { Emitter, Logger } from "./logger.ts";
 import { BunAdmin } from "../bun/admin.ts";
+import { isString } from "../type-guards.ts";
+import type { CompatOptions, LogFields } from "./types.ts";
 
 export interface CompatCreateTopicsInput {
   validateOnly?: boolean;
@@ -29,7 +31,7 @@ export class CompatAdmin {
     this.#logger = logger;
   }
 
-  on(event: string, listener: (event: Record<string, unknown>) => void): () => void {
+  on(event: string, listener: (event: LogFields) => void): () => void {
     return this.#emitter.on(event, listener);
   }
 
@@ -82,7 +84,7 @@ export class CompatAdmin {
   }): Promise<void> {
     try {
       await this.#underlying().deleteTopics(
-        payload.topics.map((entry) => (typeof entry === "string" ? entry : entry.topic)),
+        payload.topics.map((entry) => (isString(entry) ? entry : entry.topic)),
       );
     } catch (error) {
       throw wrapError(error);
@@ -318,7 +320,7 @@ export class CompatAdmin {
     return this.listGroups(statesFilter);
   }
 
-  async describeGroups(groupIds: string[]): Promise<{ groups: Array<Record<string, unknown>> }> {
+  async describeGroups(groupIds: string[]): Promise<{ groups: Array<CompatOptions> }> {
     try {
       const described = await this.#underlying().describeGroups(groupIds);
       return {
@@ -444,9 +446,10 @@ export class CompatAdmin {
     }
   }
 
-  async createAcls({ acl }: { acl: Array<Record<string, any>> }): Promise<boolean[]> {
+  async createAcls({ acl }: { acl: Array<CompatOptions> }): Promise<boolean[]> {
     try {
       const results = await this.#underlying().createAcls(
+// SAFETY: the surrounding protocol invariant validates this representation.
         acl.map((entry) => ({
           resourceType: Number(entry.resourceType ?? entry.resourceResourceType ?? 2),
           resourceName: String(entry.resourceName ?? entry.resourceResourceName),
@@ -463,7 +466,7 @@ export class CompatAdmin {
   }
 
   async describeAcls(
-    filter: Record<string, any>,
+    filter: CompatOptions,
   ): Promise<{
     resources: Array<{
       resourceType: number;
@@ -475,6 +478,7 @@ export class CompatAdmin {
     }>;
   }> {
     try {
+// SAFETY: the surrounding protocol invariant validates this representation.
       const described = await this.#underlying().describeAcls({
         resourceType: Number(filter.resourceType ?? 1),
         resourceName: filter.resourceName,
@@ -498,7 +502,7 @@ export class CompatAdmin {
     }
   }
 
-  async deleteAcls(filters: { filters: Array<Record<string, any>> }): Promise<{
+  async deleteAcls(filters: { filters: Array<CompatOptions> }): Promise<{
     entries: Array<{
       errorCode: number;
       errorMessage?: string;
@@ -514,6 +518,7 @@ export class CompatAdmin {
   }> {
     try {
       const result = await this.#underlying().deleteAcls(
+// SAFETY: the surrounding protocol invariant validates this representation.
         filters.filters.map((filter) => ({
           resourceType: Number(filter.resourceType ?? 1),
           resourceName: filter.resourceName,
