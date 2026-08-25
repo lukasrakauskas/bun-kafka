@@ -447,6 +447,8 @@ export function readMetadataResponse(reader: Reader): ClusterMetadata & { contro
     r.string();
     return broker;
   });
+  // Metadata v2+: the cluster id precedes the controller id.
+  const clusterId = reader.string();
   const controllerId = reader.i32();
   const topics = reader.array((r) => ({
     err: r.i16(),
@@ -461,5 +463,5 @@ export function readMetadataResponse(reader: Reader): ClusterMetadata & { contro
       return { err, id, leader };
     }),
   }));
-  return { brokers, topics, controllerId };
+  return { brokers, topics, controllerId, clusterId };
 }

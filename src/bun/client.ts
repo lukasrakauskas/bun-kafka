@@ -29,6 +29,13 @@ const API_LEAVE_GROUP = 13;
 const API_OFFSET_COMMIT = 8;
 const API_OFFSET_FETCH = 9;
 const API_INIT_PRODUCER_ID = 22;
+const API_DESCRIBE_GROUPS = 15;
+const API_LIST_GROUPS = 16;
+const API_DELETE_RECORDS = 21;
+const API_CREATE_ACLS = 30;
+const API_DESCRIBE_ACLS = 29;
+const API_DELETE_ACLS = 31;
+const API_DELETE_GROUPS = 42;
 
 const errorNames: Record<number, string> = {
   1: "Offset out of range",
@@ -98,6 +105,7 @@ export class Cluster {
   #connections = new Map<string, Connection>();
   #brokers = new Map<number, string>();
   #controller?: number;
+  #clusterId?: string | null;
   #topics = new Map<string, TopicMetadata>();
 
   constructor(options: KafkaOptions) {
@@ -164,11 +172,12 @@ export class Cluster {
 
   async metadata(topics: string[] | null = null): Promise<ClusterMetadata> {
     const body = new Writer().array(topics, (writer, topic) => writer.string(topic));
-    const response = readMetadataResponse(await this.#anyRequest(API_METADATA, 1, body));
+    const response = readMetadataResponse(await this.#anyRequest(API_METADATA, 2, body));
     for (const broker of response.brokers) this.#brokers.set(broker.id, address(broker.host, broker.port));
     this.#controller = response.controllerId;
+    this.#clusterId = response.clusterId;
     for (const topic of response.topics) this.#topics.set(topic.name, topic);
-    return { brokers: response.brokers, topics: response.topics };
+    return { brokers: response.brokers, topics: response.topics, clusterId: response.clusterId };
   }
 
   async topic(topic: string, refresh = false): Promise<TopicMetadata> {
@@ -220,6 +229,8 @@ export class Cluster {
     await this.#connection(broker).sendOnly(apiKey, apiVersion, body);
   }
 
+  /** Cluster id reported by Metadata v2+ responses. */
+  get clusterId(): string | null | undefined { return this.#clusterId; }
   get retryOptions(): Required<RetryOptions> { return this.#retry; }
   get requestTimeoutMs(): number { return this.#options.requestTimeoutMs; }
 
@@ -1168,6 +1179,150 @@ export class BunAdmin {
     });
   }
 
+  /** List consumer groups known to the cluster coordinator. */
+  async listGroups(statesFilter: readonly string[] = []): Promise<Array<{ groupId: string; protocolType: string; state: string }>> {
+    this.#open();
+    const response = await this.#cluster.anyRequest(API_LIST_GROUPS, 1, new Writer().array(statesFilter, (writer, state) => writer.string(state)));
+    this.#cluster.throttle(API_LIST_GROUPS, response.i32());
+    const error = response.i16();
+    if (error) throw kafkaError(error, "ListGroups");
+    return response.array((reader) => ({
+      groupId: reader.string() ?? "",
+      protocolType: reader.string() ?? "",
+      state: reader.string() ?? "",
+    }));
+  }
+
+  /** Describe consumer groups: state and member details. */
+  async describeGroups(groupIds: readonly string[]): Promise<GroupDescription[]> {
+    this.#open();
+    if (!groupIds.length) return [];
+    const body = new Writer().array(groupIds, (writer, group) => writer.string(group));
+    const response = await this.#cluster.anyRequest(API_DESCRIBE_GROUPS, 1, body);
+    this.#cluster.throttle(API_DESCRIBE_GROUPS, response.i32());
+    return response.array((reader) => {
+      const error = reader.i16();
+      const message = reader.string();
+      const groupId = reader.string() ?? "";
+      const state = reader.string() ?? "";
+      const protocolType = reader.string() ?? "";
+      const protocol = reader.string();
+      const members = reader.array((memberReader) => ({
+        memberId: memberReader.string() ?? "",
+        clientId: memberReader.string() ?? "",
+        clientHost: memberReader.string() ?? "",
+        memberMetadata: memberReader.bytes(),
+        memberAssignment: memberReader.bytes(),
+      }));
+      return { error, message, groupId, state, protocolType, protocol, members };
+    });
+  }
+
+  /** Delete consumer groups that no longer have active members. */
+  async deleteGroups(groupIds: readonly string[]): Promise<TopicResult[]> {
+    this.#open();
+    if (!groupIds.length) return [];
+    const body = new Writer().array(groupIds, (writer, group) => writer.string(group));
+    const response = await this.#cluster.anyRequest(API_DELETE_GROUPS, 1, body);
+    this.#cluster.throttle(API_DELETE_GROUPS, response.i32());
+    return response.array((reader) => ({ name: reader.string() ?? "", error: reader.i16(), message: null }));
+  }
+
+  /** Truncate topic partitions below the given offsets; returns the resulting low watermark per partition. */
+  async deleteRecords(topics: ReadonlyArray<{ name: string; partitions: ReadonlyArray<{ index: number; offset: bigint }> }>, options: { timeoutMs?: number } = {}): Promise<DeleteRecordsResult[]> {
+    this.#open();
+    if (!topics.length) return [];
+    const body = new Writer().array(topics, (writer, topic) =>
+      writer.string(topic.name).array(topic.partitions, (partitionWriter, partition) =>
+        partitionWriter.i32(partition.index).i64(partition.offset)))
+      .i32(options.timeoutMs ?? 30_000);
+    const response = await this.#cluster.anyRequest(API_DELETE_RECORDS, 1, body);
+    this.#cluster.throttle(API_DELETE_RECORDS, response.i32());
+    return response.array((topicReader) => {
+      const name = topicReader.string() ?? "";
+      return topicReader.array((partitionReader) => {
+        const index = partitionReader.i32();
+        const lowWatermark = partitionReader.i64();
+        const error = partitionReader.i16();
+        return { name, index, lowWatermark, error };
+      });
+    }).flat();
+  }
+
+  /** Create ACL bindings on the broker. */
+  async createAcls(bindings: readonly AclBinding[], options: { timeoutMs?: number } = {}): Promise<Array<{ error: number; message: string | null }>> {
+    this.#open();
+    if (!bindings.length) return [];
+    const body = new Writer().array(bindings, (writer, acl) =>
+      writer.i8(acl.resourceType).string(acl.resourceName)
+        .string(acl.principal).string(acl.host)
+        .i8(acl.operation).i8(acl.permissionType))
+      .i32(options.timeoutMs ?? 30_000);
+    const response = await this.#cluster.anyRequest(API_CREATE_ACLS, 0, body);
+    this.#cluster.throttle(API_CREATE_ACLS, response.i32());
+    return response.array((reader) => ({ error: reader.i16(), message: reader.string() }));
+  }
+
+  /** List ACLs matching the filter; null filter fields match anything. */
+  async describeAcls(filter: AclFilter): Promise<{ error: number; message: string | null; acls: AclListing[] }> {
+    this.#open();
+    const body = new Writer()
+      .i8(filter.resourceType)
+      .string(filter.resourceName ?? null)
+      .string(filter.principal ?? null)
+      .string(filter.host ?? null)
+      .i8(filter.operation)
+      .i8(filter.permissionType);
+    const response = await this.#cluster.anyRequest(API_DESCRIBE_ACLS, 0, body);
+    this.#cluster.throttle(29, response.i32());
+    const error = response.i16();
+    const message = response.string();
+    const acls = response.array((reader) => {
+      const resourceType = reader.i8();
+      const resourceName = reader.string() ?? "";
+      return reader.array((aclReader) => ({
+        resourceType,
+        resourceName,
+        principal: aclReader.string() ?? "",
+        host: aclReader.string() ?? "",
+        operation: aclReader.i8(),
+        permissionType: aclReader.i8(),
+      }));
+    }).flat();
+    return { error, message, acls };
+  }
+
+  /** Delete ACLs matching the filters; null filter fields match anything. */
+  async deleteAcls(filters: readonly AclFilter[], options: { timeoutMs?: number } = {}): Promise<Array<{ error: number; message: string | null; acls: AclListing[] }>> {
+    this.#open();
+    const body = new Writer().array(filters, (writer, filter) =>
+      writer.i8(filter.resourceType)
+        .string(filter.resourceName ?? null)
+        .string(filter.principal ?? null)
+        .string(filter.host ?? null)
+        .i8(filter.operation)
+        .i8(filter.permissionType))
+      .i32(options.timeoutMs ?? 30_000);
+    const response = await this.#cluster.anyRequest(API_DELETE_ACLS, 0, body);
+    this.#cluster.throttle(API_DELETE_ACLS, response.i32());
+    return response.array((reader) => {
+      const error = reader.i16();
+      const message = reader.string();
+      // Matching ACLs are flat; each carries its own error code/message.
+      const acls = reader.array((aclReader) => ({
+        error: aclReader.i16(),
+        message: aclReader.string(),
+        resourceType: aclReader.i8(),
+        resourceName: aclReader.string() ?? "",
+        principal: aclReader.string() ?? "",
+        host: aclReader.string() ?? "",
+        operation: aclReader.i8(),
+        permissionType: aclReader.i8(),
+      }));
+      return { error, message, acls };
+    });
+  }
+
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
@@ -1177,6 +1332,64 @@ export class BunAdmin {
 
   disconnect(): Promise<void> { return this.close(); }
   #open(): void { if (this.#closed) throw new Error("Admin is closed"); }
+}
+
+export interface GroupMemberDescription {
+  memberId: string;
+  clientId: string;
+  clientHost: string;
+  memberMetadata: Uint8Array | null;
+  memberAssignment: Uint8Array | null;
+}
+
+export interface GroupDescription {
+  error: number;
+  message: string | null;
+  groupId: string;
+  state: string;
+  protocolType: string;
+  protocol: string | null;
+  members: GroupMemberDescription[];
+}
+
+export type DeleteRecordsResult = {
+  name: string;
+  index: number;
+  lowWatermark: bigint;
+  error: number;
+};
+
+export type AclResourceType = number;
+export type AclOperation = number;
+export type AclPermissionType = number;
+
+export interface AclBinding {
+  resourceType: AclResourceType;
+  resourceName: string;
+  principal: string;
+  host: string;
+  operation: AclOperation;
+  permissionType: AclPermissionType;
+}
+
+export type AclFilter = {
+  resourceType: AclResourceType;
+  resourceName?: string;
+  principal?: string;
+  host?: string;
+  operation: AclOperation;
+  permissionType: AclPermissionType;
+};
+
+export interface AclListing {
+  error?: number;
+  message?: string | null;
+  resourceType: number;
+  resourceName: string;
+  principal: string;
+  host: string;
+  operation: number;
+  permissionType: number;
 }
 
 export class Kafka {

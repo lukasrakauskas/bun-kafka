@@ -30,7 +30,7 @@ describe("Producer delivery options", () => {
             const correlation = frameView.getInt32(8);
             const metadata = new Writer()
               .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) => writer.i32(broker.id).string(broker.host).i32(broker.port).string(null))
-              .i32(1)
+              .string(null).i32(1)
               .array([{ name: "events" }], (writer, item) => {
                 writer.i16(0).string(item.name).bool(false).array([0], (partitionWriter) => partitionWriter.i16(0).i32(0).i32(1).array([1], (w) => w.i32(1)).array([1], (w) => w.i32(1)));
               });
@@ -172,7 +172,7 @@ describe("Producer delivery options", () => {
           const correlation = view.getInt32(8);
           const body = key === 18 ? apiVersions() : new Writer()
             .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) => writer.i32(broker.id).string(broker.host).i32(broker.port).string(null))
-            .i32(1)
+            .string(null).i32(1)
             .array([{ name: "events" }], (writer, item) => {
               writer.i16(0).string(item.name).bool(false).array([0], (partitionWriter) => partitionWriter.i16(0).i32(0).i32(1).array([1], (w) => w.i32(1)).array([1], (w) => w.i32(1)));
             });

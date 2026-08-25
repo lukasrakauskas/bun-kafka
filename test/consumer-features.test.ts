@@ -58,7 +58,7 @@ describe("Static group membership", () => {
             else if (key === 10) body = new Writer().i16(0).i32(1).string("127.0.0.1").i32(listener.port);
             else if (key === 3) body = new Writer()
               .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, b) => writer.i32(b.id).string(b.host).i32(b.port).string(null))
-              .i32(1)
+              .string(null).i32(1)
               .array([{ name: "events" }], (writer, item) => writer.i16(0).string(item.name).bool(false).array([0], (pw) => pw.i16(0).i32(0).i32(1).array([1], (w) => w.i32(1)).array([1], (w) => w.i32(1))));
             else if (key === 11) body = new Writer().i32(0).i16(0).i32(1).string("range").string("member-static").string("member-static").array(["member-static"], (writer, member) => writer.string(member).bytes(memberMetadata));
             else if (key === 14) body = new Writer().i32(0).i16(0).bytes(assignment);
@@ -122,7 +122,7 @@ describe("Static group membership", () => {
           if (key !== 18 && key !== 3) versions.set(key, [view.getInt16(6)]);
           const metadata = new Writer()
             .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) => writer.i32(broker.id).string(broker.host).i32(broker.port).string(null))
-            .i32(1)
+            .string(null).i32(1)
             .array([{ name: "events" }], (writer, item) => writer.i16(0).string(item.name).bool(false).array([0], (pw) => pw.i16(0).i32(0).i32(1).array([1], (w) => w.i32(1)).array([1], (w) => w.i32(1))));
           const memberMetadata = new Writer().i16(0).array(["events"], (writer, t) => writer.string(t)).bytes(null).result();
           const assignment = new Writer().i16(0).array(["events"], (writer, t) => writer.string(t).array([0], (item, p) => item.i32(p))).bytes(null).result();
@@ -212,7 +212,7 @@ describe("Read-committed isolation", () => {
           const body = key === 18 ? apiVersions()
             : key === 3 ? new Writer()
                 .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) => writer.i32(broker.id).string(broker.host).i32(broker.port).string(null))
-                .i32(1)
+                .string(null).i32(1)
                 .array([{ name: "events" }], (writer, item) => writer.i16(0).string(item.name).bool(false).array([0], (pw) => pw.i16(0).i32(0).i32(1).array([1], (w) => w.i32(1)).array([1], (w) => w.i32(1))))
               : key === 2 ? new Writer().array(["events"], (w, t) => w.string(t).array([0], (p, partition) => p.i32(partition).i16(0).i64(0).i64(0)))
                 : new Writer().i32(0)

@@ -59,4 +59,6 @@ export interface MetadataTopic {
 export interface ClusterMetadata {
   brokers: MetadataBroker[];
   topics: MetadataTopic[];
+  /** Present from Metadata v2+ responses. */
+  clusterId?: string | null;
 }

@@ -96,7 +96,7 @@ describe("Bun native Kafka protocol", () => {
             .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) => {
               writer.i32(broker.id).string(broker.host).i32(broker.port).string(null);
             })
-            .i32(1)
+            .string(null).i32(1)
             .array([{ name: "events" }], (writer, topic) => {
               writer.i16(0).string(topic.name).bool(false).array([0], (partitionWriter, partition) => {
                 partitionWriter.i16(0).i32(partition).i32(1)
@@ -143,7 +143,7 @@ describe("Bun native Kafka protocol", () => {
               ? new Writer().i16(0).string(null).bytes(new Uint8Array()).i64(0)
               : new Writer()
                 .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) => writer.i32(broker.id).string(broker.host).i32(broker.port).string(null))
-                .i32(1)
+                .string(null).i32(1)
                 .array([{ name: "events" }], (writer, topic) => writer.i16(0).string(topic.name).bool(false).array([0], (partitionWriter) => {
                   partitionWriter.i16(0).i32(0).i32(1).array([1], (itemWriter) => itemWriter.i32(1)).array([1], (itemWriter) => itemWriter.i32(1));
                 }));
@@ -185,7 +185,7 @@ describe("Bun native Kafka protocol", () => {
           const body = key === 18 ? apiVersions()
             : key === 3 ? new Writer()
               .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) => writer.i32(broker.id).string(broker.host).i32(broker.port).string(null))
-              .i32(1).array(["events"], (writer, topic) => writer.i16(0).string(topic).bool(false).array([0], (partitions, partition) => partitions.i16(0).i32(partition).i32(1).array([1], (item) => item.i32(1)).array([1], (item) => item.i32(1))))
+              .string(null).i32(1).array(["events"], (writer, topic) => writer.i16(0).string(topic).bool(false).array([0], (partitions, partition) => partitions.i16(0).i32(partition).i32(1).array([1], (item) => item.i32(1)).array([1], (item) => item.i32(1))))
               : new Writer().array(["events"], (writer, topic) => writer.string(topic).array([0], (partitions, partition) => partitions.i32(partition).i16(0).i64(0).i64(5)));
           const response = new Writer().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
@@ -222,7 +222,7 @@ describe("Bun native Kafka protocol", () => {
           const correlation = view.getInt32(8);
           const metadata = () => new Writer()
             .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) => writer.i32(broker.id).string(broker.host).i32(broker.port).string(null))
-            .i32(1).array(["events"], (writer, topic) => writer.i16(0).string(topic).bool(false).array([0], (partitionWriter, partition) => partitionWriter.i16(0).i32(partition).i32(1).array([1], (item) => item.i32(1)).array([1], (item) => item.i32(1))));
+            .string(null).i32(1).array(["events"], (writer, topic) => writer.i16(0).string(topic).bool(false).array([0], (partitionWriter, partition) => partitionWriter.i16(0).i32(partition).i32(1).array([1], (item) => item.i32(1)).array([1], (item) => item.i32(1))));
           const memberMetadata = new Writer().i16(0).array(["events"], (writer, topic) => writer.string(topic)).bytes(null).result();
           const assignment = new Writer().i16(0).array(["events"], (writer, topic) => writer.string(topic).array([0], (item, partition) => item.i32(partition))).bytes(null).result();
           const body = key === 18 ? apiVersions()
@@ -268,7 +268,7 @@ describe("Bun native Kafka protocol", () => {
           const body = key === 18 ? apiVersions()
             : key === 3 ? new Writer()
               .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) => writer.i32(broker.id).string(broker.host).i32(broker.port).string(null))
-              .i32(1).array([], () => {})
+              .string(null).i32(1).array([], () => {})
               : key === 32
                 ? new Writer().i32(0).array([{ resourceType: 2, name: "events" }], (writer, resource) => writer.i16(0).string(null).i8(resource.resourceType).string(resource.name).array([{ name: "cleanup.policy", value: "delete" }], (configWriter, config) => configWriter.string(config.name).string(config.value).bool(false).bool(false).bool(false)))
             : key === 33

@@ -26,6 +26,7 @@ function metadataBody(brokers: MockBroker[], leader = 1, error = 0): Writer {
       const url = new URL(`tcp://${broker.address}`);
       writer.i32(brokers.indexOf(broker) + 1).string(url.hostname).i32(Number(url.port)).string(null);
     })
+    .string(null)
     .i32(1)
     .array([topic], (writer, name) => writer.i16(error).string(name).bool(false).array(error ? [] : [0], (partitionWriter) => {
       partitionWriter.i16(0).i32(0).i32(leader)

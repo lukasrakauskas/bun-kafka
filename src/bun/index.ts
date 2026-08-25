@@ -7,6 +7,12 @@ export {
 export type {
   KafkaOptions,
   KafkaEvent,
+  GroupDescription,
+  GroupMemberDescription,
+  DeleteRecordsResult,
+  AclBinding,
+  AclFilter,
+  AclListing,
   RetryOptions,
   ProducerMessage,
   ProducerOptions,
