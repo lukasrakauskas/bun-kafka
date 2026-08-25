@@ -57,16 +57,20 @@ test today.
   by scanning cluster metadata. A dedicated OffsetFetch v5 flexible test is
   missing.
 - **DescribeConfigs v1+/AlterConfigs v1 (incremental)**: only v0 exercised;
-  `isDefault`/`configSource` mapping is heuristic. No suite asserts config
-  sources against a live broker matrix.
+  `isDefault`/`configSource` mapping is pinned by a fixture
+  (test/features/api-versions.test.ts); config sources against a live broker
+  matrix remain uncovered.
 - **ListOffsets v5+**: only v1 used; MaxTimestamp lookup and isolation-level
   variants untested.
 - **Produce v9 / Fetch v12+ (flexible, leader epoch, KIP-951 streaming
-  acknowledgements)**: fixed at v3/v7. Suites never negotiate upward even when
-  brokers advertise newer versions; add a version-ceiling test so silent
-  downgrades are visible.
+  acknowledgements)**: fixed at v3/v7. A version-ceiling fixture
+  (test/features/api-versions.test.ts) now pins every request version on the
+  wire and asserts UNSUPPORTED_VERSION when a broker cannot serve a pinned
+  version, so silent drift is visible; upward negotiation itself is still
+  unimplemented.
 - **ApiVersions broker-compat fallback** (v0 auto-downgrade for pre-0.10
-  brokers): untested path.
+  brokers): rejection path is fixture-tested; the auto-downgrade behavior
+  itself is not implemented.
 
 ### Consumer semantics
 
@@ -91,22 +95,24 @@ test today.
 
 ### Producer semantics
 
-- **Per-send compression override with mixed batches** (two compression codecs
-  interleaved within one linger window): compat creates per-codec producers,
-  but no suite asserts ordering/isolation between them.
+- **Per-send compression override with mixed batches**: covered by
+  test/impl/compat-compression-real.test.ts (gzip/snappy/none interleaved
+  through one compat producer, ordering asserted).
 - **Idempotent sequence-reset after broker restart** (UNKNOWN_PRODUCER_ID →
   InitProducerId retry): chaos tests cover connection loss, not epoch reset.
 - **acks=0 fire-and-forget error accounting**: covered in features, missing
   from any external-style end-to-end suite.
 - **Transaction + transactional.id fencing (PRODUCER_FENCED) recovery**:
-  transactions-real covers happy path and abort; fenced-producer takeover is
-  untested.
+  covered by test/impl/transactions-fencing-real.test.ts (epoch takeover,
+  zombie fenced on next write; Apache 90 vs Redpanda 47 accepted).
 
 ### Security
 
 - **SASL/OAUTHBEARER with oauthBearerProvider callback** (token refresh +
-  reauth KIP-368): oauth-reauth feature test uses static token providers only;
-  provider-callback shape added for node-red parity has no suite.
+  reauth KIP-368): provider-callback shapes are covered by
+  test/features/oauth-provider-callback.test.ts ({value} and plain-string
+  providers); refresh-driven reauth still uses static tokens in
+  oauth-reauth.test.ts.
 - **SCRAM-SHA-512 vs 256 negotiation matrix against live broker**: impl tests
   use one mechanism; matrix coverage lives only in docker-compose profiles.
 - **TLS hostname verification off/on with IP SANs**: chaos TLS fixtures cover
