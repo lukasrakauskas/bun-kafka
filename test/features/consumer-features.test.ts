@@ -245,4 +245,48 @@ describe("Deserializers", () => {
     const batch = encodeRecordBatch([{ key: "k", value: "v" }]);
     expect(decode(decodeRecordSet(batch, "t", 0, 1)[0]!.value)).toBe("v");
   });
+
+  test("value deserializer types fetched messages without casts", async () => {
+    const records = encodeRecordBatch([{ value: JSON.stringify({ seq: 1 }) }]);
+    const listener = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data(socket, request) {
+          const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
+          const key = view.getInt16(4);
+          const correlation = view.getInt32(8);
+          const body = key === 18 ? apiVersions()
+            : key === 3 ? new Writer()
+                .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) => writer.i32(broker.id).string(broker.host).i32(broker.port).string(null))
+                .string(null).i32(1)
+                .array([{ name: "events" }], (writer, item) => writer.i16(0).string(item.name).bool(false).array([0], (pw) => pw.i16(0).i32(0).i32(1).array([1], (w) => w.i32(1)).array([1], (w) => w.i32(1))))
+              : key === 2 ? new Writer().array(["events"], (w, t) => w.string(t).array([0], (p, partition) => p.i32(partition).i64(0)))
+                : new Writer().i32(0) // Fetch v7
+                  .i16(0)
+                  .i32(0)
+                  .array(["events"], (topicWriter) => topicWriter.string("events").array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(1).i64(1).i64(0)
+                    .array([], () => {})
+                    .bytes(records)));
+          const response = new Writer().i32(0).i32(correlation).raw(body.result());
+          response.patchI32(0, response.length - 4);
+          socket.write(response.result());
+        },
+      },
+    });
+    const kafka = new Kafka({ brokers: [`127.0.0.1:${listener.port}`] });
+    try {
+      const consumer = kafka.consumer({
+        valueDeserializer: (data): { seq?: number } | null => data === null ? null : JSON.parse(new TextDecoder().decode(data)),
+      });
+      await consumer.assign([{ topic: "events", partition: 0, offset: 0n }]);
+      const [message] = await consumer.fetch({ maxWaitMs: 50 });
+      expect(message).toBeDefined();
+      const value: { seq?: number } | null = message!.value;
+      expect(value?.seq).toBe(1);
+    } finally {
+      await kafka.disconnect();
+      listener.stop(true);
+    }
+  }, 15_000);
 });

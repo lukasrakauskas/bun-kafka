@@ -26,10 +26,10 @@ export interface Watermarks {
   high: bigint;
 }
 
-/** A KafkaMessage whose key/value were replaced through consumer deserializers. */
-export interface ConsumedMessage extends Omit<KafkaMessage, "key" | "value"> {
-  key: unknown;
-  value: unknown;
+/** A KafkaMessage whose key/value were replaced through consumer deserializers. Defaults describe raw messages. */
+export interface ConsumedMessage<TKey = Uint8Array | null, TValue = Uint8Array | null> extends Omit<KafkaMessage, "key" | "value"> {
+  key: TKey;
+  value: TValue;
 }
 
 /** Aborted-transaction ranges reported by brokers under read-committed isolation. */

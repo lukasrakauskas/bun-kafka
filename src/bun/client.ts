@@ -846,7 +846,7 @@ export class BunProducer {
   #open(): void { if (this.#closed) throw new Error("Producer is closed"); }
 }
 
-export interface ConsumerOptions {
+export interface ConsumerOptions<K = Uint8Array | null, V = Uint8Array | null> {
   fromBeginning?: boolean;
   fetchMaxBytes?: number;
   groupId?: string;
@@ -865,9 +865,9 @@ export interface ConsumerOptions {
   heartbeatIntervalMs?: number;
   autoCommit?: boolean;
   /** Replaces message keys before they are returned. */
-  keyDeserializer?: (data: Uint8Array | null, context: DeserializerContext) => unknown;
+  keyDeserializer?: (data: Uint8Array | null, context: DeserializerContext) => K;
   /** Replaces message values before they are returned. */
-  valueDeserializer?: (data: Uint8Array | null, context: DeserializerContext) => unknown;
+  valueDeserializer?: (data: Uint8Array | null, context: DeserializerContext) => V;
 }
 
 export type DeserializerContext = {
@@ -919,9 +919,9 @@ type FetchSessionState = {
   streaming: Map<string, boolean>; // partitionKey -> last response carried records
 };
 
-export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage> {
+export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implements AsyncIterable<ConsumedMessage<K, V>> {
   #cluster: Cluster;
-  #options: ConsumerOptions;
+  #options: ConsumerOptions<K, V>;
   #assigned = new Map<string, Assigned>();
   #positions = new Map<string, bigint>();
   #paused = new Set<string>();
@@ -939,7 +939,7 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
   #groupTopics: string[] = [];
   #rejoining?: Promise<void>;
 
-  constructor(options: KafkaOptions | Cluster, consumerOptions: ConsumerOptions = {}, onClose = () => {}) {
+  constructor(options: KafkaOptions | Cluster, consumerOptions: ConsumerOptions<K, V> = {}, onClose = () => {}) {
     this.#ownsCluster = !(options instanceof Cluster);
     this.#cluster = this.#ownsCluster ? new Cluster(options as KafkaOptions) : options as Cluster;
     this.#options = consumerOptions;
@@ -1259,7 +1259,7 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
     }));
   }
 
-  async fetch(options: FetchOptions = {}): Promise<Array<KafkaMessage | ConsumedMessage>> {
+  async fetch(options: FetchOptions = {}): Promise<Array<ConsumedMessage<K, V>>> {
     this.#open();
     let lastError: unknown;
     for (let attempt = 0; attempt <= this.#cluster.retryOptions.maxRetries; attempt++) {
@@ -1285,7 +1285,7 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
     throw lastError;
   }
 
-  async #fetchOnce(options: FetchOptions = {}): Promise<Array<KafkaMessage | ConsumedMessage>> {
+  async #fetchOnce(options: FetchOptions = {}): Promise<Array<ConsumedMessage<K, V>>> {
     this.#open();
     const maxMessages = options.maxMessages ?? 500;
     if (!Number.isSafeInteger(maxMessages) || maxMessages < 1) throw new RangeError("maxMessages must be a positive integer");
@@ -1391,15 +1391,16 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
       }).flat();
   }
 
-  #drain(max: number): Array<KafkaMessage | ConsumedMessage> {
-    const messages: Array<KafkaMessage | ConsumedMessage> = [];
+  #drain(max: number): Array<ConsumedMessage<K, V>> {
+    const messages: Array<ConsumedMessage<K, V>> = [];
     while (this.#decoders.length && messages.length < max) {
       const decoder = this.#decoders[0]!;
       const next = decoder.read(max - messages.length);
       for (const message of next) {
         this.#positions.set(partitionKey(message.topic, message.partition), message.offset + 1n);
         if (!this.#options.keyDeserializer && !this.#options.valueDeserializer) {
-          messages.push(message);
+          // Raw path only runs with no deserializers, so key/value really are bytes.
+          messages.push(message as ConsumedMessage<K, V>);
           continue;
         }
         const context = { topic: message.topic, partition: message.partition, offset: message.offset, timestamp: message.timestamp };
@@ -1407,21 +1408,21 @@ export class BunConsumer implements AsyncIterable<KafkaMessage | ConsumedMessage
           ...message,
           key: this.#options.keyDeserializer?.(message.key, context) ?? null,
           value: this.#options.valueDeserializer?.(message.value, context) ?? null,
-        });
+        } as ConsumedMessage<K, V>);
       }
       if (decoder.done) this.#decoders.shift();
     }
     return messages;
   }
 
-  async *messages(options: FetchOptions = {}): AsyncGenerator<KafkaMessage | ConsumedMessage, void, unknown> {
+  async *messages(options: FetchOptions = {}): AsyncGenerator<ConsumedMessage<K, V>, void, unknown> {
     while (!this.#closed) {
       const messages = await this.fetch(options);
       for (const message of messages) yield message;
     }
   }
 
-  [Symbol.asyncIterator](): AsyncIterator<KafkaMessage | ConsumedMessage> {
+  [Symbol.asyncIterator](): AsyncIterator<ConsumedMessage<K, V>> {
     return this.messages();
   }
 
@@ -2015,8 +2016,8 @@ export class Kafka {
     return producer;
   }
 
-  consumer(options: ConsumerOptions = {}): BunConsumer {
-    let consumer: BunConsumer;
+  consumer<K = Uint8Array | null, V = Uint8Array | null>(options: ConsumerOptions<K, V> = {}): BunConsumer<K, V> {
+    let consumer: BunConsumer<K, V>;
     consumer = new BunConsumer(this.#cluster, options, () => this.#clients.delete(consumer));
     this.#clients.add(consumer);
     return consumer;
