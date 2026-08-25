@@ -1,5 +1,7 @@
 import { KafkaError } from "../errors.ts";
 import type { Bytes, ClusterMetadata, KafkaMessage, MessageHeaders } from "../types.ts";
+import { snappyCompress, snappyDecompress } from "./snappy.ts";
+import { lz4Compress, lz4Decompress } from "./lz4.ts";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -224,7 +226,9 @@ function varLongSize(value: bigint): number {
   return size;
 }
 
-export type RecordCompression = "none" | "gzip" | "zstd";
+export type RecordCompression = "none" | "gzip" | "snappy" | "lz4" | "zstd";
+
+const compressionAttributes = { none: 0, gzip: 1, snappy: 2, lz4: 3, zstd: 4 } as const;
 
 export function encodeRecordBatch(
   records: readonly WireRecord[],
@@ -233,7 +237,7 @@ export function encodeRecordBatch(
   producer: { id: bigint; epoch: number; sequence: number } = { id: -1n, epoch: -1, sequence: -1 },
 ): Uint8Array {
   if (!records.length) throw new RangeError("A record batch cannot be empty");
-  if (!(["none", "gzip", "zstd"] as const).includes(compression)) throw new RangeError(`Unsupported Kafka compression: ${compression}`);
+  if (!(compression in compressionAttributes)) throw new RangeError(`Unsupported Kafka compression: ${compression}`);
   const baseTimestamp = BigInt(records[0]!.timestamp ?? now);
   let maxTimestamp = baseTimestamp;
   let size = 61;
@@ -273,9 +277,11 @@ export function encodeRecordBatch(
   const rawRecords = recordsWriter.result() as Uint8Array<ArrayBuffer>;
   const recordBytes = compression === "gzip" ? Bun.gzipSync(rawRecords)
     : compression === "zstd" ? Bun.zstdCompressSync(rawRecords)
-      : rawRecords;
+      : compression === "snappy" ? snappyCompress(rawRecords)
+        : compression === "lz4" ? lz4Compress(rawRecords)
+          : rawRecords;
   const writer = new Writer(61 + recordBytes.byteLength);
-  writer.i64(0).i32(0).i32(-1).i8(2).u32(0).i16(compression === "gzip" ? 1 : compression === "zstd" ? 4 : 0).i32(records.length - 1)
+  writer.i64(0).i32(0).i32(-1).i8(2).u32(0).i16(compressionAttributes[compression]).i32(records.length - 1)
     .i64(baseTimestamp).i64(maxTimestamp).i64(producer.id).i16(producer.epoch).i32(producer.sequence).i32(records.length)
     .raw(recordBytes);
   writer.patchI32(8, writer.length - 12);
@@ -383,7 +389,7 @@ export class RecordSetDecoder {
     const crcStart = reader.offset;
     this.#attributes = reader.i16();
     const compression = this.#attributes & 7;
-    if (compression !== 0 && compression !== 1 && compression !== 4) throw new KafkaError(-1, `Unsupported Kafka compression codec ${compression}`);
+    if (compression > 4) throw new KafkaError(-1, `Unsupported Kafka compression codec ${compression}`);
     reader.i32();
     this.#baseTimestamp = reader.i64();
     reader.i64();
@@ -397,7 +403,10 @@ export class RecordSetDecoder {
       const records = reader.raw(this.#batchEnd - reader.offset) as Uint8Array<ArrayBuffer>;
       let decompressed: Uint8Array;
       try {
-        decompressed = compression === 1 ? Bun.gunzipSync(records) : Bun.zstdDecompressSync(records);
+        decompressed = compression === 1 ? Bun.gunzipSync(records)
+          : compression === 2 ? snappyDecompress(records)
+            : compression === 3 ? lz4Decompress(records)
+              : Bun.zstdDecompressSync(records);
       } catch (error) {
         throw new KafkaError(-1, `Invalid Kafka compressed record batch: ${error}`);
       }

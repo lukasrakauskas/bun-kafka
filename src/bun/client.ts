@@ -297,7 +297,7 @@ export class BunProducer {
     };
     if (!Number.isFinite(this.#options.lingerMs) || this.#options.lingerMs < 0
       || !Number.isSafeInteger(this.#options.batchMaxMessages) || this.#options.batchMaxMessages < 1
-      || !["none", "gzip", "zstd"].includes(this.#options.compression)) {
+      || !("none gzip snappy lz4 zstd".split(" ").includes(this.#options.compression))) {
       throw new RangeError("Invalid producer batching options");
     }
     this.#onClose = onClose;
@@ -962,8 +962,8 @@ export class BunAdmin {
     if (!topics.length) return [];
     const body = new Writer().array(topics, (writer, topic) => {
       writer.string(topic.name).i32(topic.numPartitions).i16(topic.replicationFactor ?? -1)
-        .array(topic.assignments ? topic.assignments.map((brokers, partition) => ({ partition, brokers })) : null, (assignmentWriter, assignment) => assignmentWriter.i32(assignment.partition).array(assignment.brokers, (writer, broker) => writer.i32(broker)))
-        .array(topic.configs ? Object.entries(topic.configs) : null, (writer, [name, value]) => writer.string(name).string(value));
+        .array(topic.assignments ? topic.assignments.map((brokers, partition) => ({ partition, brokers })) : [], (assignmentWriter, assignment) => assignmentWriter.i32(assignment.partition).array(assignment.brokers, (writer, broker) => writer.i32(broker)))
+        .array(topic.configs ? Object.entries(topic.configs) : [], (writer, [name, value]) => writer.string(name).string(value));
     }).i32(options.timeoutMs ?? 30_000).bool(options.validateOnly ?? false);
     const response = await this.#cluster.controllerRequest(API_CREATE_TOPICS, 4, body);
     this.#cluster.throttle(API_CREATE_TOPICS, response.i32());
@@ -982,7 +982,7 @@ export class BunAdmin {
     this.#open();
     if (!topics.length) return [];
     const body = new Writer().array(topics, (writer, topic) => {
-      writer.string(topic.name).i32(topic.count).array(topic.assignments ?? null, (assignmentWriter, assignment) => assignmentWriter.array(assignment, (writer, broker) => writer.i32(broker)));
+      writer.string(topic.name).i32(topic.count).array(topic.assignments ?? [], (assignmentWriter, assignment) => assignmentWriter.array(assignment, (writer, broker) => writer.i32(broker)));
     }).i32(options.timeoutMs ?? 30_000).bool(options.validateOnly ?? false);
     const response = await this.#cluster.controllerRequest(API_CREATE_PARTITIONS, 2, body);
     this.#cluster.throttle(API_CREATE_PARTITIONS, response.i32());
