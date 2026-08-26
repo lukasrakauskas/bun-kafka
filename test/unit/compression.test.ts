@@ -1,6 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { lz4Compress, lz4CompressBlock, lz4Decompress, lz4DecompressBlock, xxhash32 } from "../../src/bun/lz4.ts";
-import { snappyCompress, snappyCompressBlock, snappyDecompress, snappyDecompressBlock } from "../../src/bun/snappy.ts";
+import {
+  lz4Compress,
+  lz4CompressBlock,
+  lz4Decompress,
+  lz4DecompressBlock,
+  xxhash32,
+} from "../../src/bun/lz4.ts";
+import {
+  snappyCompress,
+  snappyCompressBlock,
+  snappyDecompress,
+  snappyDecompressBlock,
+} from "../../src/bun/snappy.ts";
 import { decodeRecordSet, encodeRecordBatch } from "../../src/bun/protocol.ts";
 
 const decode = (value: Uint8Array) => new TextDecoder().decode(value);
@@ -10,12 +21,16 @@ function pattern(length: number): Uint8Array {
 }
 
 function same(actual: Uint8Array, expected: Uint8Array): boolean {
-  return actual.byteLength === expected.byteLength && actual.every((byte, i) => byte === expected[i]);
+  return (
+    actual.byteLength === expected.byteLength && actual.every((byte, i) => byte === expected[i])
+  );
 }
 
 describe("snappy codec", () => {
   test("round-trips sizes around literal and copy boundaries", () => {
-    for (const length of [0, 1, 3, 4, 12, 13, 59, 60, 61, 64, 100, 256, 257, 65536, 65537, 500, 5000]) {
+    for (const length of [
+      0, 1, 3, 4, 12, 13, 59, 60, 61, 64, 100, 256, 257, 65536, 65537, 500, 5000,
+    ]) {
       const data = pattern(length);
       if (length >= 40) data.set(pattern(20), length - 20);
       expect(same(snappyDecompressBlock(snappyCompressBlock(data)), data)).toBe(true);

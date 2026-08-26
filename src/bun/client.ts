@@ -30,7 +30,9 @@ export class Kafka {
     return producer;
   }
 
-  consumer<K = Uint8Array | null, V = Uint8Array | null>(options: ConsumerOptions<K, V> = {}): BunConsumer<K, V> {
+  consumer<K = Uint8Array | null, V = Uint8Array | null>(
+    options: ConsumerOptions<K, V> = {},
+  ): BunConsumer<K, V> {
     let consumer: BunConsumer<K, V>;
     consumer = new BunConsumer(this.#cluster, options, () => this.#clients.delete(consumer));
     this.#clients.add(consumer);

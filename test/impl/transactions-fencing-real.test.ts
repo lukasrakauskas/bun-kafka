@@ -29,7 +29,12 @@ describe("Transactional producer fencing (real broker)", () => {
       // subsequent write. Apache answers PRODUCER_FENCED (90), Redpanda
       // INVALID_PRODUCER_EPOCH (47) — same stale-epoch signal.
       await zombie.beginTransaction();
-      const fenced = await zombie.send({ topic: name, messages: [{ key: "z", value: "zombie-zombie" }] }).then(() => null, (error: { code?: number }) => error);
+      const fenced = await zombie
+        .send({ topic: name, messages: [{ key: "z", value: "zombie-zombie" }] })
+        .then(
+          () => null,
+          (error: { code?: number }) => error,
+        );
       expect([47, 90]).toContain(fenced?.code);
 
       // Only records from valid epochs are visible under read_committed.

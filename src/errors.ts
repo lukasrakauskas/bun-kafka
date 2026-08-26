@@ -17,7 +17,7 @@ export class KafkaError extends Error {
 }
 
 /** Broker error codes from the Kafka wire protocol, keyed by numeric code. */
-export const kafkaErrorNames: Record<number, string> = {
+export const kafkaErrorNames = {
   [-1]: "LOCAL_ERROR",
   0: "NONE",
   1: "OFFSET_OUT_OF_RANGE",
@@ -136,9 +136,10 @@ export const kafkaErrorNames: Record<number, string> = {
   114: "MISMATCHED_ENDPOINT_TYPE",
   115: "UNSUPPORTED_ENDPOINT_TYPE",
   116: "UNKNOWN_CONTROLLER_ID",
-};
+} satisfies Record<number, string>;
 
 /** Human-readable broker error name for a numeric Kafka error code. */
 export function kafkaErrorName(code: number): string {
-  return kafkaErrorNames[code] ?? `UNKNOWN_ERROR_${code}`;
+  const name = Object.entries(kafkaErrorNames).find(([key]) => Number(key) === code)?.[1];
+  return name ?? `UNKNOWN_ERROR_${code}`;
 }

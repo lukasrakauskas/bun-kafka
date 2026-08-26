@@ -42,7 +42,8 @@ const BASE_RATE = env("SOAK_RATE", 1_000);
 const PARTITIONS = Math.floor(env("SOAK_PARTITIONS", 6));
 const MSG_BYTES = Math.floor(env("SOAK_MSG_BYTES", 1024));
 const ACKS: 1 | "all" = process.env.SOAK_ACKS === "1" ? 1 : "all";
-const BURST_INTERVAL_S = process.env.SOAK_BURST_INTERVAL_S === "0" ? 0 : env("SOAK_BURST_INTERVAL_S", 300);
+const BURST_INTERVAL_S =
+  process.env.SOAK_BURST_INTERVAL_S === "0" ? 0 : env("SOAK_BURST_INTERVAL_S", 300);
 const BURST_S = env("SOAK_BURST_S", 60);
 const BURST_FACTOR = Number(process.env.SOAK_BURST_FACTOR ?? 1.5) || 1.5;
 const SAMPLE_INTERVAL_S = env("SOAK_SAMPLE_INTERVAL_S", 10);
@@ -53,7 +54,9 @@ const WARMUP_FRACTION = 0.2; // memory gate ignores growth during this fraction 
 const topic = `soak-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const startedMs = Date.now();
 const endAt = startedMs + DURATION_S * 1_000;
-const commit = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe" }).stdout.toString().trim();
+const commit = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe" })
+  .stdout.toString()
+  .trim();
 
 // ---------------------------------------------------------------------------
 // Metrics helpers
@@ -62,7 +65,7 @@ const commit = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe" }).s
 /** Fixed-bucket latency histogram in milliseconds. */
 class Histogram {
   readonly #bounds = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000];
-  #counts = new Array(this.#bounds.length + 1).fill(0) as number[];
+  #counts = Array.from({ length: this.#bounds.length + 1 }, () => 0);
   count = 0;
   max = 0;
 
@@ -85,8 +88,14 @@ class Histogram {
     return this.max;
   }
 
-  snapshot(): { p50: number; p95: number; p99: number; max: number; count: number } {
-    return { p50: this.percentile(0.5), p95: this.percentile(0.95), p99: this.percentile(0.99), max: Math.round(this.max), count: this.count };
+  snapshot() {
+    return {
+      p50: this.percentile(0.5),
+      p95: this.percentile(0.95),
+      p99: this.percentile(0.99),
+      max: Math.round(this.max),
+      count: this.count,
+    };
   }
 
   reset(): void {
@@ -142,9 +151,9 @@ let retries = 0;
 let throttles = 0;
 let pendingSends = 0;
 
-const producedPerPartition = new Array<number>(PARTITIONS).fill(0);
-const consumedPerPartition = new Array<number>(PARTITIONS).fill(0);
-const lastSeqPerPartition = new Array<number>(PARTITIONS).fill(-1);
+const producedPerPartition = Array.from({ length: PARTITIONS }, () => 0);
+const consumedPerPartition = Array.from({ length: PARTITIONS }, () => 0);
+const lastSeqPerPartition = Array.from({ length: PARTITIONS }, () => -1);
 
 const windowSend = new Histogram();
 const windowFetch = new Histogram();
@@ -158,7 +167,8 @@ process.on("unhandledRejection", (error) => unhandled.push(error));
 
 function lag(): number {
   let total = 0;
-  for (let p = 0; p < PARTITIONS; p++) total += Math.max(0, producedPerPartition[p]! - consumedPerPartition[p]!);
+  for (let p = 0; p < PARTITIONS; p++)
+    total += Math.max(0, producedPerPartition[p]! - consumedPerPartition[p]!);
   return total;
 }
 
@@ -174,7 +184,13 @@ async function setup(): Promise<void> {
     while (Date.now() < deadline) {
       const meta = await admin.metadata([topic]);
       const found = meta.topics.find((t) => t.name === topic);
-      if (found && !found.err && found.partitions.length === PARTITIONS && found.partitions.every((p) => p.leader >= 0)) return;
+      if (
+        found &&
+        !found.err &&
+        found.partitions.length === PARTITIONS &&
+        found.partitions.every((p) => p.leader >= 0)
+      )
+        return;
       await Bun.sleep(150);
     }
     throw new Error(`Topic ${topic} did not become ready`);
@@ -191,7 +207,7 @@ let queuedRef: { readonly queuedMessages: number } | null = null;
 
 async function producerLoop(): Promise<void> {
   const producer = kafka.producer({ lingerMs: 5, batchMaxMessages: 1_000 });
-  queuedRef = producer as unknown as { queuedMessages: number };
+  queuedRef = producer;
   const TICK_MS = 50;
   const payload = new Uint8Array(MSG_BYTES).fill(0x61);
   let seq = 0;
@@ -200,7 +216,9 @@ async function producerLoop(): Promise<void> {
     while (Date.now() < endAt) {
       const elapsedS = (Date.now() - startedMs) / 1_000;
       const inBurst =
-        BURST_INTERVAL_S > 0 && elapsedS >= BURST_INTERVAL_S / 2 && elapsedS % BURST_INTERVAL_S < BURST_S;
+        BURST_INTERVAL_S > 0 &&
+        elapsedS >= BURST_INTERVAL_S / 2 &&
+        elapsedS % BURST_INTERVAL_S < BURST_S;
       const rate = inBurst ? BASE_RATE * BURST_FACTOR : BASE_RATE;
       const batchSize = Math.max(1, Math.round((rate * TICK_MS) / 1_000));
 
@@ -214,15 +232,22 @@ async function producerLoop(): Promise<void> {
         producedPerPartition[partition]++;
         batch.push(
           producer
-            .send({ topic, acks: ACKS, messages: [{ partition, key: String(messageSeq), value: payload }] })
-            .then((results) => {
-              pendingSends--;
-              counters.acknowledged++;
-              void results;
-            }, () => {
-              pendingSends--;
-              counters.failed++;
-            }),
+            .send({
+              topic,
+              acks: ACKS,
+              messages: [{ partition, key: String(messageSeq), value: payload }],
+            })
+            .then(
+              (results) => {
+                pendingSends--;
+                counters.acknowledged++;
+                void results;
+              },
+              () => {
+                pendingSends--;
+                counters.failed++;
+              },
+            ),
         );
         seq++;
       }
@@ -259,7 +284,13 @@ async function consumerLoop(): Promise<void> {
   const consumerKafka = new Kafka({ brokers: BROKERS, clientId: "bun-kafka-soak-consumer" });
   const consumer = consumerKafka.consumer({ fromBeginning: true });
   const decoder = new TextDecoder();
-  await consumer.assign(Array.from({ length: PARTITIONS }, (_, partition) => ({ topic, partition, offset: "earliest" as const })));
+  await consumer.assign(
+    Array.from({ length: PARTITIONS }, (_, partition) => ({
+      topic,
+      partition,
+      offset: "earliest" as const,
+    })),
+  );
   try {
     // Keep draining past the production end until lag closes or drain budget expires.
     while (Date.now() < endAt + 120_000) {
@@ -302,7 +333,7 @@ async function samplingLoop(): Promise<void> {
     const elapsedS = Math.max(1, (Date.now() - startedMs) / 1_000);
     const s = windowSend.snapshot();
     const f = windowFetch.snapshot();
-    const sample: Sample = {
+    const sample = {
       t_s: round(elapsedS),
       offered: counters.offered,
       acknowledged: counters.acknowledged,
@@ -330,7 +361,7 @@ async function samplingLoop(): Promise<void> {
       heap_used_bytes: mem.heapUsed,
       cpu_percent: cpuPercent(),
       fds: fdCount(),
-    };
+    } satisfies Sample;
     samples.push(sample);
     windowSend.reset();
     windowFetch.reset();
@@ -355,12 +386,38 @@ interface GateResult {
 function evaluateGates(durationS: number): GateResult[] {
   const gates: GateResult[] = [];
 
-  gates.push(gate("zero-failed-acks", counters.failed === 0, `${counters.failed} failed acknowledgements`));
-  gates.push(gate("zero-duplicates", counters.duplicates === 0, `${counters.duplicates} duplicate records observed by the oracle`));
-  gates.push(gate("per-partition-order", counters.orderViolations === 0, `${counters.orderViolations} out-of-order sequences`));
+  gates.push(
+    gate("zero-failed-acks", counters.failed === 0, `${counters.failed} failed acknowledgements`),
+  );
+  gates.push(
+    gate(
+      "zero-duplicates",
+      counters.duplicates === 0,
+      `${counters.duplicates} duplicate records observed by the oracle`,
+    ),
+  );
+  gates.push(
+    gate(
+      "per-partition-order",
+      counters.orderViolations === 0,
+      `${counters.orderViolations} out-of-order sequences`,
+    ),
+  );
   const missing = lag();
-  gates.push(gate("zero-missing-after-drain", missing === 0, `${missing} acknowledged-but-unconsumed records after final drain`));
-  gates.push(gate("no-unhandled-rejections", unhandled.length === 0, `${unhandled.length} unhandled promise rejections`));
+  gates.push(
+    gate(
+      "zero-missing-after-drain",
+      missing === 0,
+      `${missing} acknowledged-but-unconsumed records after final drain`,
+    ),
+  );
+  gates.push(
+    gate(
+      "no-unhandled-rejections",
+      unhandled.length === 0,
+      `${unhandled.length} unhandled promise rejections`,
+    ),
+  );
 
   // Memory gate: RSS range from end-of-warmup onward below 64 MiB.
   const warmupEndT = DURATION_S * WARMUP_FRACTION;
@@ -368,12 +425,14 @@ function evaluateGates(durationS: number): GateResult[] {
   if (postWarmup.length >= 2) {
     const minRss = Math.min(...postWarmup.map((s) => s.rss_bytes));
     const maxRss = Math.max(...postWarmup.map((s) => s.rss_bytes));
-    const growthMiB = ((maxRss - minRss) / 1048576);
-    gates.push(gate(
-      "memory-growth-below-64mib",
-      growthMiB < 64,
-      `${growthMiB.toFixed(1)} MiB RSS range after ${round(warmupEndT)}s warmup`,
-    ));
+    const growthMiB = (maxRss - minRss) / 1048576;
+    gates.push(
+      gate(
+        "memory-growth-below-64mib",
+        growthMiB < 64,
+        `${growthMiB.toFixed(1)} MiB RSS range after ${round(warmupEndT)}s warmup`,
+      ),
+    );
   }
 
   // Throughput decay: final quarter vs first quarter of sampled windows.
@@ -382,12 +441,14 @@ function evaluateGates(durationS: number): GateResult[] {
     const firstQuarterMps = avg(samples.slice(0, quarter), (s) => s.produce_mps);
     const finalQuarterMps = avg(samples.slice(-quarter), (s) => s.produce_mps);
     const enforce = durationS >= 900;
-    gates.push(gate(
-      "throughput-decay-below-5-percent",
-      !enforce || finalQuarterMps >= firstQuarterMps * 0.95,
-      `first quarter ${firstQuarterMps.toFixed(0)} msg/s vs final quarter ${finalQuarterMps.toFixed(0)} msg/s` +
-        (enforce ? "" : " (informational; run shorter than 15 min)"),
-    ));
+    gates.push(
+      gate(
+        "throughput-decay-below-5-percent",
+        !enforce || finalQuarterMps >= firstQuarterMps * 0.95,
+        `first quarter ${firstQuarterMps.toFixed(0)} msg/s vs final quarter ${finalQuarterMps.toFixed(0)} msg/s` +
+          (enforce ? "" : " (informational; run shorter than 15 min)"),
+      ),
+    );
   }
 
   // Latency drift between halves of the run.
@@ -399,10 +460,20 @@ function evaluateGates(durationS: number): GateResult[] {
     const p99Last = avg(samples.slice(-half), (s) => s.send_p99_ms);
     const drift95 = p95First > 0 ? (p95Last / p95First - 1) * 100 : 0;
     const drift99 = p99First > 0 ? (p99Last / p99First - 1) * 100 : 0;
-    gates.push(gate("send-p95-drift-below-20-percent", drift95 <= 20,
-      `p95 ${p95First.toFixed(1)}ms -> ${p95Last.toFixed(1)}ms (${drift95.toFixed(1)}%)`));
-    gates.push(gate("send-p99-drift-below-25-percent", drift99 <= 25,
-      `p99 ${p99First.toFixed(1)}ms -> ${p99Last.toFixed(1)}ms (${drift99.toFixed(1)}%)`));
+    gates.push(
+      gate(
+        "send-p95-drift-below-20-percent",
+        drift95 <= 20,
+        `p95 ${p95First.toFixed(1)}ms -> ${p95Last.toFixed(1)}ms (${drift95.toFixed(1)}%)`,
+      ),
+    );
+    gates.push(
+      gate(
+        "send-p99-drift-below-25-percent",
+        drift99 <= 25,
+        `p99 ${p99First.toFixed(1)}ms -> ${p99Last.toFixed(1)}ms (${drift99.toFixed(1)}%)`,
+      ),
+    );
   }
 
   // Lag recovery after each burst within three sampling windows (bounded by 10 min).
@@ -415,15 +486,22 @@ function evaluateGates(durationS: number): GateResult[] {
       const preLag = minLagBetween(burstStart - BURST_INTERVAL_S / 2, burstStart);
       const deadline = Math.min(burstEnd + recoverBoundS, durationS + 120);
       const postWindow = samples.filter((s) => s.t_s >= burstEnd && s.t_s <= deadline);
-      const peakAfterLag = postWindow.length ? Math.max(...postWindow.map((s) => s.lag_total)) : lag();
+      const peakAfterLag = postWindow.length
+        ? Math.max(...postWindow.map((s) => s.lag_total))
+        : lag();
       if (preLag !== null) {
         const overshoot = peakAfterLag - preLag;
         if (overshoot > worstOvershoot) worstOvershoot = overshoot;
         if (peakAfterLag > preLag + BASE_RATE * BURST_FACTOR * 0.05) recovered = false;
       }
     }
-    gates.push(gate("lag-recovers-after-each-burst", recovered,
-      `worst post-burst lag overshoot ${worstOvershoot} records within ${recoverBoundS}s of burst end`));
+    gates.push(
+      gate(
+        "lag-recovers-after-each-burst",
+        recovered,
+        `worst post-burst lag overshoot ${worstOvershoot} records within ${recoverBoundS}s of burst end`,
+      ),
+    );
   }
 
   return gates;
@@ -455,15 +533,25 @@ function avg(items: Sample[], pick: (item: Sample) => number): number {
 // Artifacts
 // ---------------------------------------------------------------------------
 
+type ArtifactValue = string | number | boolean;
+type ArtifactFields = { readonly [key: string]: ArtifactValue };
+
 interface SoakArtifact {
   commit: string;
   duration_seconds: number;
-  environment: Record<string, unknown>;
-  workload: Record<string, unknown>;
-  result: Record<string, unknown>;
+  environment: ArtifactFields;
+  workload: ArtifactFields;
+  result: ArtifactFields;
   samples: Sample[];
   gates: GateResult[];
   passed: boolean;
+}
+
+function burstDescription(workload: ArtifactFields): string {
+  const interval = Number(workload.burst_interval_s);
+  return interval
+    ? `${workload.burst_factor}x for ${workload.burst_length_s}s every ${interval}s`
+    : "off";
 }
 
 function renderReport(a: SoakArtifact): string {
@@ -481,7 +569,7 @@ function renderReport(a: SoakArtifact): string {
     `- Message size: ${a.workload.message_bytes} bytes`,
     `- Base offered rate: ${a.workload.producer_rate} msg/s`,
     `- Acks: ${a.workload.acks}`,
-    `- Burst: ${a.workload.burst_interval_s ? `${a.workload.burst_factor}x for ${a.workload.burst_length_s}s every ${a.workload.burst_interval_s}s` : "off"}`,
+    `- Burst: ${burstDescription(a.workload)}`,
     "",
     "## Result",
     "",
@@ -512,8 +600,13 @@ function renderReport(a: SoakArtifact): string {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<number> {
-  console.log(`soak: topic=${topic} duration=${DURATION_S}s rate=${BASE_RATE}/s partitions=${PARTITIONS} ` +
-    `msg=${MSG_BYTES}B acks=${ACKS} burst=${BURST_INTERVAL_S ? `${BURST_FACTOR}x/${BURST_S}s every ${BURST_INTERVAL_S}s` : "off"}`);
+  const burst = BURST_INTERVAL_S
+    ? `${BURST_FACTOR}x/${BURST_S}s every ${BURST_INTERVAL_S}s`
+    : "off";
+  console.log(
+    `soak: topic=${topic} duration=${DURATION_S}s rate=${BASE_RATE}/s partitions=${PARTITIONS} ` +
+      `msg=${MSG_BYTES}B acks=${ACKS} burst=${burst}`,
+  );
   await setup();
 
   const producing = producerLoop().catch(async (error) => {
@@ -611,7 +704,8 @@ async function main(): Promise<number> {
   await Bun.write(`${directory}${stamp}.md`, renderReport(artifact));
 
   console.log(`\nsoak: ${allPassed ? "PASS" : "FAIL"}`);
-  for (const gate of gates) console.log(`  ${gate.passed ? "ok  " : "FAIL"} ${gate.name}: ${gate.detail}`);
+  for (const gate of gates)
+    console.log(`  ${gate.passed ? "ok  " : "FAIL"} ${gate.name}: ${gate.detail}`);
   console.log(`artifacts: out/soak/${stamp}.{json,md}`);
   return allPassed ? 0 : 1;
 }

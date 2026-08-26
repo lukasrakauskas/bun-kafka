@@ -10,12 +10,14 @@ describe("acceptance", () => {
       await kafka.producer().send({
         topic: name,
         acks: "all",
-        messages: [{
-          key: "user-1",
-          value: JSON.stringify({ hello: "world", n: 42 }),
-          headers: { "content-type": "application/json", "x-trace": "abc" },
-          timestamp: Date.now(),
-        }],
+        messages: [
+          {
+            key: "user-1",
+            value: JSON.stringify({ hello: "world", n: 42 }),
+            headers: { "content-type": "application/json", "x-trace": "abc" },
+            timestamp: Date.now(),
+          },
+        ],
       });
 
       const consumer = kafka.consumer();
@@ -43,13 +45,18 @@ describe("acceptance", () => {
     try {
       await kafka.producer().send({
         topic: name,
-        messages: Array.from({ length: count }, (_, i) => ({ key: String(i % 16), value: `v-${i}` })),
+        messages: Array.from({ length: count }, (_, i) => ({
+          key: String(i % 16),
+          value: `v-${i}`,
+        })),
       });
       const consumer = kafka.consumer();
       await consumer.assign([{ topic: name, partition: 0, offset: "earliest" }]);
       let received = 0;
       const start = performance.now();
-      while (received < count) received += (await consumer.fetch({ maxWaitMs: 100, maxMessages: count - received })).length;
+      while (received < count)
+        received += (await consumer.fetch({ maxWaitMs: 100, maxMessages: count - received }))
+          .length;
       expect(received).toBe(count);
       expect(performance.now() - start).toBeLessThan(60_000);
     } finally {

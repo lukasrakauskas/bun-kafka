@@ -6,7 +6,10 @@ describe("Fetch sessions (real broker)", () => {
   test("repeated incremental polls deliver every produced message exactly once", async () => {
     const name = topic("fetchsess");
     const p = producer();
-    await p.send({ topic: name, messages: Array.from({ length: 25 }, (_, i) => ({ value: `m${i}` })) });
+    await p.send({
+      topic: name,
+      messages: Array.from({ length: 25 }, (_, i) => ({ value: `m${i}` })),
+    });
     await p.close();
 
     const client = new Kafka({ brokers: BROKERS.split(",") });

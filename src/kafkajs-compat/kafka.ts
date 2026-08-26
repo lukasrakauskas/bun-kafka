@@ -9,6 +9,9 @@ import { unwrapKafkaJs, type KafkaConfig } from "./config.ts";
 import { CompatProducer } from "./producer.ts";
 import { CompatConsumer } from "./consumer.ts";
 import { CompatAdmin } from "./admin.ts";
+import type { CompatOptions } from "./types.ts";
+
+type KafkaJsOptions = CompatOptions;
 
 export class Kafka {
   #logger: Logger;
@@ -17,7 +20,11 @@ export class Kafka {
   constructor(config: KafkaConfig) {
     const unwrapped = unwrapKafkaJs(config);
     this.#hub = new ClusterHub(unwrapped);
-    this.#logger = new Logger(unwrapped.logLevel ?? logLevel.NOTHING, unwrapped.clientId ?? "kafkajs", unwrapped.logCreator);
+    this.#logger = new Logger(
+      unwrapped.logLevel ?? logLevel.NOTHING,
+      unwrapped.clientId ?? "kafkajs",
+      unwrapped.logCreator,
+    );
   }
 
   #getter(): ClusterGetter {
@@ -29,15 +36,23 @@ export class Kafka {
     };
   }
 
-  producer(options: Record<string, any> = {}): CompatProducer {
-    return new CompatProducer(() => this.#getter(), this.#logger.namespace("producer"), unwrapKafkaJs(options));
+  producer(options: KafkaJsOptions = {}): CompatProducer {
+    return new CompatProducer(
+      () => this.#getter(),
+      this.#logger.namespace("producer"),
+      unwrapKafkaJs(options),
+    );
   }
 
-  consumer(options: Record<string, any> = {}): CompatConsumer {
-    return new CompatConsumer(() => this.#getter(), this.#logger.namespace("consumer"), unwrapKafkaJs(options));
+  consumer(options: KafkaJsOptions = {}): CompatConsumer {
+    return new CompatConsumer(
+      () => this.#getter(),
+      this.#logger.namespace("consumer"),
+      unwrapKafkaJs(options),
+    );
   }
 
-  admin(_options: Record<string, any> = {}): CompatAdmin {
+  admin(_options: KafkaJsOptions = {}): CompatAdmin {
     return new CompatAdmin(() => this.#getter(), this.#logger.namespace("admin"));
   }
 

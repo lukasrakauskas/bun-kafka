@@ -2,6 +2,34 @@
 
 All features listed in docs/feature-completeness.md are implemented and tested.
 
+## Release-prep cycle (2026-08-26)
+
+Work streams, each on its own branch off `feat/oxlint-oxfmt-with-custom-rules` and merged back:
+
+- `docs/kafka-versions-and-kips.md` — newcomer-oriented mapping of Kafka releases, wire API
+  versioning strategy, KIP catalog (claim → code → verifying test), plus a documented proposal
+  for full per-broker version negotiation with trigger conditions.
+- `docs/client-gap-audit.md` — gap audit vs kafkajs / node-rdkafka / franz-go with explicit
+  dispositions. Its top open code item, IncrementalAlterConfigs, is now implemented and merged
+  (see below).
+- `feat/incremental-alter-configs` — `admin.incrementalAlterConfigs()` (API key 44, v1 flexible:
+  set/delete/append/subtract per entry, validate-only). Wire schema taken from the Apache
+  protocol sources; mock wire-shape test plus real-broker round trip verified against a
+  dedicated Redpanda container (SET persisted + confirmed via DescribeConfigs, sibling-entry
+  safety, delete-reverts-to-default, error path). Docs updated (feature matrix, gap audit,
+  admin guide, changelog).
+- `feat/release-packaging` — npm publish hygiene: `files` whitelist + repository/keywords;
+  dry-run tarball verified at 31 files / ~260 KB.
+- `feat/docs-website` — nine usage guides under docs/guide/ plus a static documentation website:
+  `bun run docs:build` emits website/dist (16 pages), `bun run docs:serve` serves it.
+- Merged previously unmerged branches: feat/release-soak (24 h soak profile + wrap-up checklist)
+  and feat/ci (perf-ratio CI flake fix).
+
+Gates at merge time: oxlint --deny-warnings clean, oxfmt clean, tsc clean, 68/68 tests pass.
+
+Remaining before tagging a release: the live 24-hour soak finishes ~2026-08-26 12:20 UTC — run
+the wrap-up checklist below, then flip the status lines in docs/performance-validation.md.
+
 ## Completed (commits e46f149..HEAD)
 
 - OffsetCommit v2 INT64 retention / no-v2-throttle fix
@@ -30,6 +58,35 @@ All features listed in docs/feature-completeness.md are implemented and tested.
   1.5x bursts — 1,959,750 offered = acknowledged = consumed, zero failures/duplicates/
   order violations/missing, RSS stable (+7.5 MiB range), no throughput decay. The 24-hour
   and 72-hour release soaks remain outstanding by design.
+
+## Live 24-hour release soak (in progress)
+
+Started 2026-08-25 ~12:15 UTC on the `feat/release-soak` tree (PR #14), detached via
+`setsid` so it outlives any terminal session:
+
+    SOAK_DURATION_S=86400 SOAK_BURST_INTERVAL_S=3600 SOAK_BURST_S=600 bun scripts/soak.ts
+
+Same as `bun run test:soak:release`. Profile: 86,400 s at 1,000 msg/s (1 KiB acks=all,
+6 partitions) with a 10-minute 150% burst every hour — the 24-hour gate profile from
+docs/performance-validation.md.
+
+- Progress: `tail -f out/soak/release-24h.log`
+- Artifacts on completion: newest `out/soak/<timestamp>.{json,md}`
+- Broker: local Redpanda dev container (`bun-kafka-dev`) — keep it up for the full run.
+- ETA ≈ 2026-08-26 ~12:20 UTC.
+
+### When it finishes (wrap-up checklist)
+
+1. Check gates in the log tail / MD artifact: zero failed acks/duplicates/order
+   violations/missing records, RSS growth < 64 MiB over 24 h, throughput decay < 5 %,
+   p95/p99 drift within limits, lag recovery after every burst.
+2. Commit evidence: `out/` is gitignored, so `git add -f out/soak/release-24h.log` plus
+   the final `<timestamp>.{json,md}` pair.
+3. Flip status in docs/performance-validation.md ("Current status" line and the soak
+   sections) to 24-hour soak-proven with the run numbers; link the artifacts.
+4. Merge PR #14 (stacked on #13 → #12); issue #11 closes with it.
+5. Still outstanding afterwards: the 72-hour follow-up soak at 75 % of max stable rate,
+   required before releases that touch protocol/connection/producer/consumer code.
 
 ## Broker notes
 

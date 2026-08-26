@@ -8,7 +8,8 @@
 const MAGIC = 0x184d2204;
 const BLOCK_MAX = 4 * 1024 * 1024;
 
-const rotl = (value: number, bits: number): number => ((value << bits) | (value >>> (32 - bits))) >>> 0;
+const rotl = (value: number, bits: number): number =>
+  ((value << bits) | (value >>> (32 - bits))) >>> 0;
 
 const XX_PRIME1 = 0x9e3779b1;
 const XX_PRIME2 = 0x85ebca77;
@@ -28,10 +29,26 @@ export function xxhash32(input: Uint8Array, seed = 0): number {
     let v4 = (seed - XX_PRIME1) >>> 0;
     const limit = n - 16;
     while (at <= limit) {
-      v1 = Math.imul(rotl((v1 + Math.imul(view.getUint32(at, true), XX_PRIME2)) >>> 0, 13), XX_PRIME1) >>> 0;
-      v2 = Math.imul(rotl((v2 + Math.imul(view.getUint32(at + 4, true), XX_PRIME2)) >>> 0, 13), XX_PRIME1) >>> 0;
-      v3 = Math.imul(rotl((v3 + Math.imul(view.getUint32(at + 8, true), XX_PRIME2)) >>> 0, 13), XX_PRIME1) >>> 0;
-      v4 = Math.imul(rotl((v4 + Math.imul(view.getUint32(at + 12, true), XX_PRIME2)) >>> 0, 13), XX_PRIME1) >>> 0;
+      v1 =
+        Math.imul(
+          rotl((v1 + Math.imul(view.getUint32(at, true), XX_PRIME2)) >>> 0, 13),
+          XX_PRIME1,
+        ) >>> 0;
+      v2 =
+        Math.imul(
+          rotl((v2 + Math.imul(view.getUint32(at + 4, true), XX_PRIME2)) >>> 0, 13),
+          XX_PRIME1,
+        ) >>> 0;
+      v3 =
+        Math.imul(
+          rotl((v3 + Math.imul(view.getUint32(at + 8, true), XX_PRIME2)) >>> 0, 13),
+          XX_PRIME1,
+        ) >>> 0;
+      v4 =
+        Math.imul(
+          rotl((v4 + Math.imul(view.getUint32(at + 12, true), XX_PRIME2)) >>> 0, 13),
+          XX_PRIME1,
+        ) >>> 0;
       at += 16;
     }
     h = (rotl(v1, 1) + rotl(v2, 7) + rotl(v3, 12) + rotl(v4, 18)) >>> 0;
@@ -56,12 +73,14 @@ export function xxhash32(input: Uint8Array, seed = 0): number {
   h = Math.imul(h, XX_PRIME2) >>> 0;
   h ^= h >>> 13;
   h = Math.imul(h, XX_PRIME3) >>> 0;
-  return (h ^ h >>> 16) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
 }
 
 /** Decompress one LZ4 block. The output grows dynamically when `outputSize` is unknown. */
 export function lz4DecompressBlock(input: Uint8Array, outputSize?: number): Uint8Array {
-  let output = new Uint8Array(outputSize && outputSize > 0 ? outputSize : Math.max(4096, input.byteLength * 4));
+  let output = new Uint8Array(
+    outputSize && outputSize > 0 ? outputSize : Math.max(4096, input.byteLength * 4),
+  );
   let pos = 0;
   let offset = 0;
   const ensure = (needed: number) => {
@@ -86,7 +105,8 @@ export function lz4DecompressBlock(input: Uint8Array, outputSize?: number): Uint
     let literalLength = token >> 4;
     if (literalLength === 15) literalLength += readVarlen();
     ensure(pos + literalLength);
-    if (offset + literalLength > input.byteLength) throw new RangeError("Invalid LZ4 literal length");
+    if (offset + literalLength > input.byteLength)
+      throw new RangeError("Invalid LZ4 literal length");
     output.set(input.subarray(offset, offset + literalLength), pos);
     offset += literalLength;
     pos += literalLength;
@@ -111,10 +131,11 @@ export function lz4DecompressBlock(input: Uint8Array, outputSize?: number): Uint
 /** Decompress an LZ4 frame produced by any conformant encoder. */
 export function lz4Decompress(input: Uint8Array): Uint8Array {
   const view = new DataView(input.buffer, input.byteOffset, input.byteLength);
-  if (input.byteLength < 7 || view.getUint32(0, true) !== MAGIC) throw new RangeError("Invalid LZ4 frame magic");
+  if (input.byteLength < 7 || view.getUint32(0, true) !== MAGIC)
+    throw new RangeError("Invalid LZ4 frame magic");
   const flg = input[4]!;
   const bd = input[5]!;
-  if ((flg >>> 6) !== 1) throw new RangeError(`Unsupported LZ4 frame version ${(flg >>> 6)}`);
+  if (flg >>> 6 !== 1) throw new RangeError(`Unsupported LZ4 frame version ${flg >>> 6}`);
   const expectedChecksum = (xxhash32(input.subarray(4, 6)) >>> 8) & 0xff;
   if (input[6] !== expectedChecksum) throw new RangeError("Invalid LZ4 frame header checksum");
   void bd;
@@ -123,9 +144,10 @@ export function lz4Decompress(input: Uint8Array): Uint8Array {
   if (flg & 0x01) offset += 4; // dictionary id
   if (flg & 0x02) throw new RangeError("LZ4 skippable headers inside frames are unsupported");
   const contentSize = flg & 0x08 ? view.getBigUint64(7, true) : undefined;
-  let output: Uint8Array | undefined = contentSize !== undefined && contentSize >= 0n
-    ? new Uint8Array(Number(contentSize))
-    : undefined;
+  let output: Uint8Array | undefined =
+    contentSize !== undefined && contentSize >= 0n
+      ? new Uint8Array(Number(contentSize))
+      : undefined;
   let parts: Uint8Array[] | undefined;
   let pos = 0;
   while (true) {
@@ -163,7 +185,12 @@ export function lz4CompressBlock(input: Uint8Array): Uint8Array {
   const n = input.byteLength;
   const output = new Uint8Array(n + Math.ceil(n / 255) + 16);
   let at = 0;
-  const emitSequence = (literalsFrom: number, literalsTo: number, matchFrom: number, matchLength: number) => {
+  const emitSequence = (
+    literalsFrom: number,
+    literalsTo: number,
+    matchFrom: number,
+    matchLength: number,
+  ) => {
     const literals = literalsTo - literalsFrom;
     const tokenAt = at++;
     let literalCode = literals;
@@ -204,13 +231,20 @@ export function lz4CompressBlock(input: Uint8Array): Uint8Array {
     let pos = 0;
     let literalsFrom = 0;
     while (pos <= mfLimit) {
-      const v = input[pos]! | (input[pos + 1]! << 8) | (input[pos + 2]! << 16) | (input[pos + 3]! << 24);
+      const v =
+        input[pos]! | (input[pos + 1]! << 8) | (input[pos + 2]! << 16) | (input[pos + 3]! << 24);
       const h = (Math.imul(v, XX_PRIME1) >>> (32 - bits)) & (table.length - 1);
       const candidate: number | undefined = table[h];
       table[h] = pos;
-      if (candidate !== undefined && candidate !== -1 && pos - candidate < 65536 && input[candidate]! === input[pos]!
-        && input[candidate + 1]! === input[pos + 1]! && input[candidate + 2]! === input[pos + 2]!
-        && input[candidate + 3]! === input[pos + 3]!) {
+      if (
+        candidate !== undefined &&
+        candidate !== -1 &&
+        pos - candidate < 65536 &&
+        input[candidate]! === input[pos]! &&
+        input[candidate + 1]! === input[pos + 1]! &&
+        input[candidate + 2]! === input[pos + 2]! &&
+        input[candidate + 3]! === input[pos + 3]!
+      ) {
         let len = 4;
         while (pos + len < matchLimit && input[candidate + len] === input[pos + len]) len++;
         emitSequence(literalsFrom, pos, candidate, len);
@@ -266,8 +300,11 @@ export function lz4Compress(input: Uint8Array): Uint8Array {
   for (let offset = 0; offset < input.byteLength; offset += BLOCK_MAX) {
     const chunk = input.subarray(offset, Math.min(offset + BLOCK_MAX, input.byteLength));
     const compressed = lz4CompressBlock(chunk);
-    parts.push(compressed.byteLength < chunk.byteLength ? { data: compressed, raw: false } : { data: chunk.slice(), raw: true });
-
+    parts.push(
+      compressed.byteLength < chunk.byteLength
+        ? { data: compressed, raw: false }
+        : { data: chunk.slice(), raw: true },
+    );
   }
   let total = 20 + 4 * parts.length;
   for (const part of parts) total += part.data.byteLength;

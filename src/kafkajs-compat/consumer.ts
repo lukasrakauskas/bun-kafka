@@ -1,11 +1,17 @@
 import { BunAdmin } from "../bun/admin.ts";
 import { BunConsumer } from "../bun/consumer.ts";
+import { hasStringName, isBoolean, isNumber, isString } from "../type-guards.ts";
 import type { ConsumedMessage } from "../types.ts";
 import { CONSUMER_EVENTS } from "./constants.ts";
 import { wrapError, KafkaJSError, KafkaJSNonRetriableError } from "./errors.ts";
 import type { ClusterGetter } from "./config.ts";
 import { Emitter, Logger } from "./logger.ts";
 import { toKafkajsMessage, type KafkaJsConsumedMessage } from "./messages.ts";
+import type { CompatOptions, CompatValue, LogFields } from "./types.ts";
+
+function numberOption(value: CompatValue): number | undefined {
+  return isNumber(value) ? value : undefined;
+}
 
 export interface CompatEachMessagePayload {
   topic: string;
@@ -27,7 +33,7 @@ export interface CompatEachBatchPayload {
     offsetLag(): string;
     isStale(): boolean;
     resolveOffset(offset: string | number | bigint): void;
-    commitOffsetsIfNecessary(options?: unknown): Promise<void>;
+    commitOffsetsIfNecessary(options?: CompatOptions): Promise<void>;
     heartbeat(): Promise<void>;
   };
   heartbeat: () => Promise<void>;
@@ -44,8 +50,12 @@ export interface RunOptions {
   autoCommitThreshold?: number | null;
   eachBatchAutoResolve?: boolean;
   partitionsConsumedConcurrently?: number;
-  beforeCommit?: (offsets: Array<{ topic: string; partition: number; offset: string }>) => Promise<boolean | undefined> | boolean | undefined;
-  afterCommit?: (offsets: Array<{ topic: string; partition: number; offset: string }>) => Promise<void> | void;
+  beforeCommit?: (
+    offsets: Array<{ topic: string; partition: number; offset: string }>,
+  ) => Promise<boolean | undefined> | boolean | undefined;
+  afterCommit?: (
+    offsets: Array<{ topic: string; partition: number; offset: string }>,
+  ) => Promise<void> | void;
   onCrash?: (error: Error) => void;
 }
 
@@ -53,7 +63,7 @@ export class CompatConsumer {
   events = CONSUMER_EVENTS;
   #getter: () => ClusterGetter;
   #logger: Logger;
-  #options: Record<string, any>;
+  #options: CompatOptions;
   #emitter = new Emitter();
   #consumer?: BunConsumer;
   #running = false;
@@ -63,13 +73,13 @@ export class CompatConsumer {
   #pendingOffsets = new Map<string, { topic: string; partition: number; offset: bigint }>();
   #uncommittedCount = 0;
 
-  constructor(getter: () => ClusterGetter, logger: Logger, options: Record<string, any>) {
+  constructor(getter: () => ClusterGetter, logger: Logger, options: CompatOptions) {
     this.#getter = getter;
     this.#logger = logger;
     this.#options = options;
   }
 
-  on(event: string, listener: (event: Record<string, unknown>) => void): () => void {
+  on(event: string, listener: (event: LogFields) => void): () => void {
     return this.#emitter.on(event, listener);
   }
 
@@ -81,18 +91,27 @@ export class CompatConsumer {
     if (!this.#consumer) {
       const o = this.#options;
       const assignors = Array.isArray(o.partitionAssignors) ? o.partitionAssignors : [];
-      const cooperative = assignors.some((assignor) => (assignor as { name?: string }).name === "CooperativeStickyAssignor");
+      const cooperative = assignors.some(
+        (assignor) => hasStringName(assignor) && assignor.name === "CooperativeStickyAssignor",
+      );
       const consumerOptions = {
-        groupId: o.groupId as string,
-        sessionTimeoutMs: o.sessionTimeout as number | undefined,
-        rebalanceTimeoutMs: o.rebalanceTimeout as number | undefined,
-        heartbeatIntervalMs: o.heartbeatInterval as number | undefined,
-        fromBeginning: o.fromBeginning as boolean | undefined,
-        isolationLevel: o.isolationLevel as "read_uncommitted" | "read_committed" | undefined,
-        groupInstanceId: o.groupInstanceId as string | undefined,
+        groupId: isString(o.groupId) ? o.groupId : undefined,
+        sessionTimeoutMs: numberOption(o.sessionTimeout),
+        rebalanceTimeoutMs: numberOption(o.rebalanceTimeout),
+        heartbeatIntervalMs: numberOption(o.heartbeatInterval),
+        fromBeginning: isBoolean(o.fromBeginning) ? o.fromBeginning : undefined,
+        isolationLevel:
+          o.isolationLevel === "read_uncommitted" || o.isolationLevel === "read_committed"
+            ? o.isolationLevel
+            : undefined,
+        groupInstanceId: isString(o.groupInstanceId) ? o.groupInstanceId : undefined,
         partitionAssigner: cooperative ? ("cooperative-sticky" as const) : undefined,
       };
-      this.#consumer = new BunConsumer(this.#getter().acquire(), consumerOptions, this.#getter().release);
+      this.#consumer = new BunConsumer(
+        this.#getter().acquire(),
+        consumerOptions,
+        this.#getter().release,
+      );
     }
     return this.#consumer!;
   }
@@ -110,16 +129,32 @@ export class CompatConsumer {
     this.#emitter.emit(CONSUMER_EVENTS.DISCONNECT);
   }
 
-  async subscribe({ topic, topics, fromBeginning }: { topic?: string | RegExp; topics?: string | RegExp | Array<string | RegExp>; fromBeginning?: boolean }): Promise<void> {
+  async subscribe({
+    topic,
+    topics,
+    fromBeginning,
+  }: {
+    topic?: string | RegExp;
+    topics?: string | RegExp | Array<string | RegExp>;
+    fromBeginning?: boolean;
+  }): Promise<void> {
     try {
-      const incoming = topic !== undefined ? [topic] : topics !== undefined ? (Array.isArray(topics) ? topics : [topics]) : [];
+      const incoming =
+        topic !== undefined
+          ? [topic]
+          : topics !== undefined
+            ? Array.isArray(topics)
+              ? topics
+              : [topics]
+            : [];
       // kafkajs accumulates subscriptions across calls into one group subscription.
       const merged = [...this.#subscribedTopics];
       for (const entry of incoming) {
-        if (!merged.some((existing) => existing.toString() === entry.toString())) merged.push(entry);
+        if (!merged.some((existing) => existing.toString() === entry.toString()))
+          merged.push(entry);
       }
       this.#subscribedTopics = new Set(merged);
-      await this.#underlying().subscribe({ topics: merged as never, fromBeginning });
+      await this.#underlying().subscribe({ topics: merged, fromBeginning });
       this.#emitter.emit(CONSUMER_EVENTS.GROUP_JOIN, { groupId: this.#options.groupId });
     } catch (error) {
       throw wrapError(error);
@@ -139,7 +174,10 @@ export class CompatConsumer {
     const loop = this.#loop(options).catch(async (error) => {
       this.#running = false;
       const wrapped = error instanceof Error ? wrapError(error) : new KafkaJSError(String(error));
-      this.#logger.error(`consumer crashed: ${wrapped.message}`, { groupId: this.#options.groupId, stack: wrapped.stack });
+      this.#logger.error(`consumer crashed: ${wrapped.message}`, {
+        groupId: this.#options.groupId,
+        stack: wrapped.stack,
+      });
       this.#emitter.emit(CONSUMER_EVENTS.CRASH, { error: wrapped, groupId: this.#options.groupId });
       await options.onCrash?.(wrapped);
     });
@@ -162,17 +200,23 @@ export class CompatConsumer {
           maxMessages: 200,
           // Capped wire wait keeps stop()/pause()/resume() responsive even when
           // applications configure multi-second maxWaitTimeInMs.
-          maxWaitMs: Math.min((o.maxWaitTimeInMs as number) ?? 500, 1_000),
-          minBytes: o.minBytes as number | undefined,
-          maxBytes: o.maxBytes as number | undefined,
-          maxPartitionBytes: o.maxBytesPerPartition as number | undefined,
+          maxWaitMs: Math.min(numberOption(o.maxWaitTimeInMs) ?? 500, 1_000),
+          minBytes: numberOption(o.minBytes),
+          maxBytes: numberOption(o.maxBytes),
+          maxPartitionBytes: numberOption(o.maxBytesPerPartition),
         });
         if (!this.#running) break;
         this.#emitter.emit(CONSUMER_EVENTS.FETCH, { numberOfMessages: messages.length });
         if (!messages.length) continue;
         const groups = this.#groupByPartition(messages);
         for (let i = 0; i < groups.length; i += concurrent) {
-          await Promise.all(groups.slice(i, i + concurrent).map(([key, items]) => this.#processGroup(key, items, consumer, options, autoCommitEnabled)));
+          await Promise.all(
+            groups
+              .slice(i, i + concurrent)
+              .map(([key, items]) =>
+                this.#processGroup(key, items, consumer, options, autoCommitEnabled),
+              ),
+          );
           if (!this.#running) break;
         }
         if (autoCommitEnabled && !options.autoCommitInterval && !options.autoCommitThreshold) {
@@ -200,11 +244,21 @@ export class CompatConsumer {
     return ordered;
   }
 
-  async #processGroup(key: string, items: ConsumedMessage[], consumer: BunConsumer, options: RunOptions, autoCommitEnabled: boolean): Promise<void> {
+  async #processGroup(
+    key: string,
+    items: ConsumedMessage[],
+    consumer: BunConsumer,
+    options: RunOptions,
+    autoCommitEnabled: boolean,
+  ): Promise<void> {
     const separator = key.indexOf("\u0000");
     const topic = key.slice(0, separator);
     const partition = Number(key.slice(separator + 1));
-    this.#emitter.emit(CONSUMER_EVENTS.START_BATCH_PROCESS, { topic, partition, size: items.length });
+    this.#emitter.emit(CONSUMER_EVENTS.START_BATCH_PROCESS, {
+      topic,
+      partition,
+      size: items.length,
+    });
     const heartbeat = async () => {
       this.#emitter.emit(CONSUMER_EVENTS.HEARTBEAT);
     };
@@ -216,14 +270,32 @@ export class CompatConsumer {
         for (const raw of items) {
           if (!this.#running) return;
           this.#track(topic, partition, raw.offset + 1n);
-          await options.eachMessage({ topic, partition, message: toKafkajsMessage(raw), heartbeat, pause });
+          await options.eachMessage({
+            topic,
+            partition,
+            message: toKafkajsMessage(raw),
+            heartbeat,
+            pause,
+          });
           this.#uncommittedCount++;
-          if (options.autoCommitThreshold && this.#uncommittedCount >= options.autoCommitThreshold) {
+          if (
+            options.autoCommitThreshold &&
+            this.#uncommittedCount >= options.autoCommitThreshold
+          ) {
             await this.#flushCommits(consumer, options);
           }
         }
       } else if (options.eachBatch) {
-        await this.#runBatch(topic, partition, items, consumer, options, autoCommitEnabled, heartbeat, pause);
+        await this.#runBatch(
+          topic,
+          partition,
+          items,
+          consumer,
+          options,
+          autoCommitEnabled,
+          heartbeat,
+          pause,
+        );
       }
     } finally {
       this.#emitter.emit(CONSUMER_EVENTS.END_BATCH_PROCESS, { topic, partition });
@@ -259,7 +331,8 @@ export class CompatConsumer {
       isEmpty: () => messages.length === 0,
       firstOffset: () => (messages.length ? messages[0]!.offset : null),
       lastOffset: () => (messages.length ? messages[messages.length - 1]!.offset : null),
-      offsetLag: () => (BigInt(highWatermark) - BigInt(messages[messages.length - 1]!.offset) - 1n).toString(),
+      offsetLag: () =>
+        (BigInt(highWatermark) - BigInt(messages[messages.length - 1]!.offset) - 1n).toString(),
       isStale: () => !this.#running,
       resolveOffset: (offset: string | number | bigint) => {
         resolved.add(BigInt(offset).toString());
@@ -269,7 +342,13 @@ export class CompatConsumer {
       },
       heartbeat,
     };
-    await options.eachBatch!({ batch, heartbeat, pause, isRunning: () => this.#running, isStale: () => !this.#running });
+    await options.eachBatch!({
+      batch,
+      heartbeat,
+      pause,
+      isRunning: () => this.#running,
+      isStale: () => !this.#running,
+    });
     const autoResolve = options.eachBatchAutoResolve !== false;
     if (autoResolve) for (const raw of items) resolved.add(raw.offset.toString());
     let nextOffset: bigint;
@@ -285,7 +364,11 @@ export class CompatConsumer {
     } else {
       this.#track(topic, partition, nextOffset);
       this.#uncommittedCount++;
-      if (autoCommitEnabled && options.autoCommitThreshold && this.#uncommittedCount >= options.autoCommitThreshold) {
+      if (
+        autoCommitEnabled &&
+        options.autoCommitThreshold &&
+        this.#uncommittedCount >= options.autoCommitThreshold
+      ) {
         await this.#flushCommits(consumer, options);
       }
     }
@@ -298,15 +381,22 @@ export class CompatConsumer {
   async #flushCommits(consumer: BunConsumer, options: RunOptions): Promise<void> {
     if (!this.#pendingOffsets.size) return;
     const entries = [...this.#pendingOffsets.values()];
-    const serializable = entries.map((entry) => ({ topic: entry.topic, partition: entry.partition, offset: entry.offset.toString() }));
-    if (options.beforeCommit && await options.beforeCommit(serializable)) {
+    const serializable = entries.map((entry) => ({
+      topic: entry.topic,
+      partition: entry.partition,
+      offset: entry.offset.toString(),
+    }));
+    if (options.beforeCommit && (await options.beforeCommit(serializable))) {
       this.#pendingOffsets.clear();
       return;
     }
     await consumer.commitOffsets(entries);
     this.#pendingOffsets.clear();
     this.#uncommittedCount = 0;
-    this.#emitter.emit(CONSUMER_EVENTS.COMMIT_OFFSETS, { groupId: this.#options.groupId, topics: serializable.map((entry) => entry.topic) });
+    this.#emitter.emit(CONSUMER_EVENTS.COMMIT_OFFSETS, {
+      groupId: this.#options.groupId,
+      topics: serializable.map((entry) => entry.topic),
+    });
     await options.afterCommit?.(serializable);
   }
 
@@ -317,47 +407,76 @@ export class CompatConsumer {
     await this.#stopping;
   }
 
-  async commitOffsets(topicPartitions: Array<{ topic: string; partition: number; offset?: string | number | bigint; metadata?: string }>): Promise<void> {
+  async commitOffsets(
+    topicPartitions: Array<{
+      topic: string;
+      partition: number;
+      offset?: string | number | bigint;
+      metadata?: string;
+    }>,
+  ): Promise<void> {
     try {
       const consumer = this.#underlying();
       const entries: Array<{ topic: string; partition: number; offset: bigint }> = [];
       for (const { topic, partition, offset } of topicPartitions) {
         const key = `${topic}\u0000${partition}`;
-        const resolved = offset !== undefined
-          ? BigInt(offset)
-          : this.#pendingOffsets.get(key)?.offset ?? consumer.position(topic, partition) ?? -1n;
+        const resolved =
+          offset !== undefined
+            ? BigInt(offset)
+            : (this.#pendingOffsets.get(key)?.offset ?? consumer.position(topic, partition) ?? -1n);
         this.#pendingOffsets.delete(key);
         if (resolved >= 0n) entries.push({ topic, partition, offset: resolved });
       }
       if (!entries.length) return;
       await consumer.commitOffsets(entries);
-      this.#emitter.emit(CONSUMER_EVENTS.COMMIT_OFFSETS, { groupId: this.#options.groupId, topics: entries.map((entry) => entry.topic) });
+      this.#emitter.emit(CONSUMER_EVENTS.COMMIT_OFFSETS, {
+        groupId: this.#options.groupId,
+        topics: entries.map((entry) => entry.topic),
+      });
     } catch (error) {
       throw wrapError(error);
     }
   }
 
-  seek({ topic, partition, offset }: { topic: string; partition: number; offset: string | number | bigint }): void {
+  seek({
+    topic,
+    partition,
+    offset,
+  }: {
+    topic: string;
+    partition: number;
+    offset: string | number | bigint;
+  }): void {
     this.#underlying().seek({ topic, partition, offset: BigInt(offset) });
   }
 
   /** Core expands topic-only entries; compat mirrors the result for paused(). */
-  pause(topicPartitions: Array<{ topic: string; partitions?: number[] }>): Array<{ topic: string; partitions: number[] }> {
-    for (const target of this.#resolvePartitions(topicPartitions)) this.#paused.add(`${target.topic}\u0000${target.partition}`);
+  pause(
+    topicPartitions: Array<{ topic: string; partitions?: number[] }>,
+  ): Array<{ topic: string; partitions: number[] }> {
+    for (const target of this.#resolvePartitions(topicPartitions))
+      this.#paused.add(`${target.topic}\u0000${target.partition}`);
     this.#underlying().pause(topicPartitions);
     return this.paused();
   }
 
-  resume(topicPartitions: Array<{ topic: string; partitions?: number[] }>): Array<{ topic: string; partitions: number[] }> {
-    for (const target of this.#resolvePartitions(topicPartitions)) this.#paused.delete(`${target.topic}\u0000${target.partition}`);
+  resume(
+    topicPartitions: Array<{ topic: string; partitions?: number[] }>,
+  ): Array<{ topic: string; partitions: number[] }> {
+    for (const target of this.#resolvePartitions(topicPartitions))
+      this.#paused.delete(`${target.topic}\u0000${target.partition}`);
     this.#underlying().resume(topicPartitions);
     return this.paused();
   }
 
-  #resolvePartitions(topicPartitions: Array<{ topic: string; partitions?: number[] }>): Array<{ topic: string; partition: number }> {
+  #resolvePartitions(
+    topicPartitions: Array<{ topic: string; partitions?: number[] }>,
+  ): Array<{ topic: string; partition: number }> {
     const assigned = this.#underlying().assignment();
     return topicPartitions.flatMap(({ topic, partitions }) => {
-      const forTopic = partitions ?? assigned.filter((entry) => entry.topic === topic).map((entry) => entry.partition);
+      const forTopic =
+        partitions ??
+        assigned.filter((entry) => entry.topic === topic).map((entry) => entry.partition);
       return forTopic.map((partition) => ({ topic, partition }));
     });
   }
@@ -372,7 +491,7 @@ export class CompatConsumer {
     return [...grouped].map(([topic, partitions]) => ({ topic, partitions }));
   }
 
-  async describeGroup(): Promise<Record<string, unknown>> {
+  async describeGroup(): Promise<CompatOptions> {
     try {
       const admin = new BunAdmin(this.#getter().acquire(), this.#getter().release);
       const [group] = await admin.describeGroups([String(this.#options.groupId)]);
@@ -383,10 +502,16 @@ export class CompatConsumer {
     }
   }
 
-  assignments(): Array<{ topic: string; partitions: Array<{ partition: number; offset: string }> }> {
+  assignments(): Array<{
+    topic: string;
+    partitions: Array<{ partition: number; offset: string }>;
+  }> {
     const grouped = new Map<string, Array<{ partition: number; offset: string }>>();
     for (const { topic, partition, offset } of this.#underlying().assignment()) {
-      grouped.set(topic, [...(grouped.get(topic) ?? []), { partition, offset: offset?.toString() ?? "" }]);
+      grouped.set(topic, [
+        ...(grouped.get(topic) ?? []),
+        { partition, offset: offset?.toString() ?? "" },
+      ]);
     }
     return [...grouped].map(([topic, partitions]) => ({ topic, partitions }));
   }

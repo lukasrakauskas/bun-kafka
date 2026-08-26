@@ -2,11 +2,35 @@
   "name": "bun-kafka",
   "version": "0.2.0",
   "description": "Zero-dependency Kafka wire protocol client for Bun",
+  "keywords": [
+    "bun",
+    "client",
+    "consumer",
+    "kafka",
+    "kafkajs",
+    "producer",
+    "redpanda",
+    "typescript",
+    "wire-protocol"
+  ],
+  "homepage": "https://github.com/lukasrakauskas/bun-kafka#readme",
+  "bugs": "https://github.com/lukasrakauskas/bun-kafka/issues",
   "license": "MIT",
+  "author": "Lukas Rakauskas <rakauskaslukas123@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lukasrakauskas/bun-kafka.git"
+  },
+  "files": [
+    "index.ts",
+    "src/",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "type": "module",
   "module": "index.ts",
   "types": "index.ts",
-  "type": "module",
-  "packageManager": "bun@1.4.0",
   "exports": {
     ".": "./index.ts",
     "./kafkajs-compat": "./src/kafkajs-compat/index.ts"
@@ -20,15 +44,28 @@
     "test:chaos:mock": "bun test test/impl/chaos.test.ts",
     "test:chaos": "bun scripts/chaos.ts",
     "test:soak": "bun scripts/soak.ts",
+    "test:soak:release": "SOAK_DURATION_S=86400 SOAK_BURST_INTERVAL_S=3600 SOAK_BURST_S=600 bun scripts/soak.ts",
     "typecheck": "bunx tsc --noEmit",
+    "docs:build": "bun website/build.ts",
+    "docs:serve": "bun website/build.ts --serve",
     "bench": "bun scripts/bench-bun.ts",
-    "bench:build": "bun run scripts/build-benches.ts"
+    "bench:build": "bun run scripts/build-benches.ts",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check"
+  },
+  "devDependencies": {
+    "@oxlint/plugins": "1.80.0",
+    "@types/bun": "^1.4.0",
+    "eslint-plugin-sonarjs": "1.0.3",
+    "marked": "^18.0.11",
+    "oxfmt": "^0.65.0",
+    "oxlint": "^1.80.0",
+    "typescript": "^7.0.2"
   },
   "engines": {
     "bun": ">=1.4.0"
   },
-  "devDependencies": {
-    "@types/bun": "^1.4.0",
-    "typescript": "^7.0.2"
-  }
+  "packageManager": "bun@1.4.0"
 }

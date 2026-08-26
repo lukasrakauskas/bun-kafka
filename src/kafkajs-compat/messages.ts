@@ -1,6 +1,7 @@
 import type { ConsumedMessage } from "../types.ts";
 import { KafkaJSNonRetriableError } from "./errors.ts";
-import type { Partitioner, ProducerMessage } from "../bun/producer.ts";
+import type { Partitioner, PartitionerContext, ProducerMessage } from "../bun/producer.ts";
+import { isFunction, isNumber } from "../type-guards.ts";
 
 export interface KafkaJsMessage {
   key?: Buffer | string | null;
@@ -38,14 +39,17 @@ export type KafkaJsConsumedMessage = {
   leaderEpoch?: number | null;
 };
 
-export function toBunPartitioner(partitioner: unknown): Partitioner | undefined {
+type KafkaJsPartitioner =
+  | ((topic: string, count: number, key: Uint8Array | null) => number)
+  | { partition: (context: PartitionerContext) => number };
+
+export function toBunPartitioner(
+  partitioner: KafkaJsPartitioner | null | undefined,
+): Partitioner | undefined {
   if (!partitioner) return undefined;
-  if (typeof partitioner === "function") {
-    const fn = partitioner as (topic: string, count: number, key: Uint8Array | null) => number;
-    return ({ topic, partitionCount, key }) => fn(topic, partitionCount, key);
-  }
-  const obj = partitioner as { partition?: (ctx: unknown) => number };
-  if (typeof obj.partition === "function") return (ctx) => obj.partition!(ctx);
+  if (isFunction(partitioner))
+    return ({ topic, partitionCount, key }) => partitioner(topic, partitionCount, key);
+  if ("partition" in partitioner) return (context) => partitioner.partition(context);
   return undefined;
 }
 
@@ -54,7 +58,12 @@ export function toWireMessage(message: KafkaJsMessage): ProducerMessage {
   const wire: ProducerMessage = {
     value: message.value,
     key: message.key ?? null,
-    headers: (message.headers ?? {}) as ProducerMessage["headers"],
+    headers: Object.fromEntries(
+      Object.entries(message.headers ?? {}).map(([key, value]) => [
+        key,
+        isNumber(value) ? String(value) : (value ?? null),
+      ]),
+    ),
   };
   if (message.partition !== undefined) wire.partition = message.partition;
   if (message.timestamp !== undefined) wire.timestamp = Number(message.timestamp);
@@ -66,10 +75,13 @@ function toBuffer(value: Uint8Array | null | undefined): Buffer | null {
 }
 
 export function toKafkajsMessage(raw: ConsumedMessage): KafkaJsConsumedMessage {
-  const size = (raw.key?.byteLength ?? 0) + (raw.value?.byteLength ?? 0)
-    + Object.values(raw.headers ?? {}).reduce((sum, header) => sum + (header?.byteLength ?? 0), 0);
+  const size =
+    (raw.key?.byteLength ?? 0) +
+    (raw.value?.byteLength ?? 0) +
+    Object.values(raw.headers ?? {}).reduce((sum, header) => sum + (header?.byteLength ?? 0), 0);
   const headers: Record<string, Buffer | undefined> = {};
-  for (const [name, value] of Object.entries(raw.headers ?? {})) headers[name] = value == null ? undefined : Buffer.from(value);
+  for (const [name, value] of Object.entries(raw.headers ?? {}))
+    headers[name] = value == null ? undefined : Buffer.from(value);
   return {
     key: toBuffer(raw.key),
     value: toBuffer(raw.value),

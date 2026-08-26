@@ -29,22 +29,26 @@ export async function waitFor<T>(
   while (Date.now() - start < timeoutMs) {
     try {
       const value = await fn();
-      if (value) return value as T;
+      if (value !== undefined) return value;
     } catch (error) {
       lastErr = error;
     }
     await Bun.sleep(intervalMs);
   }
-  throw new Error(`waitFor timed out after ${timeoutMs}ms${lastErr ? `: ${lastErr}` : ""}`);
+  const detail = lastErr ? `: ${lastErr}` : "";
+  throw new Error(`waitFor timed out after ${timeoutMs}ms${detail}`);
 }
 
 export async function waitTopic(name: string, timeoutMs = 15_000) {
   const client = admin();
   try {
-    return await waitFor(async () => {
-      const metadata = await client.metadata([name]);
-      return metadata.topics.find((item) => item.name === name && item.partitions.length) ?? null;
-    }, { timeoutMs, intervalMs: 150 });
+    return await waitFor(
+      async () => {
+        const metadata = await client.metadata([name]);
+        return metadata.topics.find((item) => item.name === name && item.partitions.length) ?? null;
+      },
+      { timeoutMs, intervalMs: 150 },
+    );
   } finally {
     await client.close();
   }

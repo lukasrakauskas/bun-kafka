@@ -12,18 +12,18 @@ Therefore, the current safe promise is **bounded failure**, not seamless recover
 
 ## Current expected behavior
 
-| Event | Current expected result |
-|---|---|
-| Bootstrap broker is unavailable | Metadata tries the next configured or known broker. |
-| Active socket closes | All active requests on that socket reject. |
-| Same broker returns before the next request | A later request can open a new socket. |
-| Partition leader moves | Produce and Fetch refresh metadata and retry within the configured budget. |
-| Produce response is lost | Idempotent mode reuses the partition sequence; default mode can create a duplicate. |
-| Broker accepts Produce but response is lost | The Promise rejects or times out; the record can still exist. |
-| Consumer Fetch fails | `fetch()` retries retriable failures, then rejects when its budget is exhausted. |
-| Connected broker stays silent | The request rejects after `requestTimeoutMs`. |
-| New TCP connection is blackholed | `connectTimeoutMs` rejects the connection attempt. |
-| Response is malformed or too large | The connection rejects the response. |
+| Event                                       | Current expected result                                                             |
+| ------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Bootstrap broker is unavailable             | Metadata tries the next configured or known broker.                                 |
+| Active socket closes                        | All active requests on that socket reject.                                          |
+| Same broker returns before the next request | A later request can open a new socket.                                              |
+| Partition leader moves                      | Produce and Fetch refresh metadata and retry within the configured budget.          |
+| Produce response is lost                    | Idempotent mode reuses the partition sequence; default mode can create a duplicate. |
+| Broker accepts Produce but response is lost | The Promise rejects or times out; the record can still exist.                       |
+| Consumer Fetch fails                        | `fetch()` retries retriable failures, then rejects when its budget is exhausted.    |
+| Connected broker stays silent               | The request rejects after `requestTimeoutMs`.                                       |
+| New TCP connection is blackholed            | `connectTimeoutMs` rejects the connection attempt.                                  |
+| Response is malformed or too large          | The connection rejects the response.                                                |
 
 Do not describe idempotent Produce as qualified until its broker-failure chaos gates pass.
 
@@ -188,11 +188,11 @@ Run this test for Produce, Fetch, Metadata, and ListOffsets on an established co
 
 Run these profiles with `tc netem`:
 
-| Profile | Delay | Jitter | Loss |
-|---|---:|---:|---:|
-| Local degradation | 10 ms | 2 ms | 0.1% |
-| Regional network | 50 ms | 10 ms | 0.5% |
-| Severe degradation | 200 ms | 50 ms | 2% |
+| Profile            |  Delay | Jitter | Loss |
+| ------------------ | -----: | -----: | ---: |
+| Local degradation  |  10 ms |   2 ms | 0.1% |
+| Regional network   |  50 ms |  10 ms | 0.5% |
+| Severe degradation | 200 ms |  50 ms |   2% |
 
 Pass conditions:
 

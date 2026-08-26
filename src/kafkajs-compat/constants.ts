@@ -9,13 +9,19 @@ export const CompressionTypes = {
 } as const;
 
 /** Registry kept for kafkajs API parity; bun-kafka ships all five codecs natively. */
-export const CompressionCodecs: Record<number, unknown> = {};
+export const CompressionCodecs: Record<number, never> = {};
 
 /** bun-kafka produces Java-compatible murmur2 partitioning natively. */
 export const Partitioners = {
-  DefaultPartitioner: () => ({ partition: (ctx: { partitionCount: number }) => Math.floor(Math.random() * ctx.partitionCount) }),
-  JavaCompatiblePartitioner: () => ({ partition: (ctx: { partitionCount: number }) => Math.floor(Math.random() * ctx.partitionCount) }),
-  LegacyPartitioner: () => ({ partition: (ctx: { partitionCount: number }) => Math.floor(Math.random() * ctx.partitionCount) }),
+  DefaultPartitioner: () => ({
+    partition: (ctx: { partitionCount: number }) => Math.floor(Math.random() * ctx.partitionCount),
+  }),
+  JavaCompatiblePartitioner: () => ({
+    partition: (ctx: { partitionCount: number }) => Math.floor(Math.random() * ctx.partitionCount),
+  }),
+  LegacyPartitioner: () => ({
+    partition: (ctx: { partitionCount: number }) => Math.floor(Math.random() * ctx.partitionCount),
+  }),
 };
 
 export const logLevel = { NOTHING: 0, ERROR: 1, WARN: 2, INFO: 3, DEBUG: 4 } as const;
@@ -57,7 +63,13 @@ export const AclOperationTypes = {
 
 export const AclPermissionTypes = { UNKNOWN: 0, ANY: 1, DENY: 2, ALLOW: 3 } as const;
 
-export const ResourcePatternTypes = { UNKNOWN: 0, ANY: 1, MATCH: 2, LITERAL: 3, PREFIXED: 4 } as const;
+export const ResourcePatternTypes = {
+  UNKNOWN: 0,
+  ANY: 1,
+  MATCH: 2,
+  LITERAL: 3,
+  PREFIXED: 4,
+} as const;
 
 export const CONSUMER_EVENTS = {
   CONNECT: "consumer.connect",

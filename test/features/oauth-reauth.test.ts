@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
 import { Writer } from "../../src/bun/protocol.ts";
 
-const apiVersions = () => new Writer().i16(0).array(Array.from({ length: 64 }, (_, key) => key), (writer, key) => writer.i16(key).i16(0).i16(20));
+const apiVersions = () =>
+  new Writer().i16(0).array(
+    Array.from({ length: 64 }, (_, key) => key),
+    (writer, key) => writer.i16(key).i16(0).i16(20),
+  );
 
 describe("SASL OAUTHBEARER reauthentication", () => {
   test("re-authenticates before the advertised session lifetime elapses", async () => {
@@ -18,8 +22,10 @@ describe("SASL OAUTHBEARER reauthentication", () => {
           if (key === 36) authEvents.push(Date.now());
           let body: Writer;
           if (key === 18) body = apiVersions();
-          else if (key === 17) body = new Writer().i16(0).array(["OAUTHBEARER"], (writer, m) => writer.string(m));
-          else if (key === 36) body = new Writer().i16(0).string(null).bytes(new Uint8Array()).i64(500); // lifetime 500ms
+          else if (key === 17)
+            body = new Writer().i16(0).array(["OAUTHBEARER"], (writer, m) => writer.string(m));
+          else if (key === 36)
+            body = new Writer().i16(0).string(null).bytes(new Uint8Array()).i64(500); // lifetime 500ms
           else body = metadataBody(listener.port);
           const response = new Writer().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
@@ -29,10 +35,25 @@ describe("SASL OAUTHBEARER reauthentication", () => {
     });
     function metadataBody(port: number) {
       return new Writer()
-        .array([{ id: 1, host: "127.0.0.1", port }], (writer, b) => writer.i32(b.id).string(b.host).i32(b.port).string(null))
+        .array([{ id: 1, host: "127.0.0.1", port }], (writer, b) =>
+          writer.i32(b.id).string(b.host).i32(b.port).string(null),
+        )
         .string(null)
         .i32(1)
-        .array([{ name: "events" }], (writer, item) => writer.i16(0).string(item.name).bool(false).array([0], (pw) => pw.i16(0).i32(0).i32(1).array([1], (w) => w.i32(1)).array([1], (w) => w.i32(1))));
+        .array([{ name: "events" }], (writer, item) =>
+          writer
+            .i16(0)
+            .string(item.name)
+            .bool(false)
+            .array([0], (pw) =>
+              pw
+                .i16(0)
+                .i32(0)
+                .i32(1)
+                .array([1], (w) => w.i32(1))
+                .array([1], (w) => w.i32(1)),
+            ),
+        );
     }
     let tokenCounter = 0;
     const kafka = new Kafka({

@@ -8,7 +8,7 @@
 
 const XERIAL_HEADER = new Uint8Array([0x82, 0x53, 0x4e, 0x41, 0x50, 0x50, 0x59, 0x00]);
 
-function readVarint(input: Uint8Array, offset: number): { value: number; offset: number } {
+function readVarint(input: Uint8Array, offset: number) {
   let value = 0;
   let shift = 0;
   while (true) {
@@ -36,7 +36,8 @@ export function snappyDecompressBlock(input: Uint8Array): Uint8Array {
         for (let i = 0; i < extra; i++) len |= input[offset++]! << (8 * i);
       }
       len++;
-      if (offset + len > input.byteLength || pos + len > length) throw new RangeError("Invalid snappy literal");
+      if (offset + len > input.byteLength || pos + len > length)
+        throw new RangeError("Invalid snappy literal");
       output.set(input.subarray(offset, offset + len), pos);
       offset += len;
       pos += len;
@@ -53,7 +54,11 @@ export function snappyDecompressBlock(input: Uint8Array): Uint8Array {
       offset += 2;
     } else {
       len = (tag >> 2) + 1;
-      back = input[offset]! | (input[offset + 1]! << 8) | (input[offset + 2]! << 16) | (input[offset + 3]! << 24);
+      back =
+        input[offset]! |
+        (input[offset + 1]! << 8) |
+        (input[offset + 2]! << 16) |
+        (input[offset + 3]! << 24);
       offset += 4;
     }
     if (back <= 0 || back > pos || pos + len > length) throw new RangeError("Invalid snappy copy");
@@ -76,7 +81,13 @@ function writeVarint(output: Uint8Array, at: number, value: number): number {
   return at;
 }
 
-function emitLiteral(output: Uint8Array, at: number, input: Uint8Array, from: number, count: number): number {
+function emitLiteral(
+  output: Uint8Array,
+  at: number,
+  input: Uint8Array,
+  from: number,
+  count: number,
+): number {
   if (!count) return at;
   if (count <= 60) {
     output[at++] = (count - 1) << 2;
@@ -140,13 +151,20 @@ export function snappyCompressBlock(input: Uint8Array): Uint8Array {
   let pos = 0;
   let literalsFrom = 0;
   while (pos + 3 < n) {
-    const v = input[pos]! | (input[pos + 1]! << 8) | (input[pos + 2]! << 16) | (input[pos + 3]! << 24);
-    const h = ((Math.imul(v, 0x1e35a7bd) >>> shift) & (tableSize - 1));
+    const v =
+      input[pos]! | (input[pos + 1]! << 8) | (input[pos + 2]! << 16) | (input[pos + 3]! << 24);
+    const h = (Math.imul(v, 0x1e35a7bd) >>> shift) & (tableSize - 1);
     const candidate: number | undefined = table[h];
     table[h] = pos;
-    if (candidate !== undefined && candidate !== -1 && pos - candidate < 65536
-      && input[candidate]! === input[pos]! && input[candidate + 1]! === input[pos + 1]!
-      && input[candidate + 2]! === input[pos + 2]! && input[candidate + 3]! === input[pos + 3]!) {
+    if (
+      candidate !== undefined &&
+      candidate !== -1 &&
+      pos - candidate < 65536 &&
+      input[candidate]! === input[pos]! &&
+      input[candidate + 1]! === input[pos + 1]! &&
+      input[candidate + 2]! === input[pos + 2]! &&
+      input[candidate + 3]! === input[pos + 3]!
+    ) {
       at = emitLiteral(output, at, input, literalsFrom, pos - literalsFrom);
       let len = 4;
       while (pos + len < n && input[candidate + len] === input[pos + len]) len++;
@@ -176,7 +194,8 @@ export function snappyCompress(input: Uint8Array): Uint8Array {
 
 /** Decompress Kafka's xerial-framed Snappy format (also accepts bare blocks). */
 export function snappyDecompress(input: Uint8Array): Uint8Array {
-  if (input.byteLength < XERIAL_HEADER.byteLength + 8) throw new RangeError("Snappy payload is truncated");
+  if (input.byteLength < XERIAL_HEADER.byteLength + 8)
+    throw new RangeError("Snappy payload is truncated");
   for (let i = 0; i < XERIAL_HEADER.byteLength; i++) {
     if (input[i] !== XERIAL_HEADER[i]) return snappyDecompressBlock(input);
   }
@@ -187,7 +206,8 @@ export function snappyDecompress(input: Uint8Array): Uint8Array {
   while (offset + 4 <= input.byteLength) {
     const chunkLength = view.getUint32(offset);
     offset += 4;
-    if (chunkLength > input.byteLength - offset) throw new RangeError("Invalid xerial chunk length");
+    if (chunkLength > input.byteLength - offset)
+      throw new RangeError("Invalid xerial chunk length");
     chunks.push(snappyDecompressBlock(input.subarray(offset, offset + chunkLength)));
     offset += chunkLength;
   }

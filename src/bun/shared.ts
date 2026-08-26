@@ -25,6 +25,7 @@ export {
   API_FETCH,
   API_FIND_COORDINATOR,
   API_HEARTBEAT,
+  API_INCREMENTAL_ALTER_CONFIGS,
   API_INIT_PRODUCER_ID,
   API_JOIN_GROUP,
   API_LEAVE_GROUP,
@@ -53,6 +54,7 @@ const API_DELETE_TOPICS = 20;
 const API_CREATE_PARTITIONS = 37;
 const API_DESCRIBE_CONFIGS = 32;
 const API_ALTER_CONFIGS = 33;
+const API_INCREMENTAL_ALTER_CONFIGS = 44;
 const API_FIND_COORDINATOR = 10;
 const API_JOIN_GROUP = 11;
 const API_SYNC_GROUP = 14;
@@ -81,10 +83,15 @@ const API_ADD_OFFSETS_TO_TXN = 25;
 const API_END_TXN = 26;
 const API_TXN_OFFSET_COMMIT = 28;
 
-const retriableErrors = new Set([1, 2, 3, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 19, 20, 25, 27, 32, 33, 38, 39, 41, 44, 45, 47, 49, 56, 70, 71, 74, 75, 78, 82, 86, 88, 89]);
+const retriableErrors = new Set([
+  1, 2, 3, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 19, 20, 25, 27, 32, 33, 38, 39, 41, 44, 45, 47, 49,
+  56, 70, 71, 74, 75, 78, 82, 86, 88, 89,
+]);
 
 function kafkaError(code: number, context: string, detail?: string | null): KafkaError {
-  const label = detail ? `${context}: ${kafkaErrorName(code)} (${detail})` : `${context}: ${kafkaErrorName(code)}`;
+  const label = detail
+    ? `${context}: ${kafkaErrorName(code)} (${detail})`
+    : `${context}: ${kafkaErrorName(code)}`;
   return new KafkaError(code, label, {
     retriable: retriableErrors.has(code),
     fatal: code === 58 || code === 34,
@@ -92,7 +99,8 @@ function kafkaError(code: number, context: string, detail?: string | null): Kafk
 }
 
 function address(host: string, port: number): string {
-  return `${host.includes(":") ? `[${host}]` : host}:${port}`;
+  const formattedHost = host.includes(":") ? `[${host}]` : host;
+  return `${formattedHost}:${port}`;
 }
 
 function partitionKey(topic: string, partition: number): string {

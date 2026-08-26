@@ -1,12 +1,20 @@
 import { Cluster } from "../bun/cluster.ts";
+import type { BunKafkaSasl } from "../bun/connection.ts";
 import { KafkaJSNonRetriableError } from "./errors.ts";
-
+import { hasStringValue, isFunction, isString } from "../type-guards.ts";
+import type { CompatOptions } from "./types.ts";
 export interface KafkaConfig {
   clientId?: string;
   brokers: string[] | (() => string[] | Promise<string[]>);
-  ssl?: boolean | Record<string, unknown>;
-  sasl?: Record<string, any>;
-  retry?: { maxRetryTime?: number; initialRetryTime?: number; factor?: number; multiplier?: number; retries?: number };
+  ssl?: boolean | Bun.TLSOptions;
+  sasl?: CompatOptions;
+  retry?: {
+    maxRetryTime?: number;
+    initialRetryTime?: number;
+    factor?: number;
+    multiplier?: number;
+    retries?: number;
+  };
   logLevel?: number;
   logCreator?: (entry: import("./logger.ts").LoggerEntry) => void;
   connectionTimeout?: number;
@@ -17,40 +25,54 @@ export interface KafkaConfig {
 
 export interface MappedConfig {
   clientId: string;
-  tls?: Record<string, unknown>;
-  sasl?: Record<string, any>;
+  tls?: Bun.TLSOptions;
+  sasl?: BunKafkaSasl;
   requestTimeoutMs: number;
   connectTimeoutMs: number;
   retry: { maxRetries: number; initialBackoffMs: number; maxBackoffMs: number };
 }
 
-export function mapConfig(config: KafkaConfig, brokers: string[]): ConstructorParameters<typeof Cluster>[0] {
+export function mapConfig(
+  config: KafkaConfig,
+  brokers: string[],
+): MappedConfig & { brokers: string[] } {
   const saslConfig = config.sasl;
-  if (saslConfig?.mechanism !== undefined
-    && !["plain", "scram-sha-256", "scram-sha-512", "oauthbearer"].includes(String(saslConfig.mechanism))) {
-    throw new KafkaJSNonRetriableError(`SASL mechanism ${saslConfig.mechanism} is not supported by bun-kafka`);
+  const mechanism = saslConfig?.mechanism;
+  if (
+    mechanism !== undefined &&
+    (!isString(mechanism) ||
+      !["plain", "scram-sha-256", "scram-sha-512", "oauthbearer"].includes(mechanism))
+  ) {
+    throw new KafkaJSNonRetriableError(
+      `SASL mechanism ${String(mechanism)} is not supported by bun-kafka`,
+    );
   }
-  let token: unknown = saslConfig?.oauthBearerToken ?? saslConfig?.token;
-  if (!token && typeof saslConfig?.oauthBearerProvider === "function") {
+  const configuredToken = saslConfig?.oauthBearerToken ?? saslConfig?.token;
+  let token = isString(configuredToken) ? configuredToken : undefined;
+  const provider = saslConfig?.oauthBearerProvider;
+  if (!token && isFunction(provider)) {
     // kafkajs providers resolve to { value: token }; accept both shapes.
     token = async () => {
-      const resolved = await (saslConfig.oauthBearerProvider as () => unknown)();
-      return typeof resolved === "string" ? resolved : (resolved as { value?: string }).value;
+      const resolved = await provider();
+      return isString(resolved) ? resolved : hasStringValue(resolved) ? (resolved.value ?? "") : "";
     };
   }
-  const sasl = saslConfig
-    ? {
-        mechanism: saslConfig.mechanism,
-        username: saslConfig.username,
-        password: saslConfig.password,
-        token,
-      }
-    : undefined;
+  let sasl: BunKafkaSasl | undefined;
+  if (mechanism === "plain" || mechanism === "scram-sha-256" || mechanism === "scram-sha-512") {
+    const username = saslConfig && isString(saslConfig.username) ? saslConfig.username : undefined;
+    const password = saslConfig && isString(saslConfig.password) ? saslConfig.password : undefined;
+    if (username === undefined || password === undefined) {
+      throw new KafkaJSNonRetriableError(`${mechanism} SASL requires username and password`);
+    }
+    sasl = { mechanism, username, password };
+  } else if (mechanism === "oauthbearer" && token) {
+    sasl = { mechanism, token };
+  }
   return {
     brokers,
     clientId: config.clientId ?? "kafkajs",
-    tls: (config.ssl === true ? {} : config.ssl || undefined) as never,
-    sasl: sasl as never,
+    tls: config.ssl === true ? {} : config.ssl || undefined,
+    sasl,
     requestTimeoutMs: config.requestTimeout ?? 30_000,
     connectTimeoutMs: Math.max(config.connectionTimeout ?? 1_000, 1_000),
     retry: {
@@ -62,8 +84,9 @@ export function mapConfig(config: KafkaConfig, brokers: string[]): ConstructorPa
 }
 
 /** @confluentinc/kafka-javascript nests real options under `kafkaJS`; accept both shapes. */
-export function unwrapKafkaJs<T>(options: T & { kafkaJS?: T } | undefined): T {
-  return ((options as { kafkaJS?: T })?.kafkaJS ?? options) as T;
+export function unwrapKafkaJs<T>(options: (T & { kafkaJS?: T }) | undefined): T {
+  if (options === undefined) throw new TypeError("KafkaJS options are required");
+  return options.kafkaJS ?? options;
 }
 
 export type ClusterGetter = {
@@ -87,8 +110,10 @@ export class ClusterHub {
 
   resolve(): Promise<MappedConfig & { brokers: string[] }> {
     this.#mapped ??= (async () => {
-      const brokers = typeof this.config.brokers === "function" ? await this.config.brokers() : this.config.brokers;
-      return { ...(mapConfig(this.config, brokers) as MappedConfig), brokers };
+      const brokers = isFunction(this.config.brokers)
+        ? await this.config.brokers()
+        : this.config.brokers;
+      return mapConfig(this.config, brokers);
     })();
     return this.#mapped;
   }
@@ -100,8 +125,13 @@ export class ClusterHub {
 
   sync(): Cluster {
     if (!this.#cluster) {
-      const mapped = typeof this.config.brokers === "function" ? undefined : mapConfig(this.config, this.config.brokers);
-      if (!mapped) throw new KafkaJSNonRetriableError("Broker list is resolving asynchronously; await an async method first");
+      const mapped = isFunction(this.config.brokers)
+        ? undefined
+        : mapConfig(this.config, this.config.brokers);
+      if (!mapped)
+        throw new KafkaJSNonRetriableError(
+          "Broker list is resolving asynchronously; await an async method first",
+        );
       this.#cluster = new Cluster(mapped);
     }
     return this.#cluster;
