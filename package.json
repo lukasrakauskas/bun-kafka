@@ -2,7 +2,8 @@
   "name": "bun-kafka-monorepo",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
     "test": "bun run --cwd packages/kafka test",
