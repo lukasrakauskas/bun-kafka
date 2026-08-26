@@ -1,4 +1,7 @@
-# Bun-native benchmark
+---
+title: Benchmarks
+description: Bun-native benchmark
+---
 
 Measured with Bun 1.4.0, TypeScript 7.0.2, hyperfine 1.20.0, Go 1.27.0, Rust 1.93.1, and local Redpanda 25.2.1 on 2026-08-24.
 

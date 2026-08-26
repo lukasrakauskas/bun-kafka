@@ -8,6 +8,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    working-directory: packages/kafka
+
 jobs:
   static:
     runs-on: ubuntu-latest
@@ -17,6 +21,7 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
+        working-directory: .
       - run: bun run lint
       - run: bun run format:check
       - run: bunx tsc --noEmit
@@ -30,6 +35,7 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
+        working-directory: .
       - run: bun run test
       # threshold enforced via [test] coverageThreshold in bunfig.toml
       - run: bun run test:coverage
@@ -45,9 +51,11 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
+        working-directory: .
       # HANDOFF.md dev-container recipe; a service container cannot override
       # CMD to pass `redpanda start --mode dev-container --advertise-kafka-addr`
       - name: Start Redpanda (single node)
+        working-directory: .
         run: |
           docker run -d --name redpanda --ulimit nofile=65536:65536 -p 9092:9092 \
             redpandadata/redpanda:v24.3.7 \
@@ -55,6 +63,7 @@ jobs:
             --kafka-addr=PLAINTEXT://0.0.0.0:9092 \
             --advertise-kafka-addr=PLAINTEXT://127.0.0.1:9092
       - name: Wait for broker health
+        working-directory: .
         run: |
           for i in $(seq 1 60); do
             docker exec redpanda rpk cluster health 2>/dev/null | grep -Eq 'Healthy:\s*true' && exit 0
@@ -64,6 +73,7 @@ jobs:
           docker logs redpanda
           exit 1
       - name: Single-node internal topic replication factor + restart (HANDOFF.md)
+        working-directory: .
         run: |
           docker exec redpanda rpk cluster config set internal_topic_replication_factor 1
           docker restart redpanda
@@ -86,4 +96,20 @@ jobs:
         with:
           bun-version: 1.4.0
       - run: bun install --frozen-lockfile
+        working-directory: .
       - run: bun run test:chaos:mock
+
+  docs:
+    needs: static
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/docs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - run: bun run build

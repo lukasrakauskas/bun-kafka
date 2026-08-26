@@ -1,7 +1,7 @@
 /**
  * Long-running soak test harness for bun-kafka.
  *
- * Implements the measurement requirements from docs/performance-validation.md:
+ * Implements the measurement requirements from performance-validation.md (docs site):
  * one long-running Bun process that produces at a configurable offered rate,
  * drains with a consumer, samples metrics every SOAK_SAMPLE_INTERVAL_S seconds,
  * injects periodic bursts at a higher rate, validates a per-partition sequence

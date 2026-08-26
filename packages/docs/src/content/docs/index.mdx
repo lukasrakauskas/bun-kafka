@@ -1,0 +1,35 @@
+---
+title: bun-kafka
+description: Zero-dependency Kafka wire protocol client for Bun
+template: splash
+hero:
+  tagline: A zero-dependency Kafka client for Bun. Pure TypeScript over `Bun.connect()` — no JVM, no librdkafka, no proxy.
+  actions:
+    - text: Get started
+      link: /guide/getting-started
+      icon: right-arrow
+    - text: npm install bun-kafka
+      link: /guide/getting-started#install
+      icon: download
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+<CardGrid stagger>
+  <Card title="Produce" color="amber">
+    Idempotent or transactional batches with acks 0/1/all, four compression codecs, and per-message
+    delivery callbacks.
+  </Card>
+  <Card title="Consume" color="green">
+    Consumer groups with eager or cooperative-sticky assignment, incremental fetch sessions,
+    zero-copy payloads.
+  </Card>
+  <Card title="Administer" color="blue">
+    Topics, partitions, configs (incremental), groups, quotas, ACLs, and delegation tokens — typed
+    end to end.
+  </Card>
+  <Card title="Verify" color="purple">
+    Mock-broker suites, three-broker chaos qualification, and release-gate soak evidence in the
+    repo.
+  </Card>
+</CardGrid>

@@ -1,4 +1,7 @@
-# Gap audit versus other Kafka clients
+---
+title: Gap audit versus other clients
+description: Gap audit versus other Kafka clients
+---
 
 A line-by-line look at what kafkajs (pure JS), node-rdkafka (librdkafka binding), and franz-go
 (Go) can do that bun-kafka cannot, with an explicit disposition for every finding. Companion to
