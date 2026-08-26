@@ -115,7 +115,7 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 This repository is a Bun monorepo:
 
 - `packages/kafka` — the `bun-kafka` library (source, tests, benches, scripts)
-- `packages/docs` — the Starlight documentation site
+- `apps/docs` — the Starlight documentation site
 
 Run package commands through their scripts from the repository root, e.g.
 `bun run test`, `bun run lint`, `bun run typecheck` (they delegate with

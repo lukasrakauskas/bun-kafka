@@ -147,23 +147,23 @@ The fixed API versions require Kafka 0.11 or newer. Use a current Kafka or Redpa
 ## Documentation
 
 Guides and reference pages live in the Starlight site under
-[packages/docs](../docs/src/content/docs/guide/getting-started.md):
+[apps/docs](../apps/docs/src/content/docs/guide/getting-started.md):
 
 ```bash
 bun install          # from the repository root (workspace install)
 bun run docs:dev     # starlight dev server
-bun run docs:build   # static build into packages/docs/dist
+bun run docs:build   # static build into apps/docs/dist
 ```
 
 Readiness documentation:
 
-- [Getting started guide](../docs/src/content/docs/guide/getting-started.md)
-- [Recorded benchmarks](../docs/src/content/docs/benchmarks.md)
-- [Performance validation and soak tests](../docs/src/content/docs/performance-validation.md)
-- [Broker failure and chaos testing](../docs/src/content/docs/chaos-testing.md)
-- [Kafka feature completeness and client comparison](../docs/src/content/docs/feature-completeness.md)
-- [Kafka versions, APIs, and KIPs mapped to this client](../docs/src/content/docs/kafka-versions-and-kips.md)
-- [Gap audit versus kafkajs / node-rdkafka / franz-go](../docs/src/content/docs/client-gap-audit.md)
+- [Getting started guide](../apps/docs/src/content/docs/guide/getting-started.md)
+- [Recorded benchmarks](../apps/docs/src/content/docs/benchmarks.md)
+- [Performance validation and soak tests](../apps/docs/src/content/docs/performance-validation.md)
+- [Broker failure and chaos testing](../apps/docs/src/content/docs/chaos-testing.md)
+- [Kafka feature completeness and client comparison](../apps/docs/src/content/docs/feature-completeness.md)
+- [Kafka versions, APIs, and KIPs mapped to this client](../apps/docs/src/content/docs/kafka-versions-and-kips.md)
+- [Gap audit versus kafkajs / node-rdkafka / franz-go](../apps/docs/src/content/docs/client-gap-audit.md)
 
 The native client has short-run benchmark evidence, a passing three-broker chaos qualification (`out/chaos/`), and a passing 30-minute soak run (`out/soak/`). The 24-hour release soak gates defined in the performance validation doc remain outstanding.
 
@@ -182,7 +182,7 @@ Tests are split by scope: `test/unit/` (wire protocol primitives), `test/feature
 
 ## Soak
 
-`SOAK_DURATION_S=1800 SOAK_RATE=1000 bun run test:soak` runs one long-lived Bun process that produces at a fixed offered rate, drains with a consumer, samples latency/memory/socket/CPU metrics every 10 seconds, injects periodic bursts, validates per-partition sequence integrity, evaluates release-gate checks, and writes JSON and Markdown artifacts to `out/soak/`. See [performance validation](../docs/src/content/docs/performance-validation.md) for the full gate definitions.
+`SOAK_DURATION_S=1800 SOAK_RATE=1000 bun run test:soak` runs one long-lived Bun process that produces at a fixed offered rate, drains with a consumer, samples latency/memory/socket/CPU metrics every 10 seconds, injects periodic bursts, validates per-partition sequence integrity, evaluates release-gate checks, and writes JSON and Markdown artifacts to `out/soak/`. See [performance validation](../apps/docs/src/content/docs/performance-validation.md) for the full gate definitions.
 
 ## Releasing
 
@@ -190,7 +190,7 @@ Tests are split by scope: `test/unit/` (wire protocol primitives), `test/feature
 2. In CHANGELOG.md, rename `[Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and start a fresh `[Unreleased]` section.
 3. Tag `vX.Y.Z` and push the tag.
 
-A release requires green CI plus the soak gates defined in [performance validation](../docs/src/content/docs/performance-validation.md).
+A release requires green CI plus the soak gates defined in [performance validation](../apps/docs/src/content/docs/performance-validation.md).
 
 ## Benchmark
 
@@ -207,6 +207,6 @@ Results are written to:
 - `native/build/bun-native-hyperfine.md`
 - `native/build/bun-native-hyperfine.json`
 
-See [the recorded baseline](../docs/src/content/docs/benchmarks.md).
+See [the recorded baseline](../apps/docs/src/content/docs/benchmarks.md).
 
 The offline lanes process the same record count with one-record and 100-record batches. If `KAFKA_BROKERS` is set, hyperfine also runs a produce/consume broker round trip.

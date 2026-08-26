@@ -8,8 +8,8 @@
     "test": "bun run --cwd packages/kafka test",
     "lint": "bun run --cwd packages/kafka lint",
     "typecheck": "bun run --cwd packages/kafka typecheck",
-    "docs:dev": "bun run --cwd packages/docs dev",
-    "docs:build": "bun run --cwd packages/docs build",
-    "docs:preview": "bun run --cwd packages/docs preview"
+    "docs:dev": "bun run --cwd apps/docs dev",
+    "docs:build": "bun run --cwd apps/docs build",
+    "docs:preview": "bun run --cwd apps/docs preview"
   }
 }

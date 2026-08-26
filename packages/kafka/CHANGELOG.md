@@ -46,7 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - Repository restructured as a Bun monorepo: library in `packages/kafka`, documentation site in
-  `packages/docs` (Starlight); all guides and reference docs moved into the site's content
+  `apps/docs` (Starlight); all guides and reference docs moved into the site's content
 - Split the client god class into cluster/producer/consumer/admin modules
 - Reorganized tests into unit/features/impl scopes with coverage tracking
 
