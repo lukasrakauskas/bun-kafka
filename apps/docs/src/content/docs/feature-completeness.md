@@ -1,4 +1,7 @@
-# Kafka feature completeness
+---
+title: Feature completeness
+description: Kafka feature completeness
+---
 
 ## Verdict
 

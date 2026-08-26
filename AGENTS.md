@@ -110,7 +110,20 @@ bun --hot ./index.ts
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
 
+## Workspace layout
+
+This repository is a Bun monorepo:
+
+- `packages/kafka` — the `bun-kafka` library (source, tests, benches, scripts)
+- `apps/docs` — the Starlight documentation site
+
+Run package commands through their scripts from the repository root, e.g.
+`bun run test`, `bun run lint`, `bun run typecheck` (they delegate with
+`--cwd packages/kafka`). Docs: `bun run docs:build` / `docs:dev`. When running raw commands,
+target the owning package directory (`cd packages/kafka && bun test test/unit`).
+
 ## Linting and formatting
 
-- After making code changes, run `bunx oxlint --fix`, then run `bunx oxfmt`.
-- Before finishing, run `bunx oxlint --deny-warnings --format=agent`.
+- After making code changes, run `bunx oxlint --fix`, then run `bunx oxfmt` inside the changed
+  package (the oxlint/oxfmt config lives in `packages/kafka`).
+- Before finishing, run `bunx oxlint --deny-warnings --format=agent` in that package.

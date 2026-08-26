@@ -1,4 +1,7 @@
-# Kafka versions, wire APIs, and KIPs — mapped to bun-kafka
+---
+title: Kafka versions and KIPs
+description: Kafka versions, wire APIs, and KIPs — mapped to bun-kafka
+---
 
 This document is written for engineers who are new to Kafka. It explains how Kafka
 versions and its improvement proposals (KIPs) relate to the wire protocol this client

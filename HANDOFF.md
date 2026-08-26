@@ -1,6 +1,6 @@
 # bun-kafka feature completion — DONE
 
-All features listed in docs/feature-completeness.md are implemented and tested.
+All features listed in apps/docs/src/content/docs/feature-completeness.md are implemented and tested.
 
 ## Release-prep cycle (2026-08-26)
 
@@ -28,7 +28,7 @@ Work streams, each on its own branch off `feat/oxlint-oxfmt-with-custom-rules` a
 Gates at merge time: oxlint --deny-warnings clean, oxfmt clean, tsc clean, 68/68 tests pass.
 
 Remaining before tagging a release: the live 24-hour soak finishes ~2026-08-26 12:20 UTC — run
-the wrap-up checklist below, then flip the status lines in docs/performance-validation.md.
+the wrap-up checklist below, then flip the status lines in apps/docs/src/content/docs/performance-validation.md.
 
 ## Completed (commits e46f149..HEAD)
 
@@ -43,15 +43,15 @@ the wrap-up checklist below, then flip the status lines in docs/performance-vali
   forgotten_topics_data, UNKNOWN_SESSION/EPOCH recovery.
 - Cooperative-sticky assignor (KIP-429): subscription v1 owned partitions, sticky leader
   assignment up to fair share, retained in-memory positions across rebalances.
-- Docs updated: README matrix + docs/feature-completeness.md.
+- Docs updated: README matrix + apps/docs/src/content/docs/feature-completeness.md.
 
 ## Qualification evidence (2026-08-25)
 
 - Three-broker chaos suite passes end to end (18 pass / 0 fail), including the
   blackholed-leader pause/resume scenario that needed a bounded recovery window after a
   raft leader election during the pause. Artifacts in out/chaos/.
-- Long-running soak harness added at scripts/soak.ts (`bun run test:soak`): samples every
-  required metric per docs/performance-validation.md every 10 s, injects bursts, validates a
+- Long-running soak harness added at scripts/soak.ts (`bun run test:soak` (from packages/kafka)): samples every
+  required metric per apps/docs/src/content/docs/performance-validation.md every 10 s, injects bursts, validates a
   per-partition sequence oracle, evaluates release gates, and writes JSON+MD artifacts to
   out/soak/. BunProducer exposes `queuedMessages` for the queue-depth gate.
 - Recorded passing soak: 30 min at 1,000 msg/s of 1 KiB acks=all across 6 partitions with
@@ -68,7 +68,7 @@ Started 2026-08-25 ~12:15 UTC on the `feat/release-soak` tree (PR #14), detached
 
 Same as `bun run test:soak:release`. Profile: 86,400 s at 1,000 msg/s (1 KiB acks=all,
 6 partitions) with a 10-minute 150% burst every hour — the 24-hour gate profile from
-docs/performance-validation.md.
+apps/docs/src/content/docs/performance-validation.md.
 
 - Progress: `tail -f out/soak/release-24h.log`
 - Artifacts on completion: newest `out/soak/<timestamp>.{json,md}`
@@ -82,7 +82,7 @@ docs/performance-validation.md.
    p95/p99 drift within limits, lag recovery after every burst.
 2. Commit evidence: `out/` is gitignored, so `git add -f out/soak/release-24h.log` plus
    the final `<timestamp>.{json,md}` pair.
-3. Flip status in docs/performance-validation.md ("Current status" line and the soak
+3. Flip status in apps/docs/src/content/docs/performance-validation.md ("Current status" line and the soak
    sections) to 24-hour soak-proven with the run numbers; link the artifacts.
 4. Merge PR #14 (stacked on #13 → #12); issue #11 closes with it.
 5. Still outstanding afterwards: the 72-hour follow-up soak at 75 % of max stable rate,
@@ -101,4 +101,10 @@ Single-node Redpanda dev container `bun-kafka-dev` (image be202e716d34). Recreat
 The ulimit matters: the default FD limit makes topic creation fail with INVALID_PARTITIONS
 ("Can not increase partition count due to FD limit") after a few hundred test topics.
 
-Run everything: `bun test test/` (soak/three-broker chaos suites stay skipped by design).
+Run everything: `cd packages/kafka && bun test test/` (soak/three-broker chaos suites stay skipped by design).
+
+## Monorepo layout (2026-08-26)
+
+The library now lives in `packages/kafka`; markdown documentation moved to the Starlight site in
+`apps/docs/src/content/docs/`. Root scripts delegate with `--cwd`. The live soak writes to
+`out/soak/` at the repository root (unchanged, gitignored).

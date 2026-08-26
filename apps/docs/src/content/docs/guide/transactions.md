@@ -1,4 +1,7 @@
-# Transactions
+---
+title: Transactions
+description: Transactions
+---
 
 Kafka transactions let one producer write records to many partitions _and_ commit consumer
 offsets as a single all-or-nothing unit. Readers using `read_committed` never see aborted work.

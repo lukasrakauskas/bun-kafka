@@ -1,71 +1,16 @@
 {
-  "name": "bun-kafka",
-  "version": "0.2.0",
-  "description": "Zero-dependency Kafka wire protocol client for Bun",
-  "keywords": [
-    "bun",
-    "client",
-    "consumer",
-    "kafka",
-    "kafkajs",
-    "producer",
-    "redpanda",
-    "typescript",
-    "wire-protocol"
+  "name": "bun-kafka-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
   ],
-  "homepage": "https://github.com/lukasrakauskas/bun-kafka#readme",
-  "bugs": "https://github.com/lukasrakauskas/bun-kafka/issues",
-  "license": "MIT",
-  "author": "Lukas Rakauskas <rakauskaslukas123@gmail.com>",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/lukasrakauskas/bun-kafka.git"
-  },
-  "files": [
-    "index.ts",
-    "src/",
-    "LICENSE",
-    "README.md",
-    "CHANGELOG.md"
-  ],
-  "type": "module",
-  "module": "index.ts",
-  "types": "index.ts",
-  "exports": {
-    ".": "./index.ts",
-    "./kafkajs-compat": "./src/kafkajs-compat/index.ts"
-  },
   "scripts": {
-    "test": "bun test test/unit test/features",
-    "test:unit": "bun test test/unit",
-    "test:features": "bun test test/features",
-    "test:coverage": "bun test --coverage test/unit test/features",
-    "test:integration": "bun test test/impl/bun-integration.test.ts",
-    "test:chaos:mock": "bun test test/impl/chaos.test.ts",
-    "test:chaos": "bun scripts/chaos.ts",
-    "test:soak": "bun scripts/soak.ts",
-    "test:soak:release": "SOAK_DURATION_S=86400 SOAK_BURST_INTERVAL_S=3600 SOAK_BURST_S=600 bun scripts/soak.ts",
-    "typecheck": "bunx tsc --noEmit",
-    "docs:build": "bun website/build.ts",
-    "docs:serve": "bun website/build.ts --serve",
-    "bench": "bun scripts/bench-bun.ts",
-    "bench:build": "bun run scripts/build-benches.ts",
-    "lint": "oxlint",
-    "lint:fix": "oxlint --fix",
-    "format": "oxfmt",
-    "format:check": "oxfmt --check"
-  },
-  "devDependencies": {
-    "@oxlint/plugins": "1.80.0",
-    "@types/bun": "^1.4.0",
-    "eslint-plugin-sonarjs": "1.0.3",
-    "marked": "^18.0.11",
-    "oxfmt": "^0.65.0",
-    "oxlint": "^1.80.0",
-    "typescript": "^7.0.2"
-  },
-  "engines": {
-    "bun": ">=1.4.0"
-  },
-  "packageManager": "bun@1.4.0"
+    "test": "bun run --cwd packages/kafka test",
+    "lint": "bun run --cwd packages/kafka lint",
+    "typecheck": "bun run --cwd packages/kafka typecheck",
+    "docs:dev": "bun run --cwd apps/docs dev",
+    "docs:build": "bun run --cwd apps/docs build",
+    "docs:preview": "bun run --cwd apps/docs preview"
+  }
 }

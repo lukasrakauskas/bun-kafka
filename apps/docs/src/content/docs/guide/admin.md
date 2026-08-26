@@ -1,4 +1,7 @@
-# Administration
+---
+title: Administration
+description: Administration
+---
 
 All admin operations go through `kafka.admin()`:
 

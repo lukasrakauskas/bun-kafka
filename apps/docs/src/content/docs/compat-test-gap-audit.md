@@ -1,6 +1,9 @@
-# kafkajs-compat external suite results & test-gap audit
+---
+title: Compatibility test gap audit
+description: kafkajs-compat external suite results & test-gap audit
+---
 
-Companion to `docs/feature-completeness.md` (which tracks _implementation_
+Companion to `feature-completeness.md` (this site) (which tracks _implementation_
 coverage). This document records (a) what the external compatibility suites
 prove and (b) where bun-kafka's **own test suites** still have gaps against
 the full Kafka feature set.

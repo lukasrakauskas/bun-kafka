@@ -1,4 +1,7 @@
-# Migrating from kafkajs
+---
+title: Migrating from kafkajs
+description: Migrating from kafkajs
+---
 
 bun-kafka ships a drop-in-shaped compatibility layer so existing kafkajs code runs under Bun
 without a rewrite:

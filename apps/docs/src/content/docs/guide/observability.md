@@ -1,4 +1,7 @@
-# Observability and operations
+---
+title: Observability
+description: Observability and operations
+---
 
 ## Stats
 

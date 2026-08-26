@@ -1,4 +1,7 @@
-# Configuration reference
+---
+title: Configuration reference
+description: Configuration reference
+---
 
 ## Kafka options
 

@@ -1,4 +1,7 @@
-# Consuming
+---
+title: Consuming
+description: Consuming
+---
 
 ## Three ways to consume
 
