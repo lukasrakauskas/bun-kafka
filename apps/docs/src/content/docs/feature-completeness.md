@@ -14,7 +14,7 @@ The Bun-native client is a fast, zero-runtime-dependency implementation covering
 - Administer groups, records, ACLs, client quotas, and delegation tokens
 - Use TCP or TLS with PLAIN, SCRAM, or OAuth bearer authentication (with timed reauthentication)
 
-Remaining gaps are narrow: Kerberos/GSSAPI, proxy support, and long-run soak/chaos evidence.
+Remaining gaps are narrow: Kerberos/GSSAPI, proxy support, and 72-hour soak evidence.
 
 Use this document as a release snapshot. Other libraries can add or change features after this snapshot.
 
@@ -174,20 +174,20 @@ Each connection uses ApiVersions to verify that the broker supports the fixed re
 
 ### Reliability and operations
 
-| Feature                               | Status  | Notes                                                                                                                                                   |
-| ------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Typed Kafka errors                    | Yes     | Complete error-code catalog with code, fatal flag, and retriable flag                                                                                   |
-| Reconnect after socket close          | Partial | Retriable operations use a bounded retry policy; not all APIs recover coordinator or leader state                                                       |
-| Graceful producer flush               | Yes     | Queued sends flush on close; open transactions abort best-effort                                                                                        |
-| Graceful consumer close               | Yes     | Stops heartbeats and makes a best-effort LeaveGroup request                                                                                             |
-| Statistics callback                   | Yes     | `Connection.stats` counters, `Cluster.stats()`, and `statsIntervalMs` events                                                                            |
-| Request logging hooks                 | Yes     | Pluggable logger receives warn/info lines from retry, throttle, and auth paths                                                                          |
-| Metrics API                           | Partial | Counters exist; histograms do not                                                                                                                       |
-| OpenTelemetry hooks                   | No      | Use the logging hooks to bridge                                                                                                                         |
-| Broker throttle event                 | Yes     | Emitted through `KafkaOptions.onEvent`                                                                                                                  |
-| Health check API                      | Yes     | `healthCheck()` pings every broker via ApiVersions and reports latency/errors                                                                           |
-| Performance soak harness and evidence | Partial | `bun run test:soak` records all required measurements; a passing 30-minute run is recorded in `out/soak/`. The 24-hour release soak remains outstanding |
-| Chaos qualification                   | Yes     | Deterministic mock suite plus three-broker Docker chaos pass; results in `out/chaos/`                                                                   |
+| Feature                               | Status  | Notes                                                                                                                                                    |
+| ------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Typed Kafka errors                    | Yes     | Complete error-code catalog with code, fatal flag, and retriable flag                                                                                    |
+| Reconnect after socket close          | Partial | Retriable operations use a bounded retry policy; not all APIs recover coordinator or leader state                                                        |
+| Graceful producer flush               | Yes     | Queued sends flush on close; open transactions abort best-effort                                                                                         |
+| Graceful consumer close               | Yes     | Stops heartbeats and makes a best-effort LeaveGroup request                                                                                              |
+| Statistics callback                   | Yes     | `Connection.stats` counters, `Cluster.stats()`, and `statsIntervalMs` events                                                                             |
+| Request logging hooks                 | Yes     | Pluggable logger receives warn/info lines from retry, throttle, and auth paths                                                                           |
+| Metrics API                           | Partial | Counters exist; histograms do not                                                                                                                        |
+| OpenTelemetry hooks                   | No      | Use the logging hooks to bridge                                                                                                                          |
+| Broker throttle event                 | Yes     | Emitted through `KafkaOptions.onEvent`                                                                                                                   |
+| Health check API                      | Yes     | `healthCheck()` pings every broker via ApiVersions and reports latency/errors                                                                            |
+| Performance soak harness and evidence | Partial | `bun run test:soak` records all required measurements; the 30-minute and 24-hour release-profile runs pass. The 72-hour release soak remains outstanding |
+| Chaos qualification                   | Yes     | Deterministic mock suite plus three-broker Docker chaos pass; results in `out/chaos/`                                                                    |
 
 ## Comparison with other clients
 
@@ -243,7 +243,7 @@ Choose the Bun-native client when all these statements are true:
 Choose a more complete client when any of these statements are true:
 
 - The cluster requires Kerberos/GSSAPI.
-- The release requires existing soak and chaos evidence.
+- The release requires existing 72-hour soak evidence for changes that need that duration.
 
 ## Feature-complete milestones
 
@@ -259,7 +259,7 @@ Required features:
 - Chaos Gate A and Gate B completion
 - Twenty-four-hour performance soak
 
-Status: implemented; Gates A and B pass on the deterministic and three-broker suites. The soak duration beyond the recorded 30-minute run remains.
+Status: implemented; Gates A and B pass on the deterministic and three-broker suites, and the 24-hour soak passes for the recorded workload. The 72-hour follow-up remains.
 
 ### Milestone 2: standard service client
 
@@ -291,11 +291,11 @@ Status: complete except tracing hooks beyond the logging bridge.
 
 ## Production-readiness summary
 
-| Area                                      | Current verdict                                                                        |
-| ----------------------------------------- | -------------------------------------------------------------------------------------- |
-| Narrow manual produce/consume feature set | Implemented                                                                            |
-| Short-run speed                           | Competitive in the recorded benchmark                                                  |
-| Long-run performance proof                | Short soak passes all applicable gates (`out/soak/`); 24-hour and 72-hour soaks remain |
-| Broker-failure proof                      | Three-broker chaos suite passes (`out/chaos/`)                                         |
-| General Kafka feature completeness        | Complete for the supported API surface above                                           |
-| Zero-dependency Bun-native goal           | Met                                                                                    |
+| Area                                      | Current verdict                                                                                     |
+| ----------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Narrow manual produce/consume feature set | Implemented                                                                                         |
+| Short-run speed                           | Competitive in the recorded benchmark                                                               |
+| Long-run performance proof                | 24-hour soak passes all release gates for the recorded workload (`out/soak/`); 72-hour soak remains |
+| Broker-failure proof                      | Three-broker chaos suite passes (`out/chaos/`)                                                      |
+| General Kafka feature completeness        | Complete for the supported API surface above                                                        |
+| Zero-dependency Bun-native goal           | Met                                                                                                 |

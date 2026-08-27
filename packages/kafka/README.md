@@ -165,7 +165,7 @@ Readiness documentation:
 - [Kafka versions, APIs, and KIPs mapped to this client](../apps/docs/src/content/docs/kafka-versions-and-kips.md)
 - [Gap audit versus kafkajs / node-rdkafka / franz-go](../apps/docs/src/content/docs/client-gap-audit.md)
 
-The native client has short-run benchmark evidence, a passing three-broker chaos qualification (`out/chaos/`), and a passing 30-minute soak run (`out/soak/`). The 24-hour release soak gates defined in the performance validation doc remain outstanding.
+The native client has short-run benchmark evidence, a passing three-broker chaos qualification (`out/chaos/`), and passing 30-minute and 24-hour soak runs (`out/soak/`). The 72-hour release soak remains outstanding for changes that require that additional duration.
 
 ## Test
 
@@ -190,7 +190,7 @@ Tests are split by scope: `test/unit/` (wire protocol primitives), `test/feature
 2. In CHANGELOG.md, rename `[Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and start a fresh `[Unreleased]` section.
 3. Tag `vX.Y.Z` and push the tag.
 
-A release requires green CI plus the soak gates defined in [performance validation](../apps/docs/src/content/docs/performance-validation.md).
+A release requires green CI plus the soak gates defined in [performance validation](../apps/docs/src/content/docs/performance-validation.md). Releases that change protocol, connection, producer, or consumer behavior also require the 72-hour follow-up soak described there.
 
 ## Benchmark
 
