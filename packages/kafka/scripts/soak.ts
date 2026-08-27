@@ -18,6 +18,10 @@
  *   SOAK_BURST_S           burst length                     (default 60)
  *   SOAK_BURST_FACTOR      burst rate multiplier            (default 1.5)
  *   SOAK_SAMPLE_INTERVAL_S metric sampling interval          (default 10)
+ *   SOAK_LOG_INTERVAL_S    console progress interval         (default 60)
+ *   SOAK_RETENTION_MS      topic retention window             (default 3600000)
+ *   SOAK_RETENTION_BYTES   topic retention per partition      (default 268435456)
+ *   SOAK_SEGMENT_BYTES     topic segment size                  (default 16777216)
  *   SOAK_MAX_MESSAGES      consumer maxMessages per fetch    (default 500)
  *   KAFKA_BROKERS          comma-separated bootstrap brokers (default 127.0.0.1:9092)
  */
@@ -47,6 +51,10 @@ const BURST_INTERVAL_S =
 const BURST_S = env("SOAK_BURST_S", 60);
 const BURST_FACTOR = Number(process.env.SOAK_BURST_FACTOR ?? 1.5) || 1.5;
 const SAMPLE_INTERVAL_S = env("SOAK_SAMPLE_INTERVAL_S", 10);
+const LOG_INTERVAL_S = env("SOAK_LOG_INTERVAL_S", 60);
+const RETENTION_MS = Math.floor(env("SOAK_RETENTION_MS", 3_600_000));
+const RETENTION_BYTES = Math.floor(env("SOAK_RETENTION_BYTES", 256 * 1024 * 1024));
+const SEGMENT_BYTES = Math.floor(env("SOAK_SEGMENT_BYTES", 16 * 1024 * 1024));
 const MAX_MESSAGES = Math.floor(env("SOAK_MAX_MESSAGES", 500));
 const BROKERS = (process.env.KAFKA_BROKERS ?? "127.0.0.1:9092").split(",");
 const WARMUP_FRACTION = 0.2; // memory gate ignores growth during this fraction of the run
@@ -179,7 +187,20 @@ function lag(): number {
 async function setup(): Promise<void> {
   const admin = kafka.admin();
   try {
-    await admin.createTopics([{ name: topic, numPartitions: PARTITIONS }]);
+    await admin.createTopics([
+      {
+        name: topic,
+        numPartitions: PARTITIONS,
+        // The consumer keeps up with production, so retaining the whole run
+        // only measures broker disk growth rather than client behavior.
+        configs: {
+          "cleanup.policy": "delete",
+          "retention.ms": String(RETENTION_MS),
+          "retention.bytes": String(RETENTION_BYTES),
+          "segment.bytes": String(SEGMENT_BYTES),
+        },
+      },
+    ]);
     const deadline = Date.now() + 30_000;
     while (Date.now() < deadline) {
       const meta = await admin.metadata([topic]);
@@ -215,10 +236,11 @@ async function producerLoop(): Promise<void> {
   try {
     while (Date.now() < endAt) {
       const elapsedS = (Date.now() - startedMs) / 1_000;
+      const burstStart = BURST_INTERVAL_S / 2;
       const inBurst =
         BURST_INTERVAL_S > 0 &&
-        elapsedS >= BURST_INTERVAL_S / 2 &&
-        elapsedS % BURST_INTERVAL_S < BURST_S;
+        elapsedS >= burstStart &&
+        (elapsedS - burstStart) % BURST_INTERVAL_S < BURST_S;
       const rate = inBurst ? BASE_RATE * BURST_FACTOR : BASE_RATE;
       const batchSize = Math.max(1, Math.round((rate * TICK_MS) / 1_000));
 
@@ -326,6 +348,7 @@ function fetchLatency(ms: number): void {
 // ---------------------------------------------------------------------------
 
 async function samplingLoop(): Promise<void> {
+  let lastLogAt = Number.NEGATIVE_INFINITY;
   while (Date.now() < endAt) {
     await Bun.sleep(SAMPLE_INTERVAL_S * 1_000);
     const stats = kafka.stats();
@@ -365,11 +388,14 @@ async function samplingLoop(): Promise<void> {
     samples.push(sample);
     windowSend.reset();
     windowFetch.reset();
-    console.log(
-      `t=${String(sample.t_s).padStart(6)}s prod=${sample.produce_mps}/s cons=${sample.consume_mps}/s ` +
-        `lag=${sample.lag_total} sendP95=${s.p95}ms fetchP95=${f.p95}ms rss=${Math.round(mem.rss / 1048576)}MiB ` +
-        `cpu=${sample.cpu_percent}% fds=${sample.fds} fail=${counters.failed}`,
-    );
+    if (sample.t_s - lastLogAt >= LOG_INTERVAL_S) {
+      console.log(
+        `t=${String(sample.t_s).padStart(6)}s prod=${sample.produce_mps}/s cons=${sample.consume_mps}/s ` +
+          `lag=${sample.lag_total} sendP95=${s.p95}ms fetchP95=${f.p95}ms rss=${Math.round(mem.rss / 1048576)}MiB ` +
+          `cpu=${sample.cpu_percent}% fds=${sample.fds} fail=${counters.failed}`,
+      );
+      lastLogAt = sample.t_s;
+    }
   }
 }
 
@@ -570,6 +596,8 @@ function renderReport(a: SoakArtifact): string {
     `- Base offered rate: ${a.workload.producer_rate} msg/s`,
     `- Acks: ${a.workload.acks}`,
     `- Burst: ${burstDescription(a.workload)}`,
+    `- Retention: ${a.workload.retention_ms} ms / ${a.workload.retention_bytes_per_partition} bytes per partition`,
+    `- Segment size: ${a.workload.segment_bytes} bytes`,
     "",
     "## Result",
     "",
@@ -662,6 +690,10 @@ async function main(): Promise<number> {
       burst_factor: BURST_FACTOR,
       burst_length_s: BURST_S,
       sample_interval_s: SAMPLE_INTERVAL_S,
+      log_interval_s: LOG_INTERVAL_S,
+      retention_ms: RETENTION_MS,
+      retention_bytes_per_partition: RETENTION_BYTES,
+      segment_bytes: SEGMENT_BYTES,
       consumer_max_messages: MAX_MESSAGES,
     },
     result: {
