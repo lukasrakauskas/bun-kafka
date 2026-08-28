@@ -1,6 +1,6 @@
 import { KafkaError, KafkaErrorCode, kafkaErrorName } from "../errors.ts";
 import type { ClusterMetadata } from "../types.ts";
-import type { BunKafkaSasl, BunKafkaTls } from "./connection.ts";
+import type { BunKafkaSasl, BunKafkaTls } from "./connection/index.ts";
 
 export {
   API_ADD_OFFSETS_TO_TXN,

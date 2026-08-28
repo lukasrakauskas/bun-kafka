@@ -38,7 +38,7 @@ export type {
   CreatePartitionsInput,
   ConfigResource,
 } from "./admin.ts";
-export type { BunKafkaSasl, BunKafkaTls } from "./connection.ts";
+export type { BunKafkaSasl, BunKafkaTls } from "./connection/index.ts";
 export { KafkaError, KafkaErrorCode, kafkaErrorName, kafkaErrorNames } from "../errors.ts";
 export type {
   AbortedTransaction,

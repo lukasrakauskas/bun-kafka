@@ -6,7 +6,7 @@ import {
   DEFAULT_KAFKAJS_MAX_RETRIES,
   DEFAULT_REQUEST_TIMEOUT_MS,
 } from "../bun/shared.ts";
-import type { BunKafkaSasl } from "../bun/connection.ts";
+import type { BunKafkaSasl } from "../bun/connection/index.ts";
 import { KafkaJSNonRetriableError } from "./errors.ts";
 import { hasStringValue, isFunction, isString } from "../type-guards.ts";
 import type { CompatOptions } from "./types.ts";

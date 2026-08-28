@@ -1,6 +1,6 @@
 import { KafkaError } from "../errors.ts";
 import type { ClusterMetadata } from "../types.ts";
-import { Connection, type ConnectionOptions } from "./connection.ts";
+import { Connection, type ConnectionOptions } from "./connection/index.ts";
 import {
   RequestBody,
   ResponseBody,

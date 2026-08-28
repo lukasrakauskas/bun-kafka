@@ -84,6 +84,14 @@ export default defineConfig({
     "anti-slop/no-widen-then-assert": "error",
     "protocol-boundary/no-private-wire-types": "error",
   },
+  overrides: [
+    {
+      files: ["src/bun/connection/**/*.ts"],
+      rules: {
+        "max-lines": ["error", { max: 300, skipBlankLines: true, skipComments: true }],
+      },
+    },
+  ],
   env: {
     builtin: true,
   },
