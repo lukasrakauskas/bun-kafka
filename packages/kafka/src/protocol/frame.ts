@@ -1,6 +1,7 @@
 import { SIZE_I32 } from "../bun/shared.ts";
 import { RequestBody, ResponseBody, requestFromWriter, responseFromReader } from "./body.ts";
-import { Reader, Writer } from "./wire.ts";
+import { Reader } from "./wire/reader.ts";
+import { Writer } from "./wire/writer.ts";
 
 export type RequestFrameInput = {
   apiKey: number;

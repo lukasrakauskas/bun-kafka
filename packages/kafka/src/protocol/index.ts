@@ -98,14 +98,13 @@ export {
   writeAdminListOffsetsRequest,
   readAdminListOffsetsResponse,
 } from "./admin-operations.ts";
+export type { RecordCompression } from "./compression.ts";
+export { crc32c } from "./wire/crc32c.ts";
+export { murmur2 } from "./wire/murmur2.ts";
+export { asBytes } from "./wire/bytes.ts";
 export {
-  asBytes,
-  crc32c,
-  murmur2,
-  encodeRecordBatch,
   decodeRecordSet,
   RecordSetDecoder,
-  type WireRecord,
-  type RecordCompression,
   type RecordDecoderOptions,
-} from "./wire.ts";
+} from "./wire/records/decoder.ts";
+export { encodeRecordBatch, type WireRecord } from "./wire/records/encoder.ts";

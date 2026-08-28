@@ -1,5 +1,6 @@
 import type { KafkaDecoder, KafkaEncoder } from "./codec.ts";
-import { Reader, Writer } from "./wire.ts";
+import { Reader } from "./wire/reader.ts";
+import { Writer } from "./wire/writer.ts";
 
 /** Opaque Kafka request payload. */
 export class RequestBody {

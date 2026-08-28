@@ -5,7 +5,8 @@ import {
   requestFromWriter,
   responseFromBytes,
 } from "./body.ts";
-import { Reader, Writer } from "./wire.ts";
+import { Reader } from "./wire/reader.ts";
+import { Writer } from "./wire/writer.ts";
 
 /** Public encoder surface. Implementation is protocol-private Writer. */
 export type KafkaEncoder = {

@@ -2,13 +2,9 @@
 import { KafkaError } from "../errors.ts";
 import { RequestBody, ResponseBody } from "./body.ts";
 import { decodeResponse, encodeRequest, decodeBytes, type KafkaDecoder } from "./codec.ts";
-import {
-  encodeRecordBatch,
-  type RecordCompression,
-  type WireRecord,
-  RecordSetDecoder,
-  type RecordDecoderOptions,
-} from "./wire.ts";
+import type { RecordCompression } from "./compression.ts";
+import { RecordSetDecoder, type RecordDecoderOptions } from "./wire/records/decoder.ts";
+import { encodeRecordBatch, type WireRecord } from "./wire/records/encoder.ts";
 
 export function createRecordSetDecoder(
   bytes: Uint8Array,
