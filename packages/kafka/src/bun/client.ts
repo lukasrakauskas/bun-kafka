@@ -26,8 +26,7 @@ export class Kafka {
   }
 
   producer(options: ProducerOptions = {}): BunProducer {
-    let producer: BunProducer;
-    producer = new BunProducer(this.#cluster, options, () => this.#clients.delete(producer));
+    const producer = new BunProducer(this.#cluster, options, () => this.#clients.delete(producer));
     this.#clients.add(producer);
     return producer;
   }
@@ -35,15 +34,15 @@ export class Kafka {
   consumer<K = Uint8Array | null, V = Uint8Array | null>(
     options: ConsumerOptions<K, V> = {},
   ): BunConsumer<K, V> {
-    let consumer: BunConsumer<K, V>;
-    consumer = new BunConsumer(this.#cluster, options, () => this.#clients.delete(consumer));
+    const consumer = new BunConsumer<K, V>(this.#cluster, options, () =>
+      this.#clients.delete(consumer),
+    );
     this.#clients.add(consumer);
     return consumer;
   }
 
   admin(): BunAdmin {
-    let admin: BunAdmin;
-    admin = new BunAdmin(this.#cluster, () => this.#clients.delete(admin));
+    const admin = new BunAdmin(this.#cluster, () => this.#clients.delete(admin));
     this.#clients.add(admin);
     return admin;
   }

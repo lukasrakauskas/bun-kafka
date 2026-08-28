@@ -47,37 +47,39 @@ describe("Observability", () => {
             socket.end();
             return;
           }
-          const body =
-            key === 18
-              ? apiVersions()
-              : key === 3
-                ? new Writer()
-                    .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, b) =>
-                      writer.i32(b.id).string(b.host).i32(b.port).string(null),
-                    )
-                    .string(null)
-                    .i32(1)
-                    .array(["events"], (writer, topic) =>
-                      writer
-                        .i16(0)
-                        .string(topic)
-                        .bool(false)
-                        .array([0], (p) =>
-                          p
-                            .i16(0)
-                            .i32(0)
-                            .i32(1)
-                            .array([1], (w) => w.i32(1))
-                            .array([1], (w) => w.i32(1)),
-                        ),
-                    )
-                : key === 10
-                  ? new Writer().i16(0).i32(1).string("127.0.0.1").i32(listener.port)
-                  : new Writer().array(["events"], (writer, t) =>
-                      writer
-                        .string(t)
-                        .array([0], (partitions, p) => partitions.i32(p).i16(0).i64(0).i64(3)),
-                    );
+          let body: Writer;
+          if (key === 18) {
+            body = apiVersions();
+          } else if (key === 3) {
+            body = new Writer()
+              .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, b) =>
+                writer.i32(b.id).string(b.host).i32(b.port).string(null),
+              )
+              .string(null)
+              .i32(1)
+              .array(["events"], (writer, topic) =>
+                writer
+                  .i16(0)
+                  .string(topic)
+                  .bool(false)
+                  .array([0], (p) =>
+                    p
+                      .i16(0)
+                      .i32(0)
+                      .i32(1)
+                      .array([1], (w) => w.i32(1))
+                      .array([1], (w) => w.i32(1)),
+                  ),
+              );
+          } else if (key === 10) {
+            body = new Writer().i16(0).i32(1).string("127.0.0.1").i32(listener.port);
+          } else {
+            body = new Writer().array(["events"], (writer, t) =>
+              writer
+                .string(t)
+                .array([0], (partitions, p) => partitions.i32(p).i16(0).i64(0).i64(3)),
+            );
+          }
           const response = new Writer().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());

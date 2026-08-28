@@ -150,7 +150,13 @@ function aclBody(key: number, port: number): Writer {
 type OffsetState = { listOffsets: number };
 
 function listOffsetBody(state: OffsetState): Writer {
-  const resolved = state.listOffsets++ === 0 ? 5n : state.listOffsets === 2 ? 9n : 7n;
+  const request = state.listOffsets++;
+  let resolved = 7n;
+  if (request === 0) {
+    resolved = 5n;
+  } else if (request === 1) {
+    resolved = 9n;
+  }
   return new Writer().array(["events"], (writer, name) =>
     writer
       .string(name)

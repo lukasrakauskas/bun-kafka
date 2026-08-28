@@ -149,14 +149,16 @@ export class CompatConsumer {
     fromBeginning?: boolean;
   }): Promise<void> {
     try {
-      const incoming =
-        topic !== undefined
-          ? [topic]
-          : topics !== undefined
-            ? Array.isArray(topics)
-              ? topics
-              : [topics]
-            : [];
+      let incoming: Array<string | RegExp>;
+      if (topic !== undefined) {
+        incoming = [topic];
+      } else if (topics === undefined) {
+        incoming = [];
+      } else if (Array.isArray(topics)) {
+        incoming = topics;
+      } else {
+        incoming = [topics];
+      }
       // kafkajs accumulates subscriptions across calls into one group subscription.
       const merged = [...this.#subscribedTopics];
       for (const entry of incoming) {

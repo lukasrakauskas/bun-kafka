@@ -110,7 +110,7 @@ const apiVersions = () =>
   );
 
 function decode(value: Uint8Array | null | unknown): string | null {
-  if (value == null) {
+  if (value === null || value === undefined) {
     return null;
   }
   if (isString(value)) {
@@ -307,52 +307,52 @@ describe("Read-committed isolation", () => {
             at += 16; // replica_id + max_wait_ms + min_bytes + max_bytes (isolation sits before session fields)
             isolationByte = new DataView(request.buffer, request.byteOffset + at, 1).getInt8(0);
           }
-          const body =
-            key === 18
-              ? apiVersions()
-              : key === 3
-                ? new Writer()
-                    .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) =>
-                      writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
-                    )
-                    .string(null)
-                    .i32(1)
-                    .array([{ name: "events" }], (writer, item) =>
-                      writer
-                        .i16(0)
-                        .string(item.name)
-                        .bool(false)
-                        .array([0], (pw) =>
-                          pw
-                            .i16(0)
-                            .i32(0)
-                            .i32(1)
-                            .array([1], (w) => w.i32(1))
-                            .array([1], (w) => w.i32(1)),
-                        ),
-                    )
-                : key === 2
-                  ? new Writer().array(["events"], (w, t) =>
-                      w
-                        .string(t)
-                        .array([0], (p, partition) => p.i32(partition).i16(0).i64(0).i64(0)),
-                    )
-                  : new Writer()
-                      .i32(0) // throttle_time_ms (Fetch v7 response)
-                      .i16(0) // top-level error code
-                      .i32(0) // session id
-                      .array(["events"], (topicWriter) =>
-                        topicWriter.string("events").array([0], (partitionWriter) =>
-                          partitionWriter
-                            .i32(0)
-                            .i16(0)
-                            .i64(0)
-                            .i64(1)
-                            .i64(0)
-                            .array([], () => {})
-                            .bytes(null),
-                        ),
-                      );
+          let body: Writer;
+          if (key === 18) {
+            body = apiVersions();
+          } else if (key === 3) {
+            body = new Writer()
+              .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) =>
+                writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
+              )
+              .string(null)
+              .i32(1)
+              .array([{ name: "events" }], (writer, item) =>
+                writer
+                  .i16(0)
+                  .string(item.name)
+                  .bool(false)
+                  .array([0], (pw) =>
+                    pw
+                      .i16(0)
+                      .i32(0)
+                      .i32(1)
+                      .array([1], (w) => w.i32(1))
+                      .array([1], (w) => w.i32(1)),
+                  ),
+              );
+          } else if (key === 2) {
+            body = new Writer().array(["events"], (w, t) =>
+              w.string(t).array([0], (p, partition) => p.i32(partition).i16(0).i64(0).i64(0)),
+            );
+          } else {
+            body = new Writer()
+              .i32(0)
+              .i16(0)
+              .i32(0)
+              .array(["events"], (topicWriter) =>
+                topicWriter.string("events").array([0], (partitionWriter) =>
+                  partitionWriter
+                    .i32(0)
+                    .i16(0)
+                    .i64(0)
+                    .i64(1)
+                    .i64(0)
+                    .array([], () => {})
+                    .bytes(null),
+                ),
+              );
+          }
           const response = new Writer().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());
@@ -389,50 +389,52 @@ describe("Deserializers", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          const body =
-            key === 18
-              ? apiVersions()
-              : key === 3
-                ? new Writer()
-                    .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) =>
-                      writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
-                    )
-                    .string(null)
-                    .i32(1)
-                    .array([{ name: "events" }], (writer, item) =>
-                      writer
-                        .i16(0)
-                        .string(item.name)
-                        .bool(false)
-                        .array([0], (pw) =>
-                          pw
-                            .i16(0)
-                            .i32(0)
-                            .i32(1)
-                            .array([1], (w) => w.i32(1))
-                            .array([1], (w) => w.i32(1)),
-                        ),
-                    )
-                : key === 2
-                  ? new Writer().array(["events"], (w, t) =>
-                      w.string(t).array([0], (p, partition) => p.i32(partition).i64(0)),
-                    )
-                  : new Writer()
-                      .i32(0) // Fetch v7
+          let body: Writer;
+          if (key === 18) {
+            body = apiVersions();
+          } else if (key === 3) {
+            body = new Writer()
+              .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) =>
+                writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
+              )
+              .string(null)
+              .i32(1)
+              .array([{ name: "events" }], (writer, item) =>
+                writer
+                  .i16(0)
+                  .string(item.name)
+                  .bool(false)
+                  .array([0], (pw) =>
+                    pw
                       .i16(0)
                       .i32(0)
-                      .array(["events"], (topicWriter) =>
-                        topicWriter.string("events").array([0], (partitionWriter) =>
-                          partitionWriter
-                            .i32(0)
-                            .i16(0)
-                            .i64(1)
-                            .i64(1)
-                            .i64(0)
-                            .array([], () => {})
-                            .bytes(records),
-                        ),
-                      );
+                      .i32(1)
+                      .array([1], (w) => w.i32(1))
+                      .array([1], (w) => w.i32(1)),
+                  ),
+              );
+          } else if (key === 2) {
+            body = new Writer().array(["events"], (w, t) =>
+              w.string(t).array([0], (p, partition) => p.i32(partition).i64(0)),
+            );
+          } else {
+            body = new Writer()
+              .i32(0)
+              .i16(0)
+              .i32(0)
+              .array(["events"], (topicWriter) =>
+                topicWriter.string("events").array([0], (partitionWriter) =>
+                  partitionWriter
+                    .i32(0)
+                    .i16(0)
+                    .i64(1)
+                    .i64(1)
+                    .i64(0)
+                    .array([], () => {})
+                    .bytes(records),
+                ),
+              );
+          }
           const response = new Writer().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());

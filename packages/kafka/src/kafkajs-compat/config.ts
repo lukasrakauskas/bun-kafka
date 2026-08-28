@@ -57,7 +57,10 @@ function resolveSaslToken(
   const provider = saslConfig.oauthBearerProvider;
   return async () => {
     const resolved = await provider();
-    return isString(resolved) ? resolved : hasStringValue(resolved) ? (resolved.value ?? "") : "";
+    if (isString(resolved)) {
+      return resolved;
+    }
+    return hasStringValue(resolved) ? (resolved.value ?? "") : "";
   };
 }
 

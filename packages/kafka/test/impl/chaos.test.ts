@@ -37,7 +37,7 @@ function response(correlation: number, body: Writer | Uint8Array): Uint8Array {
   return frame.result();
 }
 
-function metadataBody(brokers: MockBroker[], leader = 1, error = 0): Writer {
+function metadataBody(brokers: Array<Pick<MockBroker, "address">>, leader = 1, error = 0): Writer {
   return new Writer()
     .array(brokers, (writer, broker) => {
       const url = new URL(`tcp://${broker.address}`);
@@ -71,12 +71,12 @@ function metadataBody(brokers: MockBroker[], leader = 1, error = 0): Writer {
     );
 }
 
-function defaultBody(apiKey: number, broker: MockBroker, fetchOffset = 0n): Writer {
+function defaultBody(apiKey: number, brokerAddress: string, fetchOffset = 0n): Writer {
   if (apiKey === 18) {
     return apiVersions();
   }
   if (apiKey === 3) {
-    return metadataBody([broker]);
+    return metadataBody([{ address: brokerAddress }]);
   }
   if (apiKey === 2) {
     return new Writer().array([topic], (writer, name) =>
@@ -122,7 +122,6 @@ function mockBroker(handler: Handler = () => false): MockBroker {
   const buffers = new WeakMap<Bun.Socket, Uint8Array>();
   const counts = new Map<number, number>();
   let open = 0;
-  let broker: MockBroker;
   const listener = Bun.listen({
     hostname: "127.0.0.1",
     port: 0,
@@ -153,7 +152,9 @@ function mockBroker(handler: Handler = () => false): MockBroker {
           const reply = (body: Writer | Uint8Array, responseCorrelation = correlation) =>
             socket.write(response(responseCorrelation, body));
           if (handler({ apiKey, correlation, count, socket }, reply) === false) {
-            reply(defaultBody(apiKey, broker, BigInt(Math.max(0, count - 1))));
+            reply(
+              defaultBody(apiKey, `127.0.0.1:${listener.port}`, BigInt(Math.max(0, count - 1))),
+            );
           }
           at += size + 4;
         }
@@ -161,12 +162,11 @@ function mockBroker(handler: Handler = () => false): MockBroker {
       },
     },
   });
-  broker = {
+  return {
     address: `127.0.0.1:${listener.port}`,
     close: () => listener.stop(true),
     active: () => open,
   };
-  return broker;
 }
 
 const kafka = (
@@ -331,8 +331,7 @@ describe("deterministic Kafka chaos", () => {
   test("refreshes metadata and follows a transferred leader", async () => {
     let leader = 1;
     let firstProduce = true;
-    let a: MockBroker;
-    let b: MockBroker;
+    const brokers: MockBroker[] = [];
     const handler =
       (id: number): Handler =>
       ({ apiKey }, reply) => {
@@ -341,7 +340,7 @@ describe("deterministic Kafka chaos", () => {
           return true;
         }
         if (apiKey === 3) {
-          reply(metadataBody([a, b], leader));
+          reply(metadataBody(brokers, leader));
           return true;
         }
         if (apiKey === 0 && id === 1 && firstProduce) {
@@ -358,9 +357,9 @@ describe("deterministic Kafka chaos", () => {
         }
         return false;
       };
-    a = mockBroker(handler(1));
-    b = mockBroker(handler(2));
-    const client = kafka([a], { retry: { maxRetries: 1, initialBackoffMs: 0, maxBackoffMs: 0 } });
+    brokers.push(mockBroker(handler(1)), mockBroker(handler(2)));
+    const [a] = brokers;
+    const client = kafka([a!], { retry: { maxRetries: 1, initialBackoffMs: 0, maxBackoffMs: 0 } });
     try {
       expect(
         (
@@ -371,7 +370,7 @@ describe("deterministic Kafka chaos", () => {
       ).toBe(topic);
     } finally {
       await client.disconnect();
-      close(a, b);
+      close(...brokers);
     }
   });
 

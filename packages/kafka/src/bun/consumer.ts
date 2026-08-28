@@ -252,16 +252,18 @@ function withGroupOffsets(
   return assigned.map((item) => {
     const key = partitionKey(item.topic, item.partition);
     const committedOffset = committed.get(key);
-    return {
-      ...item,
-      offset:
-        retained.get(key) ??
-        (committedOffset !== undefined && committedOffset >= 0n
-          ? committedOffset
-          : fromBeginning
-            ? "earliest"
-            : "latest"),
-    };
+    const retainedOffset = retained.get(key);
+    let offset: bigint | "earliest" | "latest";
+    if (retainedOffset !== undefined) {
+      offset = retainedOffset;
+    } else if (committedOffset !== undefined && committedOffset >= 0n) {
+      offset = committedOffset;
+    } else if (fromBeginning) {
+      offset = "earliest";
+    } else {
+      offset = "latest";
+    }
+    return { ...item, offset };
   });
 }
 

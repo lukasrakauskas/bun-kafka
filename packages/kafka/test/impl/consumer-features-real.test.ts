@@ -5,7 +5,7 @@ import { admin, topic } from "../helpers.ts";
 const BROKER = "127.0.0.1:9092";
 import { isString, isUint8Array } from "../../src/type-guards.ts";
 function decode(value: Uint8Array | null | unknown): string | null {
-  if (value == null) {
+  if (value === null || value === undefined) {
     return null;
   }
   if (isString(value)) {

@@ -139,7 +139,7 @@ describe("Client quotas (mock broker)", () => {
             expect(entries[0]!.entity[0]).toEqual({ t: "user", n: "alice", tags: 0 });
             expect(entries[0]!.ops[0]!.key).toBe("consumer_byte_rate");
             expect(entries[0]!.entryTags).toBe(0);
-            var responseBody = new Writer()
+            const resp = new Writer()
               .i32(correlation)
               .uvarint(0)
               .i32(0)
@@ -155,9 +155,8 @@ describe("Client quotas (mock broker)", () => {
                     .tags(),
               )
               .tags();
+            socket.write(new Writer().i32(0).patchI32(0, resp.length).raw(resp.result()).result());
           }
-          const resp: Writer = responseBody!;
-          socket.write(new Writer().i32(0).patchI32(0, resp.length).raw(resp.result()).result());
         },
       },
     });

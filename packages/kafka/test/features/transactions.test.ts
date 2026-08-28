@@ -11,7 +11,7 @@ const apiVersions = () =>
 describe("Transactions (mock broker)", () => {
   test("commit flow sends InitProducerId, AddPartitionsToTxn, Produce, EndTxn", async () => {
     const apiCalls: Array<{ key: number; flags?: number[] }> = [];
-    let txnPartitionAdded = false;
+    const txnPartitionAdded = false;
     const listener = Bun.listen({
       hostname: "127.0.0.1",
       port: 0,

@@ -351,11 +351,13 @@ export function lz4Decompress(input: Uint8Array): Uint8Array {
     ({ output, parts } = appendLz4Block(output, parts, decoded, pos));
     pos += decoded.byteLength;
   }
-  return parts
-    ? assembleLz4Parts(output, parts, pos)
-    : output
-      ? output.subarray(0, pos)
-      : new Uint8Array();
+  if (parts) {
+    return assembleLz4Parts(output, parts, pos);
+  }
+  if (output) {
+    return output.subarray(0, pos);
+  }
+  return new Uint8Array();
 }
 /** Compress one LZ4 block with a greedy hash-table matcher. */
 export function lz4CompressBlock(input: Uint8Array): Uint8Array {

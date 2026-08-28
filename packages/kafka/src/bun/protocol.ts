@@ -17,7 +17,7 @@ const textDecoder = new TextDecoder();
 const noop = () => {};
 
 export function asBytes(value: Bytes): Uint8Array | null {
-  if (value == null) {
+  if (value === null || value === undefined) {
     return null;
   }
   if (isString(value)) {

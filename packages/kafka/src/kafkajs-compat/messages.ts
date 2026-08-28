@@ -82,7 +82,7 @@ export function toWireMessage(message: KafkaJsMessage): ProducerMessage {
 }
 
 function toBuffer(value: Uint8Array | null | undefined): Buffer | null {
-  return value == null ? null : Buffer.from(value);
+  return value === null || value === undefined ? null : Buffer.from(value);
 }
 
 export function toKafkajsMessage(raw: ConsumedMessage): KafkaJsConsumedMessage {
@@ -92,7 +92,7 @@ export function toKafkajsMessage(raw: ConsumedMessage): KafkaJsConsumedMessage {
     Object.values(raw.headers ?? {}).reduce((sum, header) => sum + (header?.byteLength ?? 0), 0);
   const headers: Record<string, Buffer | undefined> = {};
   for (const [name, value] of Object.entries(raw.headers ?? {})) {
-    headers[name] = value == null ? undefined : Buffer.from(value);
+    headers[name] = value === null || value === undefined ? undefined : Buffer.from(value);
   }
   return {
     key: toBuffer(raw.key),
