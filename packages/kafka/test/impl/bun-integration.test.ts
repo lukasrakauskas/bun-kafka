@@ -8,7 +8,7 @@ const decode = (value: Uint8Array | null) =>
 
 integration("Bun native Kafka integration", () => {
   test("produces, reads metadata, and manually consumes record batches", async () => {
-    const kafka = new Kafka({ brokers: brokers!, clientId: "bun-kafka-test" });
+    const kafka = new Kafka({ brokers: brokers, clientId: "bun-kafka-test" });
     const topic = `bun-native-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
     try {
       const producer = kafka.producer({ idempotent: true, compression: "zstd" });
@@ -53,8 +53,8 @@ integration("Bun native Kafka integration", () => {
       }
 
       expect(received).toHaveLength(20);
-      expect(decode(received[0]!.value)).toBe("value-0");
-      expect(decode(received[19]!.headers.index)).toBe("19");
+      expect(decode(received[0].value)).toBe("value-0");
+      expect(decode(received[19].headers.index)).toBe("19");
       const batched = [];
       while (batched.length < 25) {
         batched.push(
@@ -64,8 +64,8 @@ integration("Bun native Kafka integration", () => {
           })),
         );
       }
-      expect(decode(batched[0]!.value)).toBe("batched-0");
-      expect(decode(batched[24]!.value)).toBe("batched-24");
+      expect(decode(batched[0].value)).toBe("batched-0");
+      expect(decode(batched[24].value)).toBe("batched-24");
 
       consumer.seek({ topic, partition: 0, offset: 10n });
       const replay = await consumer.fetch({ maxWaitMs: 100, maxMessages: 1 });

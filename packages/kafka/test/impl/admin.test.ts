@@ -12,7 +12,7 @@ describe("Admin", () => {
     try {
       const metadata = await client.metadata([name]);
       expect(metadata.brokers.length).toBeGreaterThan(0);
-      expect(metadata.brokers[0]!.host.length).toBeGreaterThan(0);
+      expect(metadata.brokers[0].host.length).toBeGreaterThan(0);
       expect(metadata.topics.some((item) => item.name === name)).toBe(true);
     } finally {
       await client.close();

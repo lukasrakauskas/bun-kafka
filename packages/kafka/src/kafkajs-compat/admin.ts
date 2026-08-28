@@ -41,7 +41,7 @@ export class CompatAdmin {
 
   #underlying(): BunAdmin {
     this.#admin ??= new BunAdmin(this.#getter().acquire(), this.#getter().release);
-    return this.#admin!;
+    return this.#admin;
   }
 
   async connect(): Promise<void> {
@@ -164,7 +164,7 @@ export class CompatAdmin {
           host: broker.host,
           port: broker.port,
         })),
-        controller: metadata.brokers.length ? metadata.brokers[0]!.id : null,
+        controller: metadata.brokers.length ? metadata.brokers[0].id : null,
         clusterId: metadata.clusterId ?? null,
       };
     } catch (error) {

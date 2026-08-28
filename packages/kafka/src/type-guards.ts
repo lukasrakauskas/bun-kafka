@@ -1,3 +1,10 @@
+export function requiredValue<T>(value: T | undefined, context = "Expected value"): T {
+  if (value === undefined) {
+    throw new Error(context);
+  }
+  return value;
+}
+
 export function isString<T>(value: T): value is T & string {
   return typeof value === "string";
 }

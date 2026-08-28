@@ -45,6 +45,8 @@ export default defineConfig({
     "promise/no-nesting": "error",
     "promise/no-return-in-finally": "error",
     "no-var": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-non-null-asserted-optional-chain": "error",
     "prefer-const": "error",
     "anti-slop/no-chained-type-assertions": "error",
     "anti-slop/no-conditional-empty-object-spread": "error",

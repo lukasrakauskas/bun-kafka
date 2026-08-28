@@ -24,12 +24,12 @@ describe("acceptance", () => {
       await consumer.assign([{ topic: name, partition: 0, offset: "earliest" }]);
       const message = (await consumer.fetch({ maxWaitMs: 5_000, maxMessages: 1 }))[0];
       expect(message).toBeTruthy();
-      expect(dec(message!.key)).toBe("user-1");
-      expect(JSON.parse(dec(message!.value)!)).toEqual({ hello: "world", n: 42 });
-      expect(dec(message!.headers["content-type"])).toBe("application/json");
-      expect(dec(message!.headers["x-trace"])).toBe("abc");
-      expect(message!.offset).toBeGreaterThanOrEqual(0n);
-      expect(message!.timestamp).toBeGreaterThan(0n);
+      expect(dec(message.key)).toBe("user-1");
+      expect(JSON.parse(dec(message.value))).toEqual({ hello: "world", n: 42 });
+      expect(dec(message.headers["content-type"])).toBe("application/json");
+      expect(dec(message.headers["x-trace"])).toBe("abc");
+      expect(message.offset).toBeGreaterThanOrEqual(0n);
+      expect(message.timestamp).toBeGreaterThan(0n);
 
       const metadata = await kafka.admin().metadata([name]);
       expect(metadata.topics.some((item) => item.name === name)).toBe(true);

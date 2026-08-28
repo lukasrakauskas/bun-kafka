@@ -1,5 +1,5 @@
 import { KafkaError } from "../errors.ts";
-import { arrayBufferBytes, isFunction, isString } from "../type-guards.ts";
+import { arrayBufferBytes, isFunction, isString, requiredValue } from "../type-guards.ts";
 import { Reader, Writer } from "./protocol.ts";
 
 export type BunKafkaTls = boolean | Bun.TLSOptions;
@@ -100,7 +100,7 @@ async function pbkdf2(
 function xor(left: Uint8Array, right: Uint8Array): Uint8Array {
   const result = new Uint8Array(left.length);
   for (let i = 0; i < left.length; i++) {
-    result[i] = left[i]! ^ right[i]!;
+    result[i] = requiredValue(left[i]) ^ requiredValue(right[i]);
   }
   return result;
 }
@@ -261,7 +261,10 @@ export class Connection {
     if (this.#authenticating) {
       return this.#authenticating;
     }
-    const sasl = this.#options.sasl!;
+    const sasl = this.#options.sasl;
+    if (!sasl) {
+      return;
+    }
     this.#authenticating = (async () => {
       const handshake = await this.#send(
         socket,
@@ -572,14 +575,15 @@ export class Connection {
         }
         offset = nextOffset;
       }
-      const count = Math.min(
-        this.#frame!.byteLength - this.#frameOffset,
-        chunk.byteLength - offset,
-      );
-      this.#frame!.set(chunk.subarray(offset, offset + count), this.#frameOffset);
+      const frame = this.#frame;
+      if (!frame) {
+        return;
+      }
+      const count = Math.min(frame.byteLength - this.#frameOffset, chunk.byteLength - offset);
+      frame.set(chunk.subarray(offset, offset + count), this.#frameOffset);
       this.#frameOffset += count;
       offset += count;
-      if (this.#frameOffset === this.#frame!.byteLength) {
+      if (this.#frameOffset === frame.byteLength) {
         this.#completeFrame();
       }
     }
@@ -605,7 +609,10 @@ export class Connection {
   }
 
   #completeFrame(): void {
-    const frame = this.#frame!;
+    const frame = this.#frame;
+    if (!frame) {
+      return;
+    }
     this.#frame = undefined;
     this.#frameOffset = 0;
     this.#bytesReceived += frame.byteLength;

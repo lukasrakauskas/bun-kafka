@@ -1,3 +1,5 @@
+import { requiredValue } from "../type-guards.ts";
+
 /**
  * Pure-TypeScript Snappy raw-block codec used for Kafka record batches.
  *
@@ -7,6 +9,7 @@
  */
 
 const XERIAL_HEADER = new Uint8Array([0x82, 0x53, 0x4e, 0x41, 0x50, 0x50, 0x59, 0x00]);
+const INVALID_COPY = "Invalid snappy copy";
 
 function readVarint(input: Uint8Array, offset: number) {
   let value = 0;
@@ -15,7 +18,7 @@ function readVarint(input: Uint8Array, offset: number) {
     if (offset >= input.byteLength || shift > 35) {
       throw new RangeError("Invalid snappy varint");
     }
-    const byte = input[offset++]!;
+    const byte = requiredValue(input[offset++], "Invalid snappy varint");
     value |= (byte & 0x7f) << shift;
     if (!(byte & 0x80)) {
       return { value, offset };
@@ -33,7 +36,7 @@ function readLiteral(input: Uint8Array, offset: number, tag: number): SnappyLite
     const extra = length - 59;
     length = 0;
     for (let i = 0; i < extra; i++) {
-      length |= input[offset++]! << (8 * i);
+      length |= requiredValue(input[offset++], "Invalid snappy literal") << (8 * i);
     }
   }
   return { offset, length: length + 1 };
@@ -44,31 +47,33 @@ function readCopy(input: Uint8Array, offset: number, tag: number): SnappyCopy {
     return {
       offset: offset + 1,
       length: 4 + ((tag >> 2) & 7),
-      back: ((tag >> 5) << 8) | input[offset]!,
+      back: ((tag >> 5) << 8) | requiredValue(input[offset], INVALID_COPY),
     };
   }
   if ((tag & 3) === 2) {
     return {
       offset: offset + 2,
       length: (tag >> 2) + 1,
-      back: input[offset]! | (input[offset + 1]! << 8),
+      back:
+        requiredValue(input[offset], INVALID_COPY) |
+        (requiredValue(input[offset + 1], INVALID_COPY) << 8),
     };
   }
   return {
     offset: offset + 4,
     length: (tag >> 2) + 1,
     back:
-      input[offset]! |
-      (input[offset + 1]! << 8) |
-      (input[offset + 2]! << 16) |
-      (input[offset + 3]! << 24),
+      requiredValue(input[offset], INVALID_COPY) |
+      (requiredValue(input[offset + 1], INVALID_COPY) << 8) |
+      (requiredValue(input[offset + 2], INVALID_COPY) << 16) |
+      (requiredValue(input[offset + 3], INVALID_COPY) << 24),
   };
 }
 
 function copyBytes(output: Uint8Array, pos: number, back: number, length: number): void {
   let from = pos - back;
   for (let i = 0; i < length; i++) {
-    output[pos + i] = output[from++]!;
+    output[pos + i] = requiredValue(output[from++], INVALID_COPY);
   }
 }
 
@@ -80,9 +85,12 @@ function findSnappyMatch(
   tableSize: number,
 ): { candidate: number; length: number } | undefined {
   const value =
-    input[pos]! | (input[pos + 1]! << 8) | (input[pos + 2]! << 16) | (input[pos + 3]! << 24);
+    requiredValue(input[pos]) |
+    (requiredValue(input[pos + 1]) << 8) |
+    (requiredValue(input[pos + 2]) << 16) |
+    (requiredValue(input[pos + 3]) << 24);
   const hash = (Math.imul(value, 0x1e35a7bd) >>> shift) & (tableSize - 1);
-  const candidate = table[hash]!;
+  const candidate = requiredValue(table[hash]);
   table[hash] = pos;
   if (
     candidate === -1 ||
@@ -121,7 +129,7 @@ function decodeSnappyTag(
   }
   const copy = readCopy(input, offset, tag);
   if (copy.back <= 0 || copy.back > pos || pos + copy.length > length) {
-    throw new RangeError("Invalid snappy copy");
+    throw new RangeError(INVALID_COPY);
   }
   copyBytes(output, pos, copy.back, copy.length);
   return { offset: copy.offset, pos: pos + copy.length };
@@ -136,7 +144,7 @@ export function snappyDecompressBlock(input: Uint8Array): Uint8Array {
   let pos = 0;
   let offset = start;
   while (offset < input.byteLength) {
-    const tag = input[offset++]!;
+    const tag = requiredValue(input[offset++], "Invalid snappy tag");
     ({ offset, pos } = decodeSnappyTag(input, output, tag, offset, pos, length));
   }
   if (pos !== length) {

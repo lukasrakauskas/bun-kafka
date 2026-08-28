@@ -1,5 +1,5 @@
 import { KafkaError } from "../errors.ts";
-import { isFunction, isString } from "../type-guards.ts";
+import { isFunction, isString, requiredValue } from "../type-guards.ts";
 import { Cluster } from "./cluster.ts";
 import {
   Reader,
@@ -345,10 +345,11 @@ export class BunProducer {
       throw new Error("No transaction is in progress");
     }
     await this.flush();
+    const producer = requiredValue(this.#producer, "Producer identity is not initialized");
     const body = new Writer()
       .string(this.#transactionalId)
-      .i64(this.#producer!.id)
-      .i16(this.#producer!.epoch)
+      .i64(producer.id)
+      .i16(producer.epoch)
       .bool(committed);
     // EndTxn v1: same wire shape as v0 but its response carries
     // throttle_time_ms on every broker implementation.
@@ -380,12 +381,13 @@ export class BunProducer {
     if (!offsets.length) {
       return;
     }
+    const producer = requiredValue(this.#producer, "Producer identity is not initialized");
     const topics = Map.groupBy(offsets, (o) => o.topic);
     const body = new Writer()
       .string(this.#transactionalId)
       .string(groupId)
-      .i64(this.#producer!.id)
-      .i16(this.#producer!.epoch)
+      .i64(producer.id)
+      .i16(producer.epoch)
       .array([...topics], (writer, [topicName, values]) =>
         writer
           .string(topicName)
@@ -395,8 +397,8 @@ export class BunProducer {
       );
     const addOffsetsBody = new Writer()
       .string(this.#transactionalId)
-      .i64(this.#producer!.id)
-      .i16(this.#producer!.epoch)
+      .i64(producer.id)
+      .i16(producer.epoch)
       .string(groupId);
     const addOffsetsResponse = await this.#txnCoordinatorRequest(
       API_ADD_OFFSETS_TO_TXN,
@@ -434,7 +436,8 @@ export class BunProducer {
 
   /** Register newly touched partitions of the open transaction with the coordinator. */
   async #addPartitionsToTxn(partitions: PartitionRecords[]): Promise<void> {
-    if (!this.#transactionalId || !this.#txnOpen || !this.#producer) {
+    const producer = this.#producer;
+    if (!this.#transactionalId || !this.#txnOpen || !producer) {
       return;
     }
     const fresh = partitions.filter(
@@ -449,8 +452,8 @@ export class BunProducer {
       1,
       new Writer()
         .string(this.#transactionalId)
-        .i64(this.#producer.id)
-        .i16(this.#producer.epoch)
+        .i64(producer.id)
+        .i16(producer.epoch)
         .array([...byTopic], (writer, [name, groups]) =>
           writer
             .string(name)
@@ -558,7 +561,7 @@ export class BunProducer {
     results: ProduceResult[];
     routedPartitions: PartitionRecords[];
   }> {
-    const first = group[0]!.input;
+    const first = requiredValue(group[0], "Cannot produce an empty group").input;
     const topics = Map.groupBy(group, ({ input }) => input.topic);
     const compression = first.compression ?? this.#options.compression;
     return this.#retryPendingGroup(topics, first, compression, 0);
@@ -610,14 +613,15 @@ export class BunProducer {
   ): Promise<PartitionRecords[]> {
     return (
       await Promise.all(
-        [...topics].map(async ([topic, sends]) =>
-          this.#route(
+        [...topics].map(async ([topic, sends]) => {
+          const firstSend = requiredValue(sends[0], `Cannot route empty topic group ${topic}`);
+          return this.#route(
             topic,
             sends.flatMap(({ input }) => input.messages),
-            sends[0]!.input.timeoutMs ?? 30_000,
+            firstSend.input.timeoutMs ?? 30_000,
             attempt > 0,
-          ),
-        ),
+          );
+        }),
       )
     ).flat();
   }

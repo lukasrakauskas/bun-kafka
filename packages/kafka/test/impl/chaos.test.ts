@@ -254,7 +254,7 @@ describe("deterministic Kafka chaos", () => {
     const consumer = client.consumer({ fromBeginning: true });
     try {
       await consumer.assign([{ topic, partition: 0, offset: 0n }]);
-      const held = (await consumer.fetch({ maxWaitMs: 1, maxMessages: 1 }))[0]!;
+      const held = (await consumer.fetch({ maxWaitMs: 1, maxMessages: 1 }))[0];
       await rejectsQuickly(consumer.fetch({ maxWaitMs: 1, maxMessages: 1 }));
       expect(partial).toBe(true);
       expect(isUint8Array(held.value) ? new TextDecoder().decode(held.value) : "").toBe("value-0");
@@ -359,7 +359,7 @@ describe("deterministic Kafka chaos", () => {
       };
     brokers.push(mockBroker(handler(1)), mockBroker(handler(2)));
     const [a] = brokers;
-    const client = kafka([a!], { retry: { maxRetries: 1, initialBackoffMs: 0, maxBackoffMs: 0 } });
+    const client = kafka([a], { retry: { maxRetries: 1, initialBackoffMs: 0, maxBackoffMs: 0 } });
     try {
       expect(
         (
@@ -485,7 +485,7 @@ describe("deterministic Kafka chaos", () => {
     expect(() => new RecordSetDecoder(invalidRecord, topic, 0, 1).read()).toThrow(KafkaError);
 
     const badCrc = recordBatch("x");
-    badCrc[badCrc.length - 1]! ^= 1;
+    badCrc[badCrc.length - 1] ^= 1;
     expect(() => new RecordSetDecoder(badCrc, topic, 0, 1).read()).toThrow(/CRC/);
 
     const badCompression = recordBatch("x");

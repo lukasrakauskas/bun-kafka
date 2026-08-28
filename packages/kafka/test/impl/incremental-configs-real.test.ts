@@ -16,7 +16,7 @@ describe("Incremental configs (real broker)", () => {
       await admin.createTopics([{ name, numPartitions: 1 }]);
       await new Promise((r) => setTimeout(r, 300));
       const find = async () =>
-        (await admin.describeConfigs([{ resourceType: 2, resourceName: name }]))[0]!.configs.find(
+        (await admin.describeConfigs([{ resourceType: 2, resourceName: name }]))[0].configs.find(
           (c) => c.name === RETENTION,
         );
 
@@ -27,7 +27,7 @@ describe("Incremental configs (real broker)", () => {
           ops: [{ name: RETENTION, operation: "set", value: RETENTION_SET }],
         },
       ]);
-      expect(results[0]!.error).toBe(0);
+      expect(results[0].error).toBe(0);
       expect((await find())?.value).toBe(RETENTION_SET);
 
       // A second incremental call must not clobber the first entry (replace-mode would).
@@ -38,10 +38,10 @@ describe("Incremental configs (real broker)", () => {
           ops: [{ name: "max.message.bytes", operation: "set", value: "2097152" }],
         },
       ]);
-      const configs = (await admin.describeConfigs([{ resourceType: 2, resourceName: name }]))[0]!
+      const configs = (await admin.describeConfigs([{ resourceType: 2, resourceName: name }]))[0]
         .configs;
-      expect(configs.find((c) => c.name === RETENTION)!.value).toBe(RETENTION_SET);
-      expect(configs.find((c) => c.name === "max.message.bytes")!.value).toBe("2097152");
+      expect(configs.find((c) => c.name === RETENTION).value).toBe(RETENTION_SET);
+      expect(configs.find((c) => c.name === "max.message.bytes").value).toBe("2097152");
 
       await admin.incrementalAlterConfigs([
         {
@@ -59,8 +59,8 @@ describe("Incremental configs (real broker)", () => {
           ops: [{ name: "not.a.config", operation: "set", value: "x" }],
         },
       ]);
-      expect(bad[0]!.error).not.toBe(0);
-      expect(bad[0]!.message).toContain("not.a.config");
+      expect(bad[0].error).not.toBe(0);
+      expect(bad[0].message).toContain("not.a.config");
 
       await admin.deleteTopics([name]).catch(() => {});
     } finally {

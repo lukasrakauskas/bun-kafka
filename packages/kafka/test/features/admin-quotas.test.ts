@@ -91,8 +91,8 @@ describe("Client quotas (mock broker)", () => {
           { entityType: "client-id", matchType: "exact", match: "quota-app" },
         ]);
       expect(sawDescribe).toBe(true);
-      expect(result[0]!.entities).toEqual([{ entityType: "client-id", entityName: "quota-app" }]);
-      expect(result[0]!.values).toEqual([{ name: "producer_byte_rate", value: 1024 }]);
+      expect(result[0].entities).toEqual([{ entityType: "client-id", entityName: "quota-app" }]);
+      expect(result[0].values).toEqual([{ name: "producer_byte_rate", value: 1024 }]);
     } finally {
       await kafka.disconnect();
       listener.stop(true);
@@ -136,9 +136,9 @@ describe("Client quotas (mock broker)", () => {
               return { entity, ops, entryTags };
             });
             sawValidateOnly = body.bool();
-            expect(entries[0]!.entity[0]).toEqual({ t: "user", n: "alice", tags: 0 });
-            expect(entries[0]!.ops[0]!.key).toBe("consumer_byte_rate");
-            expect(entries[0]!.entryTags).toBe(0);
+            expect(entries[0].entity[0]).toEqual({ t: "user", n: "alice", tags: 0 });
+            expect(entries[0].ops[0].key).toBe("consumer_byte_rate");
+            expect(entries[0].entryTags).toBe(0);
             const resp = new Writer()
               .i32(correlation)
               .uvarint(0)
@@ -171,8 +171,8 @@ describe("Client quotas (mock broker)", () => {
       ]);
       expect(sawAlter).toBe(true);
       expect(sawValidateOnly).toBe(true);
-      expect(result[0]!.error).toBe(0);
-      expect(result[0]!.entity).toEqual([{ entityType: "user", entityName: "alice" }]);
+      expect(result[0].error).toBe(0);
+      expect(result[0].entity).toEqual([{ entityType: "user", entityName: "alice" }]);
     } finally {
       await kafka.disconnect();
       listener.stop(true);
@@ -234,7 +234,7 @@ describe("Delegation tokens (mock broker)", () => {
       expect(sawCreate).toBe(true);
       expect(token.principalName).toBe("alice");
       expect(token.tokenId).toBe("token-id-1");
-      expect(new TextDecoder().decode(token.hmac!)).toBe("token-hmac-bytes");
+      expect(new TextDecoder().decode(token.hmac)).toBe("token-hmac-bytes");
       expect(token.expiryTimestampMs).toBe(1710000000000n);
     } finally {
       await kafka.disconnect();

@@ -49,7 +49,7 @@ describe("snappy codec", () => {
     const first = pattern(50);
     const second = new TextEncoder().encode("second-chunk-payload");
     const blocks = [first, second].map((block) => snappyCompressBlock(block));
-    const framed = new Uint8Array(16 + 4 + blocks[0]!.byteLength + 4 + blocks[1]!.byteLength);
+    const framed = new Uint8Array(16 + 4 + blocks[0].byteLength + 4 + blocks[1].byteLength);
     framed.set(new Uint8Array([0x82, 0x53, 0x4e, 0x41, 0x50, 0x50, 0x59, 0x00]));
     const view = new DataView(framed.buffer);
     view.setInt32(8, 1);
@@ -146,8 +146,8 @@ describe("record batch compression codecs", () => {
       const batch = encodeRecordBatch(records, Date.now(), codec);
       const messages = decodeRecordSet(batch, "t", 0, 1);
       expect(messages).toHaveLength(records.length);
-      expect(decode(messages[49]!.value!)).toBe(records[49]!.value);
-      expect(decode(messages[7]!.headers.index!)).toBe("7");
+      expect(decode(messages[49].value)).toBe(records[49].value);
+      expect(decode(messages[7].headers.index)).toBe("7");
     }
   });
 

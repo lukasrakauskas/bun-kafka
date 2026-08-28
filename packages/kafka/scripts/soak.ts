@@ -88,7 +88,7 @@ class Histogram {
       this.max = ms;
     }
     let i = 0;
-    while (i < this.#bounds.length && ms > this.#bounds[i]!) {
+    while (i < this.#bounds.length && ms > this.#bounds[i]) {
       i++;
     }
     this.#counts[i]++;
@@ -101,9 +101,9 @@ class Histogram {
     }
     let target = this.count * p;
     for (let i = 0; i < this.#counts.length; i++) {
-      target -= this.#counts[i]!;
+      target -= this.#counts[i];
       if (target <= 0) {
-        return i < this.#bounds.length ? this.#bounds[i]! : this.max;
+        return i < this.#bounds.length ? this.#bounds[i] : this.max;
       }
     }
     return this.max;
@@ -192,7 +192,7 @@ process.on("unhandledRejection", (error) => unhandled.push(error));
 function lag(): number {
   let total = 0;
   for (let p = 0; p < PARTITIONS; p++) {
-    total += Math.max(0, producedPerPartition[p]! - consumedPerPartition[p]!);
+    total += Math.max(0, producedPerPartition[p] - consumedPerPartition[p]);
   }
   return total;
 }
@@ -348,7 +348,7 @@ async function consumerLoop(): Promise<void> {
 
 function processConsumedMessages(messages: ConsumedMessage[], decoder: TextDecoder): void {
   for (const message of messages) {
-    const sequence = Number(decoder.decode(message.key!));
+    const sequence = Number(decoder.decode(message.key));
     if (sequence < 0) {
       continue;
     }
@@ -359,7 +359,7 @@ function processConsumedMessages(messages: ConsumedMessage[], decoder: TextDecod
 }
 
 function updateSequence(partition: number, sequence: number): void {
-  const previous = lastSeqPerPartition[partition]!;
+  const previous = lastSeqPerPartition[partition];
   if (sequence > previous) {
     lastSeqPerPartition[partition] = sequence;
   } else if (sequence === previous) {

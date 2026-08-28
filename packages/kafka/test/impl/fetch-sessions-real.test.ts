@@ -20,7 +20,7 @@ describe("Fetch sessions (real broker)", () => {
       for (let round = 0; round < 10 && got.length < 25; round++) {
         const messages = await consumer.fetch({ maxWaitMs: 300, maxMessages: 25 - got.length });
         for (const m of messages) {
-          got.push(dec(m.value)!);
+          got.push(dec(m.value));
         }
       }
       expect(got).toEqual(Array.from({ length: 25 }, (_, i) => `m${i}`));

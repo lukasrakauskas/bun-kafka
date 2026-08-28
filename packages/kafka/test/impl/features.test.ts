@@ -28,13 +28,13 @@ describe("Bun Kafka features", () => {
       expect(consumer.assignment()).toHaveLength(1);
       const first = await consumer.fetch({ maxWaitMs: 5_000, maxMessages: 3, copy: true });
       expect(first.map((message) => dec(message.value))).toEqual(["one", "two", "three"]);
-      expect(dec(first[0]!.headers.h)).toBe("1");
+      expect(dec(first[0].headers.h)).toBe("1");
 
       consumer.seek({ topic: name, partition: 0, offset: 1n });
       consumer.pause([{ topic: name, partition: 0 }]);
       expect(await consumer.fetch({ maxWaitMs: 10 })).toHaveLength(0);
       consumer.resume([{ topic: name, partition: 0 }]);
-      expect((await consumer.fetch({ maxWaitMs: 1_000, maxMessages: 1 }))[0]!.offset).toBe(1n);
+      expect((await consumer.fetch({ maxWaitMs: 1_000, maxMessages: 1 }))[0].offset).toBe(1n);
 
       const metadata = await kafka.admin().metadata([name]);
       expect(metadata.topics[0]?.name).toBe(name);

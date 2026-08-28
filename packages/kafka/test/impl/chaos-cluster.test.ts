@@ -76,7 +76,7 @@ async function start(id: number): Promise<void> {
   compose("start", service(id));
   await waitFor(async () => {
     const client = new Kafka({
-      brokers: [brokers[id]!],
+      brokers: [brokers[id]],
       connectTimeoutMs: 300,
       requestTimeoutMs: 300,
       retry: { maxRetries: 0 },
@@ -145,7 +145,7 @@ async function scan(
   await waitFor(async () => {
     messages.push(...(await consumer.fetch({ maxWaitMs: 50, maxMessages: 500, copy: true })));
     return assignments.every(
-      ({ partition }) => (consumer.position(name, partition) ?? 0n) >= highs[partition]!,
+      ({ partition }) => (consumer.position(name, partition) ?? 0n) >= highs[partition],
     )
       ? true
       : undefined;
@@ -170,7 +170,7 @@ chaos("three-broker Kafka chaos", () => {
       });
       const consumer = client.consumer({ fromBeginning: true });
       await consumer.assign([{ topic: name, partition: 0, offset: 0n }]);
-      const held = (await consumer.fetch({ maxWaitMs: 50, maxMessages: 1 }))[0]!;
+      const held = (await consumer.fetch({ maxWaitMs: 50, maxMessages: 1 }))[0];
       killed = await leader(client, name);
       stop(killed);
 

@@ -202,7 +202,7 @@ describe("Fetch sessions (mock broker)", () => {
 
       expect(requests.length).toBeGreaterThanOrEqual(2);
       expect(requests[0]).toMatchObject({ sessionId: 0, sessionEpoch: 0 });
-      expect(requests[0]!.topics[0]).toMatchObject({ name: "events" });
+      expect(requests[0].topics[0]).toMatchObject({ name: "events" });
       expect(requests[1]).toMatchObject({ sessionId: 42, sessionEpoch: 1 });
       const third = requests[2];
       if (third) {
@@ -297,10 +297,10 @@ describe("Fetch sessions (mock broker)", () => {
       consumer.pause([{ topic: "events", partition: 1 }]);
       await consumer.fetch({ maxWaitMs: 20 });
       expect(requests.length).toBe(2);
-      expect(requests[1]!.sessionEpoch).toBe(1);
-      const eventsForgotten = requests[1]!.forgotten.find((f) => f.name === "events");
+      expect(requests[1].sessionEpoch).toBe(1);
+      const eventsForgotten = requests[1].forgotten.find((f) => f.name === "events");
       expect(eventsForgotten).toBeTruthy();
-      expect(eventsForgotten!.partitions).toContain(1);
+      expect(eventsForgotten.partitions).toContain(1);
     } finally {
       await kafka.disconnect();
       listener.stop(true);

@@ -25,7 +25,7 @@ function readOwnedPartitions(request: Uint8Array): OwnedPartitionsResult {
     name: item.string() ?? "",
     metadata: item.bytes() ?? new Uint8Array(),
   }));
-  const metadata = new Reader(protocols[0]!.metadata);
+  const metadata = new Reader(protocols[0].metadata);
   const version = metadata.i16();
   metadata.array((item) => item.string());
   const partitions = metadata
@@ -34,7 +34,7 @@ function readOwnedPartitions(request: Uint8Array): OwnedPartitionsResult {
       return item.array((partition) => partition.i32());
     })
     .flat();
-  return { protocol: protocols[0]!.name, version, partitions };
+  return { protocol: protocols[0].name, version, partitions };
 }
 
 function cooperativeBody(key: number, port: number): Writer {
@@ -132,8 +132,8 @@ function retainPartitions(
       if (!partitions.includes(owned.partition) || ownedBy.has(owned.partition)) {
         continue;
       }
-      const mine = finals.get(member.memberId)!;
-      if (mine.length >= targetSize.get(member.memberId)!) {
+      const mine = finals.get(member.memberId);
+      if (mine.length >= targetSize.get(member.memberId)) {
         continue;
       }
       ownedBy.set(owned.partition, member.memberId);
@@ -155,14 +155,14 @@ function assignRemaining(
     }
     const chosen =
       members
-        .filter((member) => finals.get(member.memberId)!.length < targetSize.get(member.memberId)!)
+        .filter((member) => finals.get(member.memberId).length < targetSize.get(member.memberId))
         .sort(
           (a, b) =>
-            finals.get(a.memberId)!.length - finals.get(b.memberId)!.length ||
+            finals.get(a.memberId).length - finals.get(b.memberId).length ||
             a.memberId.localeCompare(b.memberId),
-        )[0] ?? members[0]!;
+        )[0] ?? members[0];
     ownedBy.set(partition, chosen.memberId);
-    finals.get(chosen.memberId)!.push(partition);
+    finals.get(chosen.memberId).push(partition);
   }
 }
 

@@ -1,5 +1,5 @@
 import { KafkaError } from "../errors.ts";
-import { arrayBufferBytes, isString } from "../type-guards.ts";
+import { arrayBufferBytes, isString, requiredValue } from "../type-guards.ts";
 import type {
   AbortedTransaction,
   Bytes,
@@ -281,7 +281,7 @@ export class Reader {
       if (this.offset >= this.data.byteLength) {
         throw new KafkaError(-1, MALFORMED_RESPONSE);
       }
-      const byte = this.data[this.offset++]!;
+      const byte = requiredValue(this.data[this.offset++], MALFORMED_RESPONSE);
       value += (byte & 0x7f) * 2 ** shift;
       if (!(byte & 0x80)) {
         return (value >>> 1) ^ -(value & 1);
@@ -296,7 +296,7 @@ export class Reader {
       if (this.offset >= this.data.byteLength) {
         throw new KafkaError(-1, MALFORMED_RESPONSE);
       }
-      const byte = this.data[this.offset++]!;
+      const byte = requiredValue(this.data[this.offset++], MALFORMED_RESPONSE);
       value |= BigInt(byte & 0x7f) << shift;
       if (!(byte & 0x80)) {
         return (value >> 1n) ^ -(value & 1n);
@@ -311,7 +311,7 @@ export class Reader {
       if (this.offset >= this.data.byteLength) {
         throw new KafkaError(-1, MALFORMED_RESPONSE);
       }
-      const byte = this.data[this.offset++]!;
+      const byte = requiredValue(this.data[this.offset++], MALFORMED_RESPONSE);
       value += (byte & 0x7f) * 2 ** shift;
       if (!(byte & 0x80)) {
         return value;
@@ -375,10 +375,13 @@ function createCrcTable(): Uint32Array {
 let crcTable: Uint32Array | undefined;
 
 export function crc32c(bytes: Uint8Array): number {
-  crcTable ??= createCrcTable();
+  if (!crcTable) {
+    crcTable = createCrcTable();
+  }
+  const table = requiredValue(crcTable);
   let crc = 0xffffffff;
   for (let i = 0; i < bytes.byteLength; i++) {
-    crc = crcTable[(crc ^ bytes[i]!) & 0xff]! ^ (crc >>> 8);
+    crc = requiredValue(table[(crc ^ requiredValue(bytes[i])) & 0xff]) ^ (crc >>> 8);
   }
   return (crc ^ 0xffffffff) >>> 0;
 }
@@ -389,23 +392,23 @@ export function murmur2(bytes: Uint8Array): number {
   let offset = 0;
   for (; offset + 4 <= bytes.byteLength; offset += 4) {
     let k =
-      bytes[offset]! |
-      (bytes[offset + 1]! << 8) |
-      (bytes[offset + 2]! << 16) |
-      (bytes[offset + 3]! << 24);
+      requiredValue(bytes[offset]) |
+      (requiredValue(bytes[offset + 1]) << 8) |
+      (requiredValue(bytes[offset + 2]) << 16) |
+      (requiredValue(bytes[offset + 3]) << 24);
     k = Math.imul(k, m);
     k ^= k >>> 24;
     hash = Math.imul(hash, m) ^ Math.imul(k, m);
   }
   const tail = bytes.byteLength - offset;
   if (tail >= 3) {
-    hash ^= bytes[offset + 2]! << 16;
+    hash ^= requiredValue(bytes[offset + 2]) << 16;
   }
   if (tail >= 2) {
-    hash ^= bytes[offset + 1]! << 8;
+    hash ^= requiredValue(bytes[offset + 1]) << 8;
   }
   if (tail >= 1) {
-    hash ^= bytes[offset]!;
+    hash ^= requiredValue(bytes[offset]);
     hash = Math.imul(hash, m);
   }
   hash ^= hash >>> 13;
@@ -680,7 +683,7 @@ export function encodeRecordBatch(
   const recordAttributes = producer.control ? 0x20 : 0;
   const batchAttributes =
     compressionAttributes[compression] | (producer.transactional && !producer.control ? 0x10 : 0);
-  const baseTimestamp = BigInt(records[0]!.timestamp ?? now);
+  const baseTimestamp = BigInt(requiredValue(records[0]).timestamp ?? now);
   const prepared = records.map((record, offset) =>
     prepareRecord(record, offset, baseTimestamp, now),
   );

@@ -22,14 +22,14 @@ describe("Kafka wire protocol primitives", () => {
     const messages = decodeRecordSet(batch, "events", 3, 7);
 
     expect(messages).toHaveLength(2);
-    expect(messages[0]!.offset).toBe(0n);
-    expect(messages[1]!.offset).toBe(1n);
-    expect(messages[1]!.timestamp).toBe(1005n);
-    expect(decode(messages[0]!.key)).toBe("a");
-    expect(decode(messages[0]!.value)).toBe("one");
-    expect(decode(messages[0]!.headers.trace!)).toBe("x");
-    expect(messages[0]!.headers.empty).toBeNull();
-    expect(messages[1]!.value).toBeNull();
+    expect(messages[0].offset).toBe(0n);
+    expect(messages[1].offset).toBe(1n);
+    expect(messages[1].timestamp).toBe(1005n);
+    expect(decode(messages[0].key)).toBe("a");
+    expect(decode(messages[0].value)).toBe("one");
+    expect(decode(messages[0].headers.trace)).toBe("x");
+    expect(messages[0].headers.empty).toBeNull();
+    expect(messages[1].value).toBeNull();
   });
 
   test("grows record batches beyond the initial writer buffer", () => {
@@ -51,10 +51,10 @@ describe("Kafka wire protocol primitives", () => {
     expect(messages.map((message) => message.offset)).toEqual(
       Array.from({ length: 25 }, (_, i) => BigInt(i)),
     );
-    expect(messages[0]!.value!.buffer).toBe(batch.buffer);
+    expect(messages[0].value.buffer).toBe(batch.buffer);
 
     const copied = new RecordSetDecoder(batch, "paged", 0, 1, { copy: true }).read(1);
-    expect(copied[0]!.value!.buffer).not.toBe(batch.buffer);
+    expect(copied[0].value.buffer).not.toBe(batch.buffer);
   });
 
   test("uses fast number varints and bigint varlongs", () => {
@@ -81,7 +81,7 @@ describe("Kafka wire protocol primitives", () => {
   test("CRC32C uses the Kafka polynomial and rejects corruption", () => {
     expect(crc32c(new TextEncoder().encode("123456789"))).toBe(0xe3069283);
     const batch = encodeRecordBatch([{ value: "safe" }]);
-    batch[batch.length - 1]! ^= 1;
+    batch[batch.length - 1] ^= 1;
     expect(() => decodeRecordSet(batch, "t", 0, 0)).toThrow(KafkaError);
   });
 

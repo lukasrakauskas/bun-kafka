@@ -87,7 +87,7 @@ export class CompatProducer {
       producerOptions(this.#options),
       this.#getter().release,
     );
-    return this.#producer!;
+    return this.#producer;
   }
 
   async send({ topic, messages, acks, timeout, compression }: KafkaJsSendRecord): Promise<

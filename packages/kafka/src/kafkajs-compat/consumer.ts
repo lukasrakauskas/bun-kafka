@@ -334,7 +334,7 @@ export class CompatConsumer {
         return;
       }
       this.#track(topic, partition, raw.offset + 1n);
-      await options.eachMessage!({
+      await options.eachMessage({
         topic,
         partition,
         message: toKafkajsMessage(raw),
@@ -372,7 +372,7 @@ export class CompatConsumer {
       autoCommitEnabled,
       heartbeat,
     );
-    await options.eachBatch!({
+    await options.eachBatch({
       batch,
       heartbeat,
       pause,
@@ -399,7 +399,7 @@ export class CompatConsumer {
     try {
       return String((await consumer.watermarks(topic, partition)).high);
     } catch {
-      return String(items[items.length - 1]!.offset + 1n);
+      return String(items[items.length - 1].offset + 1n);
     }
   }
 
@@ -420,10 +420,10 @@ export class CompatConsumer {
       highWatermark,
       messages,
       isEmpty: () => messages.length === 0,
-      firstOffset: () => (messages.length ? messages[0]!.offset : null),
-      lastOffset: () => (messages.length ? messages[messages.length - 1]!.offset : null),
+      firstOffset: () => (messages.length ? messages[0].offset : null),
+      lastOffset: () => (messages.length ? messages[messages.length - 1].offset : null),
       offsetLag: () =>
-        (BigInt(highWatermark) - BigInt(messages[messages.length - 1]!.offset) - 1n).toString(),
+        (BigInt(highWatermark) - BigInt(messages[messages.length - 1].offset) - 1n).toString(),
       isStale: () => !this.#running,
       resolveOffset: (offset) => resolved.add(BigInt(offset).toString()),
       commitOffsetsIfNecessary: async () => {
@@ -449,8 +449,8 @@ export class CompatConsumer {
         resolved.add(raw.offset.toString());
       }
     }
-    const first = items[0]!;
-    const last = items[items.length - 1]!;
+    const first = items[0];
+    const last = items[items.length - 1];
     const nextOffset = resolved.size ? highestOffset(resolved) + 1n : first.offset;
     if (nextOffset <= last.offset) {
       consumer.seek({ topic, partition, offset: nextOffset });

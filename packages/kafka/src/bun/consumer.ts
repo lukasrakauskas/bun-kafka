@@ -1,5 +1,5 @@
 import { KafkaError } from "../errors.ts";
-import { isBigInt, isString } from "../type-guards.ts";
+import { isBigInt, isString, requiredValue } from "../type-guards.ts";
 import type { ConsumedMessage, TopicPartition, Watermarks } from "../types.ts";
 import { Cluster } from "./cluster.ts";
 import { RecordSetDecoder, Reader, Writer } from "./protocol.ts";
@@ -164,9 +164,13 @@ function assignByRange(
   members.forEach((member, index) => {
     const start = index * base + Math.min(index, extra);
     const count = base + (index < extra ? 1 : 0);
-    assignments
-      .get(member.memberId)!
-      .push({ topic, partitions: partitions.slice(start, start + count) });
+    requiredValue(
+      assignments.get(member.memberId),
+      `Missing assignment for ${member.memberId}`,
+    ).push({
+      topic,
+      partitions: partitions.slice(start, start + count),
+    });
   });
 }
 
@@ -190,18 +194,27 @@ function assignCooperatively(
     }
     const chosen =
       members
-        .filter((member) => finals.get(member.memberId)!.length < targetSize.get(member.memberId)!)
+        .filter(
+          (member) =>
+            requiredValue(finals.get(member.memberId)).length <
+            requiredValue(targetSize.get(member.memberId)),
+        )
         .sort(
           (a, b) =>
-            finals.get(a.memberId)!.length - finals.get(b.memberId)!.length ||
-            a.memberId.localeCompare(b.memberId),
-        )[0] ?? members[0]!;
+            requiredValue(finals.get(a.memberId)).length -
+              requiredValue(finals.get(b.memberId)).length || a.memberId.localeCompare(b.memberId),
+        )[0] ?? requiredValue(members[0], "No group members available");
     ownedBy.set(partition, chosen.memberId);
-    finals.get(chosen.memberId)!.push(partition);
+    requiredValue(finals.get(chosen.memberId), `Missing assignment for ${chosen.memberId}`).push(
+      partition,
+    );
   }
   for (const [memberId, owned] of finals) {
     if (owned.length) {
-      assignments.get(memberId)!.push({ topic, partitions: owned.sort((a, b) => a - b) });
+      requiredValue(assignments.get(memberId), `Missing assignment for ${memberId}`).push({
+        topic,
+        partitions: owned.sort((a, b) => a - b),
+      });
     }
   }
 }
@@ -223,8 +236,11 @@ function retainOwnedPartitions(
       ) {
         continue;
       }
-      const mine = finals.get(member.memberId)!;
-      if (mine.length >= targetSize.get(member.memberId)!) {
+      const mine = requiredValue(
+        finals.get(member.memberId),
+        `Missing assignment for ${member.memberId}`,
+      );
+      if (mine.length >= requiredValue(targetSize.get(member.memberId))) {
         continue;
       }
       ownedBy.set(owned.partition, member.memberId);
@@ -316,7 +332,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const response = await this.#cluster.anyRequest(
       API_FIND_COORDINATOR,
       0,
-      new Writer().string(this.#groupId!),
+      new Writer().string(this.#requiredGroupId()),
     );
     const error = response.i16();
     const coordinator = response.i32();
@@ -376,7 +392,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     );
     const joinVersion = instanceId === undefined ? 2 : 3;
     const join = new Writer()
-      .string(this.#groupId!)
+      .string(this.#requiredGroupId())
       .i32(this.#options.sessionTimeoutMs ?? 45_000)
       .i32(this.#options.rebalanceTimeoutMs ?? 60_000)
       .string(this.#memberId);
@@ -422,7 +438,10 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   ): Promise<ConsumerAssignment[]> {
     const instanceId = this.#options.groupInstanceId;
     const version = instanceId === undefined ? 0 : 3;
-    const sync = new Writer().string(this.#groupId!).i32(this.#generationId).string(this.#memberId);
+    const sync = new Writer()
+      .string(this.#requiredGroupId())
+      .i32(this.#generationId)
+      .string(this.#memberId);
     if (instanceId !== undefined) {
       sync.string(instanceId);
     }
@@ -507,7 +526,10 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   async #sendHeartbeat(coordinator: number): Promise<void> {
     const instanceId = this.#options.groupInstanceId;
     const version = instanceId === undefined ? 0 : 3;
-    const body = new Writer().string(this.#groupId!).i32(this.#generationId).string(this.#memberId);
+    const body = new Writer()
+      .string(this.#requiredGroupId())
+      .i32(this.#generationId)
+      .string(this.#memberId);
     if (instanceId !== undefined) {
       body.string(instanceId);
     }
@@ -1038,7 +1060,10 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   #drain(max: number): Array<ConsumedMessage<K, V>> {
     const messages: Array<ConsumedMessage<K, V>> = [];
     while (this.#decoders.length && messages.length < max) {
-      const decoder = this.#decoders[0]!;
+      const decoder = this.#decoders[0];
+      if (!decoder) {
+        break;
+      }
       for (const message of decoder.read(max - messages.length)) {
         messages.push(this.#convertMessage(message));
       }
@@ -1230,6 +1255,13 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   disconnect(): Promise<void> {
     return this.close();
   }
+  #requiredGroupId(): string {
+    if (!this.#groupId) {
+      throw new Error("Consumer groupId is required");
+    }
+    return this.#groupId;
+  }
+
   #open(): void {
     if (this.#closed) {
       throw new Error("Consumer is closed");

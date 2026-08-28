@@ -380,7 +380,7 @@ describe("Read-committed isolation", () => {
 describe("Deserializers", () => {
   test("decodeRecordSet stays independent of deserialization", () => {
     const batch = encodeRecordBatch([{ key: "k", value: "v" }]);
-    expect(decode(decodeRecordSet(batch, "t", 0, 1)[0]!.value)).toBe("v");
+    expect(decode(decodeRecordSet(batch, "t", 0, 1)[0].value)).toBe("v");
   });
 
   test("value deserializer types fetched messages without casts", async () => {
@@ -454,7 +454,7 @@ describe("Deserializers", () => {
       await consumer.assign([{ topic: "events", partition: 0, offset: 0n }]);
       const [message] = await consumer.fetch({ maxWaitMs: 50 });
       expect(message).toBeDefined();
-      const value: { seq?: number } | null = message!.value;
+      const value: { seq?: number } | null = message.value;
       expect(value?.seq).toBe(1);
     } finally {
       await kafka.disconnect();

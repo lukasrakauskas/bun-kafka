@@ -82,7 +82,7 @@ function createSaslCredentials(
   token: string | (() => Promise<string>) | undefined,
 ): BunKafkaSasl | undefined {
   if (mechanism === "plain" || mechanism === "scram-sha-256" || mechanism === "scram-sha-512") {
-    return createBasicSasl(mechanism, config!);
+    return createBasicSasl(mechanism, config);
   }
   return mechanism === "oauthbearer" && token ? { mechanism, token } : undefined;
 }

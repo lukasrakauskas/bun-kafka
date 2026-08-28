@@ -15,7 +15,7 @@ function track<T extends { close(): Promise<void> }>(client: T): T {
 afterEach(async () => {
   while (open.length) {
     try {
-      await open.pop()!.close();
+      await open.pop().close();
     } catch {}
   }
 });
@@ -39,7 +39,7 @@ describe("Bun consumer batches", () => {
       batches++;
       expect(batch.length).toBeLessThanOrEqual(16);
       for (const message of batch) {
-        got.push(dec(message.value)!);
+        got.push(dec(message.value));
       }
     }
     expect(got).toHaveLength(50);

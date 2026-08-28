@@ -74,8 +74,8 @@ describe("Producer delivery options", () => {
       });
       // Both messages land on the single mocked partition; results are partition-level.
       expect(results).toHaveLength(1);
-      expect(results[0]!.baseOffset).toBe(-1n);
-      expect(results[0]!.logAppendTime).toBe(-1n);
+      expect(results[0].baseOffset).toBe(-1n);
+      expect(results[0].logAppendTime).toBe(-1n);
       for (let i = 0; i < 50 && produceRequests === 0; i++) {
         await Bun.sleep(10);
       }

@@ -1,3 +1,5 @@
+import { requiredValue } from "../type-guards.ts";
+
 /**
  * Pure-TypeScript LZ4 block and frame codecs used for Kafka record batches.
  *
@@ -64,7 +66,7 @@ export function xxhash32(input: Uint8Array, seed = 0): number {
     remaining -= 4;
   }
   while (remaining > 0) {
-    h = (h + Math.imul(input[at]!, XX_PRIME5)) >>> 0;
+    h = (h + Math.imul(requiredValue(input[at]), XX_PRIME5)) >>> 0;
     h = Math.imul(rotl(h, 11), XX_PRIME1) >>> 0;
     at++;
     remaining--;
@@ -99,7 +101,7 @@ function readLz4Length(input: Uint8Array, offset: number, length: number): Lz4Le
     if (offset >= input.byteLength) {
       throw new RangeError("Invalid LZ4 extended length");
     }
-    const byte = input[offset++]!;
+    const byte = requiredValue(input[offset++], "Invalid LZ4 extended length");
     length += byte;
     if (byte !== 255) {
       return { offset, length };
@@ -110,7 +112,7 @@ function readLz4Length(input: Uint8Array, offset: number, length: number): Lz4Le
 function copyLz4Match(output: Uint8Array, pos: number, back: number, length: number): void {
   let from = pos - back;
   for (let i = 0; i < length; i++) {
-    output[pos + i] = output[from++]!;
+    output[pos + i] = requiredValue(output[from++], "Invalid LZ4 match");
   }
 }
 
@@ -122,9 +124,12 @@ function findLz4Match(
   matchLimit: number,
 ): { candidate: number; length: number } | undefined {
   const value =
-    input[pos]! | (input[pos + 1]! << 8) | (input[pos + 2]! << 16) | (input[pos + 3]! << 24);
+    requiredValue(input[pos]) |
+    (requiredValue(input[pos + 1]) << 8) |
+    (requiredValue(input[pos + 2]) << 16) |
+    (requiredValue(input[pos + 3]) << 24);
   const hash = (Math.imul(value, XX_PRIME1) >>> (32 - bits)) & (table.length - 1);
-  const candidate = table[hash]!;
+  const candidate = requiredValue(table[hash]);
   table[hash] = pos;
   if (
     candidate === -1 ||
@@ -215,7 +220,7 @@ function decodeLz4Sequence(
   offset: number,
   pos: number,
 ): Lz4BlockState {
-  const token = input[offset++]!;
+  const token = requiredValue(input[offset++], "Invalid LZ4 block");
   const literal = readLz4Length(input, offset, token >> 4);
   offset = literal.offset;
   output = growLz4Output(output, pos + literal.length);
@@ -231,7 +236,7 @@ function decodeLz4Sequence(
   if (offset + 2 > input.byteLength) {
     throw new RangeError("Invalid LZ4 match offset");
   }
-  const back = input[offset]! | (input[offset + 1]! << 8);
+  const back = requiredValue(input[offset]) | (requiredValue(input[offset + 1]) << 8);
   offset += 2;
   if (back === 0 || back > pos) {
     throw new RangeError("Invalid LZ4 match offset");
@@ -249,7 +254,7 @@ function readLz4FrameHeader(input: Uint8Array, view: DataView): Lz4FrameHeader {
   if (input.byteLength < 7 || view.getUint32(0, true) !== MAGIC) {
     throw new RangeError("Invalid LZ4 frame magic");
   }
-  const flg = input[4]!;
+  const flg = requiredValue(input[4], "Invalid LZ4 frame header");
   if (flg >>> 6 !== 1) {
     throw new RangeError(`Unsupported LZ4 frame version ${flg >>> 6}`);
   }

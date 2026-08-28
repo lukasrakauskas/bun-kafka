@@ -54,7 +54,7 @@ async function sha256(value: Uint8Array): Promise<Uint8Array> {
 function xor(left: Uint8Array, right: Uint8Array): Uint8Array {
   const result = new Uint8Array(left.length);
   for (let i = 0; i < left.length; i++) {
-    result[i] = left[i]! ^ right[i]!;
+    result[i] = left[i] ^ right[i];
   }
   return result;
 }
