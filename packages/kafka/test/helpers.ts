@@ -1,4 +1,4 @@
-import { BunAdmin, Consumer, Producer, type KafkaOptions } from "../index.ts";
+import { Admin, Consumer, Producer, type KafkaOptions } from "../index.ts";
 
 export const BROKERS = process.env.KAFKA_BROKERS ?? "127.0.0.1:9092";
 
@@ -17,7 +17,7 @@ export function consumer(extra: { fromBeginning?: boolean } = {}) {
 }
 
 export function admin() {
-  return new BunAdmin(options());
+  return new Admin(options());
 }
 
 export async function waitFor<T>(

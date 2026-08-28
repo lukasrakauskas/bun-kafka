@@ -37,7 +37,7 @@ The Docker runner defaults to 1,000 fault cycles, but the last full run used 10 
 
 ### 1. Fix and use the real Admin topic APIs
 
-`BunAdmin.createTopics()` closed the Redpanda connection during manual testing. The cluster suite currently uses `rpk topic create` and `rpk topic delete` as a workaround. Find the request encoding error, add a real-broker regression test, and then remove this workaround.
+`Admin.createTopics()` closed the Redpanda connection during manual testing. The cluster suite currently uses `rpk topic create` and `rpk topic delete` as a workaround. Find the request encoding error, add a real-broker regression test, and then remove this workaround.
 
 ### 2. Complete TLS fault coverage
 

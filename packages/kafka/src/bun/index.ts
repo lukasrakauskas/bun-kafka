@@ -1,7 +1,7 @@
 export { Kafka } from "./client.ts";
 export { Producer } from "./producer/index.ts";
 export { Consumer } from "../consumer/index.ts";
-export { BunAdmin } from "./admin.ts";
+export { Admin } from "./admin.ts";
 export type {
   KafkaOptions,
   KafkaEvent,

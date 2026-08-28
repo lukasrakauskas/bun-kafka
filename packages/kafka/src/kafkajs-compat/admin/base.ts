@@ -1,4 +1,4 @@
-import { BunAdmin } from "../../bun/admin.ts";
+import { Admin } from "../../bun/admin.ts";
 import { ADMIN_EVENTS } from "../constants.ts";
 import type { ClusterGetter } from "../config.ts";
 import { Emitter, Logger } from "../logger.ts";
@@ -6,7 +6,7 @@ import type { LogFields } from "../types.ts";
 
 export class CompatAdminBase {
   events = ADMIN_EVENTS;
-  protected admin?: BunAdmin;
+  protected admin?: Admin;
   protected emitter = new Emitter();
 
   constructor(
@@ -22,8 +22,8 @@ export class CompatAdminBase {
     return this.log;
   }
 
-  protected underlying(): BunAdmin {
-    this.admin ??= new BunAdmin(this.getter().acquire(), this.getter().release);
+  protected underlying(): Admin {
+    this.admin ??= new Admin(this.getter().acquire(), this.getter().release);
     return this.admin;
   }
 

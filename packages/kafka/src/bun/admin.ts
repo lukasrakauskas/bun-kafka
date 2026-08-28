@@ -1,6 +1,6 @@
 import { AdminSecurity } from "./admin/security.ts";
 
-export class BunAdmin extends AdminSecurity {}
+export class Admin extends AdminSecurity {}
 
 export type {
   AclBinding,

@@ -1,4 +1,4 @@
-import { BunAdmin } from "../../bun/admin.ts";
+import { Admin } from "../../bun/admin.ts";
 import { Consumer } from "../../consumer/index.ts";
 import { CONSUMER_EVENTS } from "../constants.ts";
 import type { ClusterGetter } from "../config.ts";
@@ -195,7 +195,7 @@ export class CompatConsumerBase {
 
   async describeGroup(): Promise<CompatOptions> {
     try {
-      const admin = new BunAdmin(this.getter().acquire(), this.getter().release);
+      const admin = new Admin(this.getter().acquire(), this.getter().release);
       const [group] = await admin.describeGroups([String(this.options.groupId)]);
       admin.close();
       return group ?? {};

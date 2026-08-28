@@ -1,5 +1,5 @@
 import { Cluster } from "./cluster.ts";
-import { BunAdmin } from "./admin.ts";
+import { Admin } from "./admin.ts";
 import { Consumer, type ConsumerOptions } from "../consumer/index.ts";
 import { Producer, type ProducerOptions } from "./producer/index.ts";
 import {
@@ -48,8 +48,8 @@ export class Kafka {
     return consumer;
   }
 
-  admin(): BunAdmin {
-    const admin = new BunAdmin(this.#cluster, () => this.#clients.delete(admin));
+  admin(): Admin {
+    const admin = new Admin(this.#cluster, () => this.#clients.delete(admin));
     this.#clients.add(admin);
     return admin;
   }
