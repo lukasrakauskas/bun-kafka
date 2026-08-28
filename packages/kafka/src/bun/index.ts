@@ -1,6 +1,6 @@
 export { Kafka } from "./client.ts";
 export { BunProducer } from "./producer.ts";
-export { BunConsumer } from "./consumer.ts";
+export { Consumer } from "../consumer/index.ts";
 export { BunAdmin } from "./admin.ts";
 export type {
   KafkaOptions,
@@ -25,7 +25,7 @@ export type {
   ConsumerSubscribe,
   ConsumerAssignment,
   FetchOptions,
-} from "./consumer.ts";
+} from "../consumer/index.ts";
 export type {
   GroupDescription,
   GroupMemberDescription,

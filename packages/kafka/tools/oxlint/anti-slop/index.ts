@@ -11,6 +11,7 @@ import { noRuntimeTypeofRule } from "./rules/no-runtime-typeof.ts";
 import { noForbiddenTermInSymbolNamesRule } from "./rules/no-shape-in-symbol-names.ts";
 import { noUnknownParametersRule } from "./rules/no-unknown-parameters.ts";
 import { noUnknownReturnsRule } from "./rules/no-unknown-returns.ts";
+import { noVagueClassNamesRule } from "./rules/no-vague-class-names.ts";
 import { noUnknownTypeAliasesRule } from "./rules/no-unknown-type-aliases.ts";
 import { noUnsafeDictionaryTypeRule } from "./rules/no-unsafe-dictionary-type.ts";
 import { noWidenThenAssertRule } from "./rules/no-widen-then-assert.ts";
@@ -31,6 +32,7 @@ const antiSlopPlugin = eslintCompatPlugin({
     "no-shape-in-symbol-names": noForbiddenTermInSymbolNamesRule,
     "no-unknown-parameters": noUnknownParametersRule,
     "no-unknown-returns": noUnknownReturnsRule,
+    "no-vague-class-names": noVagueClassNamesRule,
     "no-unknown-type-aliases": noUnknownTypeAliasesRule,
     "no-widen-then-assert": noWidenThenAssertRule,
   },

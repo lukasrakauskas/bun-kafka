@@ -1,6 +1,6 @@
 import { Cluster } from "./cluster.ts";
 import { BunAdmin } from "./admin.ts";
-import { BunConsumer, type ConsumerOptions } from "./consumer.ts";
+import { Consumer, type ConsumerOptions } from "../consumer/index.ts";
 import { BunProducer, type ProducerOptions } from "./producer.ts";
 import {
   DEFAULT_HEALTH_CHECK_TIMEOUT_MS,
@@ -40,8 +40,8 @@ export class Kafka {
 
   consumer<K = Uint8Array | null, V = Uint8Array | null>(
     options: ConsumerOptions<K, V> = {},
-  ): BunConsumer<K, V> {
-    const consumer = new BunConsumer<K, V>(this.#cluster, options, () =>
+  ): Consumer<K, V> {
+    const consumer = new Consumer<K, V>(this.#cluster, options, () =>
       this.#clients.delete(consumer),
     );
     this.#clients.add(consumer);

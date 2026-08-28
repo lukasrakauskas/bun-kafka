@@ -1,5 +1,5 @@
 import { BunAdmin } from "../bun/admin.ts";
-import { BunConsumer } from "../bun/consumer.ts";
+import { Consumer } from "../consumer/index.ts";
 import { DEFAULT_FETCH_MAX_WAIT_MS, DEFAULT_KAFKAJS_MAX_WAIT_MS_CAP } from "../bun/shared.ts";
 import { hasStringName, isBoolean, isNumber, isString } from "../type-guards.ts";
 import type { ConsumedMessage } from "../types.ts";
@@ -16,7 +16,7 @@ function numberOption(value: CompatValue): number | undefined {
 
 function createCompatConsumerOptions(
   options: CompatOptions,
-): ConstructorParameters<typeof BunConsumer>[1] {
+): ConstructorParameters<typeof Consumer>[1] {
   const assignors = Array.isArray(options.partitionAssignors) ? options.partitionAssignors : [];
   const cooperative = assignors.some(
     (assignor) => hasStringName(assignor) && assignor.name === "CooperativeStickyAssignor",
@@ -94,7 +94,7 @@ export class CompatConsumer {
   #logger: Logger;
   #options: CompatOptions;
   #emitter = new Emitter();
-  #consumer?: BunConsumer;
+  #consumer?: Consumer;
   #running = false;
   #stopping?: Promise<void>;
   #paused = new Set<string>();
@@ -116,9 +116,9 @@ export class CompatConsumer {
     return this.#logger;
   }
 
-  #underlying(): BunConsumer {
+  #underlying(): Consumer {
     if (!this.#consumer) {
-      this.#consumer = new BunConsumer(
+      this.#consumer = new Consumer(
         this.#getter().acquire(),
         createCompatConsumerOptions(this.#options),
         this.#getter().release,
@@ -220,7 +220,7 @@ export class CompatConsumer {
   }
 
   async #loopIteration(
-    consumer: BunConsumer,
+    consumer: Consumer,
     options: RunOptions,
     autoCommitEnabled: boolean,
     concurrent: number,
@@ -250,7 +250,7 @@ export class CompatConsumer {
 
   async #processGroups(
     messages: ConsumedMessage[],
-    consumer: BunConsumer,
+    consumer: Consumer,
     options: RunOptions,
     autoCommitEnabled: boolean,
     concurrent: number,
@@ -290,7 +290,7 @@ export class CompatConsumer {
   async #processGroup(
     key: string,
     items: ConsumedMessage[],
-    consumer: BunConsumer,
+    consumer: Consumer,
     options: RunOptions,
     autoCommitEnabled: boolean,
   ): Promise<void> {
@@ -328,7 +328,7 @@ export class CompatConsumer {
     topic: string,
     partition: number,
     items: ConsumedMessage[],
-    consumer: BunConsumer,
+    consumer: Consumer,
     options: RunOptions,
     heartbeat: () => Promise<void>,
     pause: () => void,
@@ -356,7 +356,7 @@ export class CompatConsumer {
     topic: string,
     partition: number,
     items: ConsumedMessage[],
-    consumer: BunConsumer,
+    consumer: Consumer,
     options: RunOptions,
     autoCommitEnabled: boolean,
     heartbeat: () => Promise<void>,
@@ -398,7 +398,7 @@ export class CompatConsumer {
     topic: string,
     partition: number,
     items: ConsumedMessage[],
-    consumer: BunConsumer,
+    consumer: Consumer,
   ): Promise<string> {
     try {
       return String((await consumer.watermarks(topic, partition)).high);
@@ -413,7 +413,7 @@ export class CompatConsumer {
     highWatermark: string,
     messages: KafkaJsConsumedMessage[],
     resolved: Set<string>,
-    consumer: BunConsumer,
+    consumer: Consumer,
     options: RunOptions,
     autoCommitEnabled: boolean,
     heartbeat: () => Promise<void>,
@@ -444,7 +444,7 @@ export class CompatConsumer {
     partition: number,
     items: ConsumedMessage[],
     resolved: Set<string>,
-    consumer: BunConsumer,
+    consumer: Consumer,
     options: RunOptions,
     autoCommitEnabled: boolean,
   ): Promise<void> {
@@ -475,7 +475,7 @@ export class CompatConsumer {
     this.#pendingOffsets.set(`${topic}\u0000${partition}`, { topic, partition, offset });
   }
 
-  async #flushCommits(consumer: BunConsumer, options: RunOptions): Promise<void> {
+  async #flushCommits(consumer: Consumer, options: RunOptions): Promise<void> {
     if (!this.#pendingOffsets.size) {
       return;
     }
