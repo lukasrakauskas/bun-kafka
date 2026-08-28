@@ -76,100 +76,194 @@ export function xxhash32(input: Uint8Array, seed = 0): number {
   return (h ^ (h >>> 16)) >>> 0;
 }
 
-/** Decompress one LZ4 block. The output grows dynamically when `outputSize` is unknown. */
-export function lz4DecompressBlock(input: Uint8Array, outputSize?: number): Uint8Array {
-  let output = new Uint8Array(
-    outputSize && outputSize > 0 ? outputSize : Math.max(4096, input.byteLength * 4),
-  );
-  let pos = 0;
-  let offset = 0;
-  const ensure = (needed: number) => {
-    if (needed <= output.byteLength) return;
-    let capacity = output.byteLength;
-    while (capacity < needed) capacity *= 2;
-    const next = new Uint8Array(capacity);
-    next.set(output);
-    output = next;
-  };
-  const readVarlen = (): number => {
-    let len = 0;
-    while (true) {
-      if (offset >= input.byteLength) throw new RangeError("Invalid LZ4 extended length");
-      const byte = input[offset++]!;
-      len += byte;
-      if (byte !== 255) return len;
-    }
-  };
-  while (offset < input.byteLength) {
-    const token = input[offset++]!;
-    let literalLength = token >> 4;
-    if (literalLength === 15) literalLength += readVarlen();
-    ensure(pos + literalLength);
-    if (offset + literalLength > input.byteLength)
-      throw new RangeError("Invalid LZ4 literal length");
-    output.set(input.subarray(offset, offset + literalLength), pos);
-    offset += literalLength;
-    pos += literalLength;
-    if (offset >= input.byteLength) break;
-    if (offset + 2 > input.byteLength) throw new RangeError("Invalid LZ4 match offset");
-    const back = input[offset]! | (input[offset + 1]! << 8);
-    offset += 2;
-    if (back === 0 || back > pos) throw new RangeError("Invalid LZ4 match offset");
-    let matchLength = (token & 15) + 4;
-    if ((token & 15) === 15) matchLength += readVarlen();
-    ensure(pos + matchLength);
-    let from = pos - back;
-    for (let i = 0; i < matchLength; i++) output[pos + i] = output[from++]!;
-    pos += matchLength;
-  }
-  if (outputSize !== undefined && outputSize > 0 && pos !== outputSize) {
-    throw new RangeError("LZ4 payload does not match its declared size");
-  }
-  return output.subarray(0, pos).slice();
+type Lz4Length = { offset: number; length: number };
+
+function growLz4Output(output: Uint8Array, needed: number): Uint8Array {
+  if (needed <= output.byteLength) return output;
+  let capacity = output.byteLength;
+  while (capacity < needed) capacity *= 2;
+  const next = new Uint8Array(capacity);
+  next.set(output);
+  return next;
 }
 
-/** Decompress an LZ4 frame produced by any conformant encoder. */
-export function lz4Decompress(input: Uint8Array): Uint8Array {
-  const view = new DataView(input.buffer, input.byteOffset, input.byteLength);
+function readLz4Length(input: Uint8Array, offset: number, length: number): Lz4Length {
+  if (length !== 15) return { offset, length };
+  while (true) {
+    if (offset >= input.byteLength) throw new RangeError("Invalid LZ4 extended length");
+    const byte = input[offset++]!;
+    length += byte;
+    if (byte !== 255) return { offset, length };
+  }
+}
+
+function copyLz4Match(output: Uint8Array, pos: number, back: number, length: number): void {
+  let from = pos - back;
+  for (let i = 0; i < length; i++) output[pos + i] = output[from++]!;
+}
+
+function findLz4Match(
+  input: Uint8Array,
+  pos: number,
+  table: Int32Array,
+  bits: number,
+  matchLimit: number,
+): { candidate: number; length: number } | undefined {
+  const value =
+    input[pos]! | (input[pos + 1]! << 8) | (input[pos + 2]! << 16) | (input[pos + 3]! << 24);
+  const hash = (Math.imul(value, XX_PRIME1) >>> (32 - bits)) & (table.length - 1);
+  const candidate = table[hash]!;
+  table[hash] = pos;
+  if (
+    candidate === -1 ||
+    pos - candidate >= 65536 ||
+    input[candidate] !== input[pos] ||
+    input[candidate + 1] !== input[pos + 1] ||
+    input[candidate + 2] !== input[pos + 2] ||
+    input[candidate + 3] !== input[pos + 3]
+  )
+    return;
+  let length = 4;
+  while (pos + length < matchLimit && input[candidate + length] === input[pos + length]) length++;
+  return { candidate, length };
+}
+
+function emitLz4Sequence(
+  output: Uint8Array,
+  input: Uint8Array,
+  at: number,
+  literalsFrom: number,
+  literalsTo: number,
+  matchFrom: number,
+  matchLength: number,
+): number {
+  const literals = literalsTo - literalsFrom;
+  const tokenAt = at++;
+  let literalCode = literals;
+  if (literals >= 15) {
+    literalCode = 15;
+    let rest = literals - 15;
+    while (rest >= 255) {
+      output[at++] = 255;
+      rest -= 255;
+    }
+    output[at++] = rest;
+  }
+  output.set(input.subarray(literalsFrom, literalsTo), at);
+  at += literals;
+  let matchExtra = -1;
+  let matchCode = matchLength - 4;
+  if (matchCode >= 15) {
+    matchExtra = matchCode - 15;
+    matchCode = 15;
+  }
+  const back = literalsTo - matchFrom;
+  output[tokenAt] = (literalCode << 4) | matchCode;
+  output[at++] = back & 0xff;
+  output[at++] = back >>> 8;
+  if (matchExtra >= 0) {
+    while (matchExtra >= 255) {
+      output[at++] = 255;
+      matchExtra -= 255;
+    }
+    output[at++] = matchExtra;
+  }
+  return at;
+}
+
+function emitLz4Literals(output: Uint8Array, input: Uint8Array, at: number, from: number): number {
+  const count = input.byteLength - from;
+  const code = Math.min(count, 15);
+  output[at++] = code << 4;
+  if (count >= 15) {
+    let remaining = count - 15;
+    while (remaining >= 255) {
+      output[at++] = 255;
+      remaining -= 255;
+    }
+    output[at++] = remaining;
+  }
+  output.set(input.subarray(from), at);
+  return at + count;
+}
+
+type Lz4BlockState = {
+  output: Uint8Array<ArrayBufferLike>;
+  offset: number;
+  pos: number;
+  done: boolean;
+};
+
+function decodeLz4Sequence(
+  input: Uint8Array,
+  output: Uint8Array<ArrayBufferLike>,
+  offset: number,
+  pos: number,
+): Lz4BlockState {
+  const token = input[offset++]!;
+  const literal = readLz4Length(input, offset, token >> 4);
+  offset = literal.offset;
+  output = growLz4Output(output, pos + literal.length);
+  if (offset + literal.length > input.byteLength)
+    throw new RangeError("Invalid LZ4 literal length");
+  output.set(input.subarray(offset, offset + literal.length), pos);
+  offset += literal.length;
+  pos += literal.length;
+  if (offset >= input.byteLength) return { output, offset, pos, done: true };
+  if (offset + 2 > input.byteLength) throw new RangeError("Invalid LZ4 match offset");
+  const back = input[offset]! | (input[offset + 1]! << 8);
+  offset += 2;
+  if (back === 0 || back > pos) throw new RangeError("Invalid LZ4 match offset");
+  const match = readLz4Length(input, offset, token & 15);
+  offset = match.offset;
+  output = growLz4Output(output, pos + match.length + 4);
+  copyLz4Match(output, pos, back, match.length + 4);
+  return { output, offset, pos: pos + match.length + 4, done: false };
+}
+
+type Lz4FrameHeader = { offset: number; contentSize: bigint | undefined };
+
+function readLz4FrameHeader(input: Uint8Array, view: DataView): Lz4FrameHeader {
   if (input.byteLength < 7 || view.getUint32(0, true) !== MAGIC)
     throw new RangeError("Invalid LZ4 frame magic");
   const flg = input[4]!;
-  const bd = input[5]!;
   if (flg >>> 6 !== 1) throw new RangeError(`Unsupported LZ4 frame version ${flg >>> 6}`);
   const expectedChecksum = (xxhash32(input.subarray(4, 6)) >>> 8) & 0xff;
   if (input[6] !== expectedChecksum) throw new RangeError("Invalid LZ4 frame header checksum");
-  void bd;
   let offset = 7;
-  if (flg & 0x08) offset += 8; // content size
-  if (flg & 0x01) offset += 4; // dictionary id
+  if (flg & 0x08) offset += 8;
+  if (flg & 0x01) offset += 4;
   if (flg & 0x02) throw new RangeError("LZ4 skippable headers inside frames are unsupported");
-  const contentSize = flg & 0x08 ? view.getBigUint64(7, true) : undefined;
-  let output: Uint8Array | undefined =
-    contentSize !== undefined && contentSize >= 0n
-      ? new Uint8Array(Number(contentSize))
-      : undefined;
-  let parts: Uint8Array[] | undefined;
-  let pos = 0;
-  while (true) {
-    if (offset + 4 > input.byteLength) throw new RangeError("Truncated LZ4 frame");
-    const size = view.getUint32(offset, true);
-    offset += 4;
-    if (size === 0) break;
-    const raw = (size & 0x80000000) !== 0;
-    const length = size & 0x7fffffff;
-    const data = input.subarray(offset, offset + length);
-    offset += length;
-    const decoded = raw ? data.slice() : lz4DecompressBlock(data, undefined);
-    if (output && pos + decoded.byteLength <= output.byteLength) {
-      output.set(decoded, pos);
-    } else {
-      parts ??= [];
-      parts.push(decoded);
-    }
-    pos += decoded.byteLength;
-  }
-  if (!parts) return output ? output.subarray(0, pos) : new Uint8Array();
-  // Rare path: unknown content size or oversized decode. Assemble everything.
+  return { offset, contentSize: flg & 0x08 ? view.getBigUint64(7, true) : undefined };
+}
+
+type Lz4FrameBlock = { offset: number; size: number; data: Uint8Array };
+type Lz4OutputParts = { output: Uint8Array | undefined; parts: Uint8Array[] | undefined };
+
+function readLz4FrameBlock(input: Uint8Array, view: DataView, offset: number): Lz4FrameBlock {
+  if (offset + 4 > input.byteLength) throw new RangeError("Truncated LZ4 frame");
+  const size = view.getUint32(offset, true);
+  offset += 4;
+  const length = size & 0x7fffffff;
+  return { offset: offset + length, size, data: input.subarray(offset, offset + length) };
+}
+
+function appendLz4Block(
+  output: Uint8Array | undefined,
+  parts: Uint8Array[] | undefined,
+  decoded: Uint8Array,
+  pos: number,
+): Lz4OutputParts {
+  if (output && pos + decoded.byteLength <= output.byteLength) output.set(decoded, pos);
+  else (parts ??= []).push(decoded);
+  return { output, parts };
+}
+
+function assembleLz4Parts(
+  output: Uint8Array | undefined,
+  parts: Uint8Array[],
+  pos: number,
+): Uint8Array {
   const all = [...(output ? [output.subarray(0, Math.min(pos, output.byteLength))] : []), ...parts];
   const result = new Uint8Array(all.reduce((sum, part) => sum + part.byteLength, 0));
   let at = 0;
@@ -180,116 +274,68 @@ export function lz4Decompress(input: Uint8Array): Uint8Array {
   return result;
 }
 
+/** Decompress one LZ4 block. The output grows dynamically when `outputSize` is unknown. */
+export function lz4DecompressBlock(input: Uint8Array, outputSize?: number): Uint8Array {
+  let output: Uint8Array<ArrayBufferLike> = new Uint8Array(
+    outputSize && outputSize > 0 ? outputSize : Math.max(4096, input.byteLength * 4),
+  );
+  let offset = 0;
+  let pos = 0;
+  while (offset < input.byteLength) {
+    const state = decodeLz4Sequence(input, output, offset, pos);
+    ({ output, offset, pos } = state);
+    if (state.done) break;
+  }
+  if (outputSize !== undefined && outputSize > 0 && pos !== outputSize)
+    throw new RangeError("LZ4 payload does not match its declared size");
+  return output.subarray(0, pos).slice();
+}
+/** Decompress an LZ4 frame produced by any conformant encoder. */
+export function lz4Decompress(input: Uint8Array): Uint8Array {
+  const view = new DataView(input.buffer, input.byteOffset, input.byteLength);
+  const header = readLz4FrameHeader(input, view);
+  let offset = header.offset;
+  let output: Uint8Array | undefined =
+    header.contentSize === undefined ? undefined : new Uint8Array(Number(header.contentSize));
+  let parts: Uint8Array[] | undefined;
+  let pos = 0;
+  while (true) {
+    const block = readLz4FrameBlock(input, view, offset);
+    offset = block.offset;
+    if (block.size === 0) break;
+    const decoded =
+      (block.size & 0x80000000) !== 0 ? block.data.slice() : lz4DecompressBlock(block.data);
+    ({ output, parts } = appendLz4Block(output, parts, decoded, pos));
+    pos += decoded.byteLength;
+  }
+  return parts
+    ? assembleLz4Parts(output, parts, pos)
+    : output
+      ? output.subarray(0, pos)
+      : new Uint8Array();
+}
 /** Compress one LZ4 block with a greedy hash-table matcher. */
 export function lz4CompressBlock(input: Uint8Array): Uint8Array {
   const n = input.byteLength;
   const output = new Uint8Array(n + Math.ceil(n / 255) + 16);
+  if (n < 13) return output.subarray(0, emitLz4Literals(output, input, 0, 0)).slice();
+  const bits = Math.min(Math.max(Math.ceil(Math.log2(n)), 4), 16);
+  const table = new Int32Array(1 << bits).fill(-1);
+  const matchLimit = n - 5;
   let at = 0;
-  const emitSequence = (
-    literalsFrom: number,
-    literalsTo: number,
-    matchFrom: number,
-    matchLength: number,
-  ) => {
-    const literals = literalsTo - literalsFrom;
-    const tokenAt = at++;
-    let literalCode = literals;
-    if (literals >= 15) {
-      literalCode = 15;
-      let rest = literals - 15;
-      while (rest >= 255) {
-        output[at++] = 255;
-        rest -= 255;
-      }
-      output[at++] = rest;
-    }
-    output.set(input.subarray(literalsFrom, literalsTo), at);
-    at += literals;
-    let matchExtra = -1;
-    let matchCode = matchLength - 4;
-    if (matchCode >= 15) {
-      matchExtra = matchCode - 15;
-      matchCode = 15;
-    }
-    const back = literalsTo - matchFrom;
-    output[tokenAt] = (literalCode << 4) | matchCode;
-    output[at++] = back & 0xff;
-    output[at++] = back >>> 8;
-    if (matchExtra >= 0) {
-      while (matchExtra >= 255) {
-        output[at++] = 255;
-        matchExtra -= 255;
-      }
-      output[at++] = matchExtra;
-    }
-  };
-  if (n >= 13) {
-    const bits = Math.min(Math.max(Math.ceil(Math.log2(n)), 4), 16);
-    const table = new Int32Array(1 << bits).fill(-1);
-    const mfLimit = n - 12;
-    const matchLimit = n - 5;
-    let pos = 0;
-    let literalsFrom = 0;
-    while (pos <= mfLimit) {
-      const v =
-        input[pos]! | (input[pos + 1]! << 8) | (input[pos + 2]! << 16) | (input[pos + 3]! << 24);
-      const h = (Math.imul(v, XX_PRIME1) >>> (32 - bits)) & (table.length - 1);
-      const candidate: number | undefined = table[h];
-      table[h] = pos;
-      if (
-        candidate !== undefined &&
-        candidate !== -1 &&
-        pos - candidate < 65536 &&
-        input[candidate]! === input[pos]! &&
-        input[candidate + 1]! === input[pos + 1]! &&
-        input[candidate + 2]! === input[pos + 2]! &&
-        input[candidate + 3]! === input[pos + 3]!
-      ) {
-        let len = 4;
-        while (pos + len < matchLimit && input[candidate + len] === input[pos + len]) len++;
-        emitSequence(literalsFrom, pos, candidate, len);
-        pos += len;
-        literalsFrom = pos;
-        continue;
-      }
+  let pos = 0;
+  let literalsFrom = 0;
+  while (pos <= n - 12) {
+    const match = findLz4Match(input, pos, table, bits, matchLimit);
+    if (!match) {
       pos++;
+      continue;
     }
-    // Final literals after the last match: token without a match.
-    const count = n - literalsFrom;
-    let code = count;
-    if (count >= 15) {
-      code = 15;
-      const rest = count - 15;
-      output[at++] = code << 4;
-      let remaining = rest;
-      while (remaining >= 255) {
-        output[at++] = 255;
-        remaining -= 255;
-      }
-      output[at++] = remaining;
-    } else {
-      output[at++] = code << 4;
-    }
-    output.set(input.subarray(literalsFrom, n), at);
-    at += count;
-    return output.subarray(0, at).slice();
+    at = emitLz4Sequence(output, input, at, literalsFrom, pos, match.candidate, match.length);
+    pos += match.length;
+    literalsFrom = pos;
   }
-  // Short block: pure literal run.
-  let code = n;
-  if (n >= 15) {
-    code = 15;
-    output[at++] = code << 4;
-    let rest = n - 15;
-    while (rest >= 255) {
-      output[at++] = 255;
-      rest -= 255;
-    }
-    output[at++] = rest;
-  } else {
-    output[at++] = code << 4;
-  }
-  output.set(input, at);
-  at += n;
+  at = emitLz4Literals(output, input, at, literalsFrom);
   return output.subarray(0, at).slice();
 }
 

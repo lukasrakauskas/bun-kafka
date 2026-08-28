@@ -20,6 +20,100 @@ function readVarint(input: Uint8Array, offset: number) {
   }
 }
 
+type SnappyCopy = { offset: number; length: number; back: number };
+type SnappyLiteral = { offset: number; length: number };
+
+function readLiteral(input: Uint8Array, offset: number, tag: number): SnappyLiteral {
+  let length = tag >> 2;
+  if (length >= 60) {
+    const extra = length - 59;
+    length = 0;
+    for (let i = 0; i < extra; i++) length |= input[offset++]! << (8 * i);
+  }
+  return { offset, length: length + 1 };
+}
+
+function readCopy(input: Uint8Array, offset: number, tag: number): SnappyCopy {
+  if ((tag & 3) === 1) {
+    return {
+      offset: offset + 1,
+      length: 4 + ((tag >> 2) & 7),
+      back: ((tag >> 5) << 8) | input[offset]!,
+    };
+  }
+  if ((tag & 3) === 2) {
+    return {
+      offset: offset + 2,
+      length: (tag >> 2) + 1,
+      back: input[offset]! | (input[offset + 1]! << 8),
+    };
+  }
+  return {
+    offset: offset + 4,
+    length: (tag >> 2) + 1,
+    back:
+      input[offset]! |
+      (input[offset + 1]! << 8) |
+      (input[offset + 2]! << 16) |
+      (input[offset + 3]! << 24),
+  };
+}
+
+function copyBytes(output: Uint8Array, pos: number, back: number, length: number): void {
+  let from = pos - back;
+  for (let i = 0; i < length; i++) output[pos + i] = output[from++]!;
+}
+
+function findSnappyMatch(
+  input: Uint8Array,
+  pos: number,
+  table: Int32Array,
+  shift: number,
+  tableSize: number,
+): { candidate: number; length: number } | undefined {
+  const value =
+    input[pos]! | (input[pos + 1]! << 8) | (input[pos + 2]! << 16) | (input[pos + 3]! << 24);
+  const hash = (Math.imul(value, 0x1e35a7bd) >>> shift) & (tableSize - 1);
+  const candidate = table[hash]!;
+  table[hash] = pos;
+  if (
+    candidate === -1 ||
+    pos - candidate >= 65536 ||
+    input[candidate] !== input[pos] ||
+    input[candidate + 1] !== input[pos + 1] ||
+    input[candidate + 2] !== input[pos + 2] ||
+    input[candidate + 3] !== input[pos + 3]
+  )
+    return;
+  let length = 4;
+  while (pos + length < input.length && input[candidate + length] === input[pos + length]) length++;
+  return { candidate, length };
+}
+
+type SnappyDecodeState = { offset: number; pos: number };
+
+function decodeSnappyTag(
+  input: Uint8Array,
+  output: Uint8Array,
+  tag: number,
+  offset: number,
+  pos: number,
+  length: number,
+): SnappyDecodeState {
+  if ((tag & 3) === 0) {
+    const literal = readLiteral(input, offset, tag);
+    if (literal.offset + literal.length > input.byteLength || pos + literal.length > length)
+      throw new RangeError("Invalid snappy literal");
+    output.set(input.subarray(literal.offset, literal.offset + literal.length), pos);
+    return { offset: literal.offset + literal.length, pos: pos + literal.length };
+  }
+  const copy = readCopy(input, offset, tag);
+  if (copy.back <= 0 || copy.back > pos || pos + copy.length > length)
+    throw new RangeError("Invalid snappy copy");
+  copyBytes(output, pos, copy.back, copy.length);
+  return { offset: copy.offset, pos: pos + copy.length };
+}
+
 export function snappyDecompressBlock(input: Uint8Array): Uint8Array {
   const { value: length, offset: start } = readVarint(input, 0);
   if (length < 0 || length > 0xffffffff) throw new RangeError("Invalid snappy uncompressed size");
@@ -28,44 +122,7 @@ export function snappyDecompressBlock(input: Uint8Array): Uint8Array {
   let offset = start;
   while (offset < input.byteLength) {
     const tag = input[offset++]!;
-    if ((tag & 3) === 0) {
-      let len = tag >> 2;
-      if (len >= 60) {
-        const extra = len - 59; // 60..63 mean 1..4 following bytes
-        len = 0;
-        for (let i = 0; i < extra; i++) len |= input[offset++]! << (8 * i);
-      }
-      len++;
-      if (offset + len > input.byteLength || pos + len > length)
-        throw new RangeError("Invalid snappy literal");
-      output.set(input.subarray(offset, offset + len), pos);
-      offset += len;
-      pos += len;
-      continue;
-    }
-    let len: number;
-    let back: number;
-    if ((tag & 3) === 1) {
-      len = 4 + ((tag >> 2) & 7);
-      back = ((tag >> 5) << 8) | input[offset++]!;
-    } else if ((tag & 3) === 2) {
-      len = (tag >> 2) + 1;
-      back = input[offset]! | (input[offset + 1]! << 8);
-      offset += 2;
-    } else {
-      len = (tag >> 2) + 1;
-      back =
-        input[offset]! |
-        (input[offset + 1]! << 8) |
-        (input[offset + 2]! << 16) |
-        (input[offset + 3]! << 24);
-      offset += 4;
-    }
-    if (back <= 0 || back > pos || pos + len > length) throw new RangeError("Invalid snappy copy");
-    // Copies may overlap themselves; replicate byte by byte.
-    let from = pos - back;
-    for (let i = 0; i < len; i++) output[pos + i] = output[from++]!;
-    pos += len;
+    ({ offset, pos } = decodeSnappyTag(input, output, tag, offset, pos, length));
   }
   if (pos !== length) throw new RangeError("Snappy payload does not match its declared size");
   return output;
@@ -147,33 +204,18 @@ export function snappyCompressBlock(input: Uint8Array): Uint8Array {
   const tableSize = 1 << bits;
   const table = new Int32Array(tableSize).fill(-1);
   const shift = 32 - bits;
-
   let pos = 0;
   let literalsFrom = 0;
   while (pos + 3 < n) {
-    const v =
-      input[pos]! | (input[pos + 1]! << 8) | (input[pos + 2]! << 16) | (input[pos + 3]! << 24);
-    const h = (Math.imul(v, 0x1e35a7bd) >>> shift) & (tableSize - 1);
-    const candidate: number | undefined = table[h];
-    table[h] = pos;
-    if (
-      candidate !== undefined &&
-      candidate !== -1 &&
-      pos - candidate < 65536 &&
-      input[candidate]! === input[pos]! &&
-      input[candidate + 1]! === input[pos + 1]! &&
-      input[candidate + 2]! === input[pos + 2]! &&
-      input[candidate + 3]! === input[pos + 3]!
-    ) {
-      at = emitLiteral(output, at, input, literalsFrom, pos - literalsFrom);
-      let len = 4;
-      while (pos + len < n && input[candidate + len] === input[pos + len]) len++;
-      at = emitCopy(output, at, pos - candidate, len);
-      pos += len;
-      literalsFrom = pos;
+    const match = findSnappyMatch(input, pos, table, shift, tableSize);
+    if (!match) {
+      pos++;
       continue;
     }
-    pos++;
+    at = emitLiteral(output, at, input, literalsFrom, pos - literalsFrom);
+    at = emitCopy(output, at, pos - match.candidate, match.length);
+    pos += match.length;
+    literalsFrom = pos;
   }
   if (literalsFrom < n) at = emitLiteral(output, at, input, literalsFrom, n - literalsFrom);
   return output.subarray(0, at).slice();

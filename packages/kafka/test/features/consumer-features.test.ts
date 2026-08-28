@@ -5,7 +5,94 @@ import { Writer, decodeRecordSet, encodeRecordBatch } from "../../src/bun/protoc
 import type { AbortedTransaction } from "../../src/types.ts";
 import { RecordSetDecoder } from "../../src/bun/protocol.ts";
 
-const STATIC_MEMBER_ID = "member-static";
+function writeConsumerResponse(socket: Bun.Socket, correlation: number, body: Writer): void {
+  const response = new Writer().i32(0).i32(correlation).raw(body.result());
+  response.patchI32(0, response.length - 4);
+  socket.write(response.result());
+}
+
+function handleConsumerFrames(
+  socket: Bun.Socket,
+  request: Uint8Array,
+  port: number,
+  bodyFor: (key: number, port: number, version: number) => Writer,
+  observe: (key: number, version: number) => void,
+): void {
+  let offset = 0;
+  while (offset < request.byteLength) {
+    const size = new DataView(request.buffer, request.byteOffset + offset).getInt32(0);
+    const frame = request.subarray(offset, offset + 4 + size);
+    const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+    const key = view.getInt16(4);
+    observe(key, view.getInt16(6));
+    writeConsumerResponse(socket, view.getInt32(8), bodyFor(key, port, view.getInt16(6)));
+    offset += 4 + size;
+  }
+}
+
+function consumerFeatureBody(key: number, port: number, version: number): Writer {
+  const memberMetadata = new Writer()
+    .i16(0)
+    .array(["events"], (writer, topic) => writer.string(topic))
+    .bytes(null)
+    .result();
+  const assignment = new Writer()
+    .i16(0)
+    .array(["events"], (writer, topic) =>
+      writer.string(topic).array([0], (item, partition) => item.i32(partition)),
+    )
+    .bytes(null)
+    .result();
+  if (key === 18) return apiVersions();
+  if (key === 10) return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
+  if (key === 3)
+    return new Writer()
+      .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
+        writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
+      )
+      .string(null)
+      .i32(1)
+      .array([{ name: "events" }], (writer, topic) =>
+        writer
+          .i16(0)
+          .string(topic.name)
+          .bool(false)
+          .array([0], (pw) =>
+            pw
+              .i16(0)
+              .i32(0)
+              .i32(1)
+              .array([1], (w) => w.i32(1))
+              .array([1], (w) => w.i32(1)),
+          ),
+      );
+  if (key === 11)
+    return new Writer()
+      .i32(0)
+      .i16(0)
+      .i32(1)
+      .string("range")
+      .string("member-1")
+      .string("member-1")
+      .array(["member-1"], (writer, member) => writer.string(member).bytes(memberMetadata));
+  if (key === 14)
+    return version === 3
+      ? new Writer().i32(0).i16(0).bytes(assignment)
+      : new Writer().i16(0).bytes(assignment);
+  if (key === 9)
+    return new Writer()
+      .array(["events"], (writer, topic) =>
+        writer
+          .string(topic)
+          .array([0], (item, partition) => item.i32(partition).i64(7).string(null).i16(0)),
+      )
+      .i16(0);
+  if (key === 8)
+    return new Writer().array(["events"], (writer, topic) =>
+      writer.string(topic).array([0], (item, partition) => item.i32(partition).i16(0)),
+    );
+  return new Writer().i16(0);
+}
 
 const apiVersions = () =>
   new Writer().i16(0).array(
@@ -29,136 +116,19 @@ describe("Static group membership", () => {
       port: 0,
       socket: {
         data(socket, request) {
-          let offset = 0;
-          while (offset < request.byteLength) {
-            const size = new DataView(request.buffer, request.byteOffset + offset).getInt32(0);
-            const frame = request.subarray(offset, offset + 4 + size);
-            offset += 4 + size;
-            const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
-            const key = view.getInt16(4);
-            const version = view.getInt16(6);
-            const correlation = view.getInt32(8);
-            if (key !== 18) versions.set(key, [version]);
-            // Parse the static identity position for the group APIs.
-            let instanceId: string | null = null;
-            if (key === 11 || key === 14 || key === 13 || (key === 12 && version >= 3)) {
-              const clientIdLen = new DataView(frame.buffer, frame.byteOffset + 12, 2).getInt16(0);
-              const reader = new ReaderShim(frame.subarray(14 + clientIdLen));
-              reader.string(); // groupId
-              if (key === 11) {
-                reader.i32(); // session timeout
-                reader.i32(); // rebalance timeout
-                reader.string(); // memberId
-                instanceId = reader.string();
-              } else {
-                reader.i32(); // generation id
-                reader.string(); // memberId
-                instanceId = reader.string();
-              }
-            }
-            void instanceId;
-            if (key === 12) {
-              heartbeats++;
-            }
-            const memberMetadata = new Writer()
-              .i16(0)
-              .array(["events"], (writer, topicName) => writer.string(topicName))
-              .bytes(null)
-              .result();
-            const assignment = new Writer()
-              .i16(0)
-              .array(["events"], (writer, topicName) =>
-                writer.string(topicName).array([0], (item, partition) => item.i32(partition)),
-              )
-              .bytes(null)
-              .result();
-            let body: Writer;
-            if (key === 18) body = apiVersions();
-            else if (key === 10)
-              body = new Writer().i16(0).i32(1).string("127.0.0.1").i32(listener.port);
-            else if (key === 3)
-              body = new Writer()
-                .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, b) =>
-                  writer.i32(b.id).string(b.host).i32(b.port).string(null),
-                )
-                .string(null)
-                .i32(1)
-                .array([{ name: "events" }], (writer, item) =>
-                  writer
-                    .i16(0)
-                    .string(item.name)
-                    .bool(false)
-                    .array([0], (pw) =>
-                      pw
-                        .i16(0)
-                        .i32(0)
-                        .i32(1)
-                        .array([1], (w) => w.i32(1))
-                        .array([1], (w) => w.i32(1)),
-                    ),
-                );
-            else if (key === 11)
-              body = new Writer()
-                .i32(0)
-                .i16(0)
-                .i32(1)
-                .string("range")
-                .string(STATIC_MEMBER_ID)
-                .string(STATIC_MEMBER_ID)
-                .array([STATIC_MEMBER_ID], (writer, member) =>
-                  writer.string(member).bytes(memberMetadata),
-                );
-            else if (key === 14) body = new Writer().i32(0).i16(0).bytes(assignment);
-            else if (key === 9)
-              body = new Writer()
-                .array(["events"], (writer, topicName) =>
-                  writer
-                    .string(topicName)
-                    .array([0], (item, partition) =>
-                      item.i32(partition).i64(7).string(null).i16(0),
-                    ),
-                )
-                .i16(0);
-            else if (key === 8)
-              body = new Writer().array(["events"], (writer, topicName) =>
-                writer
-                  .string(topicName)
-                  .array([0], (item, partition) => item.i32(partition).i16(0)),
-              );
-            else body = new Writer().i16(0);
-            const response = new Writer().i32(0).i32(correlation).raw(body.result());
-            response.patchI32(0, response.length - 4);
-            socket.write(response.result());
-          }
+          handleConsumerFrames(
+            socket,
+            request,
+            listener.port,
+            consumerFeatureBody,
+            (key, version) => {
+              if (key !== 18) versions.set(key, [version]);
+              if (key === 12) heartbeats++;
+            },
+          );
         },
       },
     });
-    class ReaderShim {
-      #view: DataView;
-      #bytes: Uint8Array;
-      #at = 0;
-      constructor(bytes: Uint8Array) {
-        this.#bytes = bytes;
-        this.#view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-      }
-      i32() {
-        const v = this.#view.getInt32(this.#at);
-        this.#at += 4;
-        return v;
-      }
-      i16() {
-        const v = this.#view.getInt16(this.#at);
-        this.#at += 2;
-        return v;
-      }
-      string(): string | null {
-        const length = this.i16();
-        if (length < 0) return null;
-        const out = new TextDecoder().decode(this.#bytes.subarray(this.#at, this.#at + length));
-        this.#at += length;
-        return out;
-      }
-    }
     const kafka = new Kafka({
       brokers: [`127.0.0.1:${listener.port}`],
       retry: { initialBackoffMs: 0, maxBackoffMs: 0 },
@@ -192,74 +162,15 @@ describe("Static group membership", () => {
       port: 0,
       socket: {
         data(socket, request) {
-          const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
-          const key = view.getInt16(4);
-          const correlation = view.getInt32(8);
-          if (key !== 18 && key !== 3) versions.set(key, [view.getInt16(6)]);
-          const metadata = new Writer()
-            .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) =>
-              writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
-            )
-            .string(null)
-            .i32(1)
-            .array([{ name: "events" }], (writer, item) =>
-              writer
-                .i16(0)
-                .string(item.name)
-                .bool(false)
-                .array([0], (pw) =>
-                  pw
-                    .i16(0)
-                    .i32(0)
-                    .i32(1)
-                    .array([1], (w) => w.i32(1))
-                    .array([1], (w) => w.i32(1)),
-                ),
-            );
-          const memberMetadata = new Writer()
-            .i16(0)
-            .array(["events"], (writer, t) => writer.string(t))
-            .bytes(null)
-            .result();
-          const assignment = new Writer()
-            .i16(0)
-            .array(["events"], (writer, t) => writer.string(t).array([0], (item, p) => item.i32(p)))
-            .bytes(null)
-            .result();
-          const body =
-            key === 18
-              ? apiVersions()
-              : key === 10
-                ? new Writer().i16(0).i32(1).string("127.0.0.1").i32(listener.port)
-                : key === 3
-                  ? metadata
-                  : key === 11
-                    ? new Writer()
-                        .i32(0)
-                        .i16(0)
-                        .i32(1)
-                        .string("range")
-                        .string("m1")
-                        .string("m1")
-                        .array(["m1"], (w, m) => w.string(m).bytes(memberMetadata))
-                    : key === 14
-                      ? new Writer().i16(0).bytes(assignment)
-                      : key === 9
-                        ? new Writer()
-                            .array(["events"], (w, t) =>
-                              w
-                                .string(t)
-                                .array([0], (item, p) => item.i32(p).i64(7).string(null).i16(0)),
-                            )
-                            .i16(0)
-                        : key === 8
-                          ? new Writer().array(["events"], (w, t) =>
-                              w.string(t).array([0], (item, p) => item.i32(p).i16(0)),
-                            )
-                          : new Writer().i16(0);
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
-          response.patchI32(0, response.length - 4);
-          socket.write(response.result());
+          handleConsumerFrames(
+            socket,
+            request,
+            listener.port,
+            consumerFeatureBody,
+            (key, version) => {
+              if (key !== 18 && key !== 3) versions.set(key, [version]);
+            },
+          );
         },
       },
     });

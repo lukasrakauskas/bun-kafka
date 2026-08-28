@@ -18,6 +18,23 @@ export type ShutdownOptions = {
  * Register SIGTERM/SIGINT handlers that flush producers and close clients.
  * Returns an uninstall function.
  */
+async function closeClient(
+  client: Closer,
+  timeoutMs: number,
+  onError?: (error: Error) => void,
+): Promise<void> {
+  try {
+    if (client.flush) await client.flush(timeoutMs);
+  } catch (error) {
+    onError?.(error instanceof Error ? error : new Error(String(error)));
+  }
+  try {
+    await client.close(timeoutMs);
+  } catch (error) {
+    onError?.(error instanceof Error ? error : new Error(String(error)));
+  }
+}
+
 export function installShutdown(
   clients: Closer | Closer[],
   opts: ShutdownOptions = {},
@@ -30,18 +47,7 @@ export function installShutdown(
   const run = async () => {
     if (ran) return;
     ran = true;
-    for (const c of list) {
-      try {
-        if (c.flush) await c.flush(timeoutMs);
-      } catch (e) {
-        opts.onError?.(e instanceof Error ? e : new Error(String(e)));
-      }
-      try {
-        await c.close(timeoutMs);
-      } catch (e) {
-        opts.onError?.(e instanceof Error ? e : new Error(String(e)));
-      }
-    }
+    for (const client of list) await closeClient(client, timeoutMs, opts.onError);
     if (exit) process.exit(0);
   };
 

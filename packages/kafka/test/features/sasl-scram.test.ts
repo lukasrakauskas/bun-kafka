@@ -63,104 +63,122 @@ const b64 = (value: Uint8Array) => btoa(String.fromCharCode(...value));
  * Minimal SASL/SCRAM-SHA-256 broker: performs a real handshake so the client's
  * proof and the server signature are both cryptographically checked.
  */
-function scramListener(options: {
+type ScramListenerOptions = {
   port: () => number;
   password: string;
   onProofVerified?: (verified: boolean) => void;
-}) {
-  let round = 0;
-  let clientFirstBare = "";
-  let serverFirst = "";
+};
+
+type ScramState = { round: number; clientFirstBare: string; serverFirst: string };
+
+type ScramFrame = { key: number; correlation: number; auth: string; nextOffset: number };
+
+function readScramFrame(request: Uint8Array, offset: number): ScramFrame {
+  const size = new DataView(request.buffer, request.byteOffset + offset).getInt32(0);
+  const frame = request.subarray(offset, offset + 4 + size);
+  const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+  const key = view.getInt16(4);
+  const clientIdLength = view.getInt16(12);
+  const authLength = key === 36 ? view.getInt32(14 + clientIdLength) : 0;
+  const auth =
+    key === 36
+      ? decoder.decode(frame.subarray(18 + clientIdLength, 18 + clientIdLength + authLength))
+      : "";
+  return { key, correlation: view.getInt32(8), auth, nextOffset: offset + 4 + size };
+}
+
+async function createScramResponse(
+  frame: ScramFrame,
+  state: ScramState,
+  options: ScramListenerOptions,
+  salt: Uint8Array,
+): Promise<Writer> {
+  if (frame.key === 18) return apiVersions();
+  if (frame.key === 17)
+    return new Writer()
+      .i16(0)
+      .array(["SCRAM-SHA-256"], (writer, mechanism) => writer.string(mechanism));
+  if (frame.key === 36 && state.round++ === 0) {
+    state.clientFirstBare = frame.auth.replace(/^n,,/, "");
+    const clientNonce = /r=([^,\s]+)/.exec(state.clientFirstBare)?.[1] ?? "";
+    state.serverFirst = `r=${clientNonce}serverpart,s=${b64(salt)},i=4096`;
+    return new Writer().i16(0).string(null).bytes(encoder.encode(state.serverFirst)).i64(0);
+  }
+  if (frame.key === 36) return createFinalScramResponse(frame.auth, state, options, salt);
+  return metadataBody(options.port());
+}
+
+async function createFinalScramResponse(
+  auth: string,
+  state: ScramState,
+  options: ScramListenerOptions,
+  salt: Uint8Array,
+): Promise<Writer> {
+  const withoutProof = /^((?:c=[^,]+,r=[^,]+))(?:,p=([A-Za-z0-9+/=]+))?$/.exec(auth);
+  const proof = withoutProof?.[2]
+    ? Uint8Array.from(atob(withoutProof[2]), (char) => char.charCodeAt(0))
+    : null;
+  const saltedPassword = new Uint8Array(
+    await crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt, iterations: 4096, hash: "SHA-256" },
+      await crypto.subtle.importKey("raw", encoder.encode(options.password), "PBKDF2", false, [
+        "deriveBits",
+      ]),
+      256,
+    ),
+  );
+  const clientKey = await hmac(saltedPassword, "Client Key");
+  const storedKey = await sha256(clientKey);
+  const authMessage = `${state.clientFirstBare},${state.serverFirst},${withoutProof?.[1] ?? ""}`;
+  const clientSignature = await hmac(storedKey, authMessage);
+  const verified =
+    proof !== null &&
+    (await sha256(xor(proof, clientSignature))).every((byte, index) => byte === storedKey[index]);
+  options.onProofVerified?.(verified);
+  if (!verified)
+    return new Writer().i16(49).string("SCRAM proof mismatch").bytes(new Uint8Array()).i64(0);
+  const serverKey = await hmac(saltedPassword, "Server Key");
+  const verifier = b64(await hmac(serverKey, authMessage));
+  return new Writer()
+    .i16(0)
+    .string(null)
+    .bytes(encoder.encode(`v=${verifier}`))
+    .i64(0);
+}
+
+async function handleScramFrames(
+  socket: Bun.Socket,
+  request: Uint8Array,
+  state: ScramState,
+  options: ScramListenerOptions,
+  salt: Uint8Array,
+): Promise<void> {
+  for (let offset = 0; offset < request.byteLength;) {
+    const frame = readScramFrame(request, offset);
+    writeResponse(
+      socket,
+      frame.correlation,
+      await createScramResponse(frame, state, options, salt),
+    );
+    offset = frame.nextOffset;
+  }
+}
+
+function writeResponse(socket: Bun.Socket, correlation: number, body: Writer): void {
+  const response = new Writer().i32(0).i32(correlation).raw(body.result());
+  response.patchI32(0, response.length - 4);
+  socket.write(response.result());
+}
+
+function scramListener(options: ScramListenerOptions) {
+  const state: ScramState = { round: 0, clientFirstBare: "", serverFirst: "" };
   const salt = encoder.encode("scram-salt-0001");
   return Bun.listen({
     hostname: "127.0.0.1",
     port: 0,
     socket: {
       async data(socket, request) {
-        let offset = 0;
-        while (offset < request.byteLength) {
-          const size = new DataView(request.buffer, request.byteOffset + offset).getInt32(0);
-          const frame = request.subarray(offset, offset + 4 + size);
-          const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
-          const key = view.getInt16(4);
-          const correlation = view.getInt32(8);
-          const clientIdLength = view.getInt16(12);
-          const authLength = key === 36 ? view.getInt32(14 + clientIdLength) : 0;
-          const auth =
-            key === 36
-              ? decoder.decode(
-                  frame.subarray(18 + clientIdLength, 18 + clientIdLength + authLength),
-                )
-              : "";
-
-          let body: Writer;
-          if (key === 18) body = apiVersions();
-          else if (key === 17)
-            body = new Writer()
-              .i16(0)
-              .array(["SCRAM-SHA-256"], (writer, mechanism) => writer.string(mechanism));
-          else if (key === 36 && round++ === 0) {
-            // Server-first-message: echo the client nonce, add ours.
-            clientFirstBare = auth.replace(/^n,,/, "");
-            const clientNonce = /r=([^,\s]+)/.exec(clientFirstBare)?.[1] ?? "";
-            serverFirst = `r=${clientNonce}serverpart,s=${b64(salt)},i=4096`;
-            body = new Writer().i16(0).string(null).bytes(encoder.encode(serverFirst)).i64(0);
-          } else if (key === 36) {
-            // Client-final-message: verify the proof before answering v=.
-            const withoutProof = /^((?:c=[^,]+,r=[^,]+))(?:,p=([A-Za-z0-9+/=]+))?$/.exec(auth);
-            const proof = withoutProof?.[2]
-              ? Uint8Array.from(atob(withoutProof[2]), (char) => char.charCodeAt(0))
-              : null;
-            const saltedPassword = new Uint8Array(
-              await crypto.subtle.deriveBits(
-                {
-                  name: "PBKDF2",
-                  salt,
-                  iterations: 4096,
-                  hash: "SHA-256",
-                },
-                await crypto.subtle.importKey(
-                  "raw",
-                  encoder.encode(options.password),
-                  "PBKDF2",
-                  false,
-                  ["deriveBits"],
-                ),
-                256,
-              ),
-            );
-            const clientKey = await hmac(saltedPassword, "Client Key");
-            const storedKey = await sha256(clientKey);
-            const authMessage = `${clientFirstBare},${serverFirst},${withoutProof?.[1] ?? ""}`;
-            const clientSignature = await hmac(storedKey, authMessage);
-            const verified =
-              proof !== null &&
-              (await sha256(xor(proof, clientSignature))).every(
-                (byte, index) => byte === storedKey[index],
-              );
-            options.onProofVerified?.(verified);
-            if (!verified) {
-              body = new Writer()
-                .i16(49)
-                .string("SCRAM proof mismatch")
-                .bytes(new Uint8Array())
-                .i64(0);
-            } else {
-              const serverKey = await hmac(saltedPassword, "Server Key");
-              const verifier = b64(await hmac(serverKey, authMessage));
-              body = new Writer()
-                .i16(0)
-                .string(null)
-                .bytes(encoder.encode(`v=${verifier}`))
-                .i64(0);
-            }
-          } else body = metadataBody(options.port());
-
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
-          response.patchI32(0, response.length - 4);
-          socket.write(response.result());
-          offset += 4 + size;
-        }
+        await handleScramFrames(socket, request, state, options, salt);
       },
     },
   });

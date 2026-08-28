@@ -17,6 +17,47 @@ import {
   type TopicMetadata,
 } from "./shared.ts";
 
+function validateClusterTimeouts(
+  requestTimeoutMs: number,
+  connectTimeoutMs: number,
+  maxResponseBytes: number,
+  retry: Required<RetryOptions>,
+): void {
+  if (
+    !Number.isSafeInteger(requestTimeoutMs) ||
+    requestTimeoutMs <= 0 ||
+    !Number.isSafeInteger(connectTimeoutMs) ||
+    connectTimeoutMs <= 0 ||
+    !Number.isSafeInteger(maxResponseBytes) ||
+    maxResponseBytes < 4 ||
+    !Number.isSafeInteger(retry.maxRetries) ||
+    retry.maxRetries < 0 ||
+    !Number.isFinite(retry.initialBackoffMs) ||
+    retry.initialBackoffMs < 0 ||
+    !Number.isFinite(retry.maxBackoffMs) ||
+    retry.maxBackoffMs < retry.initialBackoffMs
+  )
+    throw new RangeError("Invalid Kafka timeout, response size, or retry options");
+}
+
+function validateSaslOptions(options: KafkaOptions): void {
+  const sasl = options.sasl;
+  if (
+    sasl &&
+    (!new Set(["plain", "scram-sha-256", "scram-sha-512", "oauthbearer"]).has(sasl.mechanism) ||
+      (sasl.mechanism === "oauthbearer" ? !sasl.token : !sasl.username || !sasl.password))
+  )
+    throw new TypeError("Invalid Kafka SASL options");
+}
+
+function validateStatsInterval(options: KafkaOptions): void {
+  if (
+    options.statsIntervalMs !== undefined &&
+    (!Number.isSafeInteger(options.statsIntervalMs) || options.statsIntervalMs < 1)
+  )
+    throw new RangeError("Invalid Kafka statsIntervalMs");
+}
+
 export class Cluster {
   #bootstrap: string[];
   #options: ConnectionOptions;
@@ -44,36 +85,9 @@ export class Cluster {
       initialBackoffMs: options.retry?.initialBackoffMs ?? 50,
       maxBackoffMs: options.retry?.maxBackoffMs ?? 2_000,
     };
-    if (
-      !Number.isSafeInteger(requestTimeoutMs) ||
-      requestTimeoutMs <= 0 ||
-      !Number.isSafeInteger(connectTimeoutMs) ||
-      connectTimeoutMs <= 0 ||
-      !Number.isSafeInteger(maxResponseBytes) ||
-      maxResponseBytes < 4 ||
-      !Number.isSafeInteger(retry.maxRetries) ||
-      retry.maxRetries < 0 ||
-      !Number.isFinite(retry.initialBackoffMs) ||
-      retry.initialBackoffMs < 0 ||
-      !Number.isFinite(retry.maxBackoffMs) ||
-      retry.maxBackoffMs < retry.initialBackoffMs
-    ) {
-      throw new RangeError("Invalid Kafka timeout, response size, or retry options");
-    }
-    const sasl = options.sasl;
-    if (
-      sasl &&
-      (!new Set(["plain", "scram-sha-256", "scram-sha-512", "oauthbearer"]).has(sasl.mechanism) ||
-        (sasl.mechanism === "oauthbearer" ? !sasl.token : !sasl.username || !sasl.password))
-    ) {
-      throw new TypeError("Invalid Kafka SASL options");
-    }
-    if (
-      options.statsIntervalMs !== undefined &&
-      (!Number.isSafeInteger(options.statsIntervalMs) || options.statsIntervalMs < 1)
-    ) {
-      throw new RangeError("Invalid Kafka statsIntervalMs");
-    }
+    validateClusterTimeouts(requestTimeoutMs, connectTimeoutMs, maxResponseBytes, retry);
+    validateSaslOptions(options);
+    validateStatsInterval(options);
     this.#bootstrap = [...options.brokers];
     this.#retry = retry;
     this.#onEvent = options.onEvent;
@@ -161,41 +175,57 @@ export class Cluster {
     retry = true,
     flexible = false,
   ): Promise<Reader> {
-    let lastError: unknown;
+    return this.#requestWithRetry(brokerId, apiKey, apiVersion, body, timeoutMs, retry, flexible);
+  }
+
+  async #requestWithRetry(
+    brokerId: number,
+    apiKey: number,
+    apiVersion: number,
+    body: Writer,
+    timeoutMs: number | undefined,
+    retry: boolean,
+    flexible: boolean,
+  ): Promise<Reader> {
     const maxRetries = retry ? this.#retry.maxRetries : 0;
+    let lastError: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        let broker = this.#brokers.get(brokerId);
-        if (!broker) {
-          await this.metadata();
-          broker = this.#brokers.get(brokerId);
-        }
-        if (!broker)
-          throw new KafkaError(-1, `Kafka broker ${brokerId} is not in metadata`, {
-            retriable: true,
-          });
-        return await this.#connection(broker).request(
-          apiKey,
-          apiVersion,
-          body,
-          timeoutMs,
-          flexible,
-        );
+        return await this.#requestOnce(brokerId, apiKey, apiVersion, body, timeoutMs, flexible);
       } catch (error) {
         lastError = error;
         if (!(error instanceof KafkaError && error.retriable) || attempt === maxRetries)
           throw error;
-        this.#retries++;
-        const delay = retryDelay(this.#retry, attempt);
-        this.log(
-          "warn",
-          `retrying ${apiKey} attempt ${attempt + 1} in ${delay}ms: ${String(error)}`,
-        );
-        this.event({ type: "retry", apiKey, attempt: attempt + 1, delayMs: delay, error });
-        if (delay) await Bun.sleep(delay);
+        await this.#retryRequest(apiKey, attempt, error);
       }
     }
     throw lastError;
+  }
+
+  async #requestOnce(
+    brokerId: number,
+    apiKey: number,
+    apiVersion: number,
+    body: Writer,
+    timeoutMs: number | undefined,
+    flexible: boolean,
+  ): Promise<Reader> {
+    let broker = this.#brokers.get(brokerId);
+    if (!broker) {
+      await this.metadata();
+      broker = this.#brokers.get(brokerId);
+    }
+    if (!broker)
+      throw new KafkaError(-1, `Kafka broker ${brokerId} is not in metadata`, { retriable: true });
+    return this.#connection(broker).request(apiKey, apiVersion, body, timeoutMs, flexible);
+  }
+
+  async #retryRequest(apiKey: number, attempt: number, error: KafkaError): Promise<void> {
+    this.#retries++;
+    const delay = retryDelay(this.#retry, attempt);
+    this.log("warn", `retrying ${apiKey} attempt ${attempt + 1} in ${delay}ms: ${String(error)}`);
+    this.event({ type: "retry", apiKey, attempt: attempt + 1, delayMs: delay, error });
+    if (delay) await Bun.sleep(delay);
   }
 
   async controllerRequest(apiKey: number, apiVersion: number, body: Writer): Promise<Reader> {

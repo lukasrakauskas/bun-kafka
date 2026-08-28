@@ -32,47 +32,66 @@ export interface MappedConfig {
   retry: { maxRetries: number; initialBackoffMs: number; maxBackoffMs: number };
 }
 
-export function mapConfig(
-  config: KafkaConfig,
-  brokers: string[],
-): MappedConfig & { brokers: string[] } {
-  const saslConfig = config.sasl;
-  const mechanism = saslConfig?.mechanism;
+function validateSaslMechanism(mechanism: CompatOptions["mechanism"]): void {
   if (
     mechanism !== undefined &&
     (!isString(mechanism) ||
       !["plain", "scram-sha-256", "scram-sha-512", "oauthbearer"].includes(mechanism))
-  ) {
+  )
     throw new KafkaJSNonRetriableError(
       `SASL mechanism ${String(mechanism)} is not supported by bun-kafka`,
     );
-  }
-  const configuredToken = saslConfig?.oauthBearerToken ?? saslConfig?.token;
-  let token = isString(configuredToken) ? configuredToken : undefined;
-  const provider = saslConfig?.oauthBearerProvider;
-  if (!token && isFunction(provider)) {
-    // kafkajs providers resolve to { value: token }; accept both shapes.
-    token = async () => {
-      const resolved = await provider();
-      return isString(resolved) ? resolved : hasStringValue(resolved) ? (resolved.value ?? "") : "";
-    };
-  }
-  let sasl: BunKafkaSasl | undefined;
-  if (mechanism === "plain" || mechanism === "scram-sha-256" || mechanism === "scram-sha-512") {
-    const username = saslConfig && isString(saslConfig.username) ? saslConfig.username : undefined;
-    const password = saslConfig && isString(saslConfig.password) ? saslConfig.password : undefined;
-    if (username === undefined || password === undefined) {
-      throw new KafkaJSNonRetriableError(`${mechanism} SASL requires username and password`);
-    }
-    sasl = { mechanism, username, password };
-  } else if (mechanism === "oauthbearer" && token) {
-    sasl = { mechanism, token };
-  }
+}
+
+function resolveSaslToken(
+  saslConfig: CompatOptions | undefined,
+): string | (() => Promise<string>) | undefined {
+  const configured = saslConfig?.oauthBearerToken ?? saslConfig?.token;
+  if (isString(configured)) return configured;
+  if (!isFunction(saslConfig?.oauthBearerProvider)) return undefined;
+  const provider = saslConfig.oauthBearerProvider;
+  return async () => {
+    const resolved = await provider();
+    return isString(resolved) ? resolved : hasStringValue(resolved) ? (resolved.value ?? "") : "";
+  };
+}
+
+function createBasicSasl(
+  mechanism: "plain" | "scram-sha-256" | "scram-sha-512",
+  config: CompatOptions,
+): BunKafkaSasl {
+  const username = isString(config.username) ? config.username : undefined;
+  const password = isString(config.password) ? config.password : undefined;
+  if (username === undefined || password === undefined)
+    throw new KafkaJSNonRetriableError(`${mechanism} SASL requires username and password`);
+  return { mechanism, username, password };
+}
+
+function createSaslCredentials(
+  mechanism: CompatOptions["mechanism"],
+  config: CompatOptions | undefined,
+  token: string | (() => Promise<string>) | undefined,
+): BunKafkaSasl | undefined {
+  if (mechanism === "plain" || mechanism === "scram-sha-256" || mechanism === "scram-sha-512")
+    return createBasicSasl(mechanism, config!);
+  return mechanism === "oauthbearer" && token ? { mechanism, token } : undefined;
+}
+
+function mapSaslConfig(saslConfig: CompatOptions | undefined): BunKafkaSasl | undefined {
+  const mechanism = saslConfig?.mechanism;
+  validateSaslMechanism(mechanism);
+  return createSaslCredentials(mechanism, saslConfig, resolveSaslToken(saslConfig));
+}
+
+export function mapConfig(
+  config: KafkaConfig,
+  brokers: string[],
+): MappedConfig & { brokers: string[] } {
   return {
     brokers,
     clientId: config.clientId ?? "kafkajs",
     tls: config.ssl === true ? {} : config.ssl || undefined,
-    sasl,
+    sasl: mapSaslConfig(config.sasl),
     requestTimeoutMs: config.requestTimeout ?? 30_000,
     connectTimeoutMs: Math.max(config.connectionTimeout ?? 1_000, 1_000),
     retry: {

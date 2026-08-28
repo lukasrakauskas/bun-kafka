@@ -13,6 +13,28 @@ function numberOption(value: CompatValue): number | undefined {
   return isNumber(value) ? value : undefined;
 }
 
+function createCompatConsumerOptions(
+  options: CompatOptions,
+): ConstructorParameters<typeof BunConsumer>[1] {
+  const assignors = Array.isArray(options.partitionAssignors) ? options.partitionAssignors : [];
+  const cooperative = assignors.some(
+    (assignor) => hasStringName(assignor) && assignor.name === "CooperativeStickyAssignor",
+  );
+  return {
+    groupId: isString(options.groupId) ? options.groupId : undefined,
+    sessionTimeoutMs: numberOption(options.sessionTimeout),
+    rebalanceTimeoutMs: numberOption(options.rebalanceTimeout),
+    heartbeatIntervalMs: numberOption(options.heartbeatInterval),
+    fromBeginning: isBoolean(options.fromBeginning) ? options.fromBeginning : undefined,
+    isolationLevel:
+      options.isolationLevel === "read_uncommitted" || options.isolationLevel === "read_committed"
+        ? options.isolationLevel
+        : undefined,
+    groupInstanceId: isString(options.groupInstanceId) ? options.groupInstanceId : undefined,
+    partitionAssigner: cooperative ? "cooperative-sticky" : undefined,
+  };
+}
+
 export interface CompatEachMessagePayload {
   topic: string;
   partition: number;
@@ -59,6 +81,12 @@ export interface RunOptions {
   onCrash?: (error: Error) => void;
 }
 
+function highestOffset(offsets: Set<string>): bigint {
+  return [...offsets]
+    .map(BigInt)
+    .reduce((highest, offset) => (offset > highest ? offset : highest));
+}
+
 export class CompatConsumer {
   events = CONSUMER_EVENTS;
   #getter: () => ClusterGetter;
@@ -89,31 +117,13 @@ export class CompatConsumer {
 
   #underlying(): BunConsumer {
     if (!this.#consumer) {
-      const o = this.#options;
-      const assignors = Array.isArray(o.partitionAssignors) ? o.partitionAssignors : [];
-      const cooperative = assignors.some(
-        (assignor) => hasStringName(assignor) && assignor.name === "CooperativeStickyAssignor",
-      );
-      const consumerOptions = {
-        groupId: isString(o.groupId) ? o.groupId : undefined,
-        sessionTimeoutMs: numberOption(o.sessionTimeout),
-        rebalanceTimeoutMs: numberOption(o.rebalanceTimeout),
-        heartbeatIntervalMs: numberOption(o.heartbeatInterval),
-        fromBeginning: isBoolean(o.fromBeginning) ? o.fromBeginning : undefined,
-        isolationLevel:
-          o.isolationLevel === "read_uncommitted" || o.isolationLevel === "read_committed"
-            ? o.isolationLevel
-            : undefined,
-        groupInstanceId: isString(o.groupInstanceId) ? o.groupInstanceId : undefined,
-        partitionAssigner: cooperative ? ("cooperative-sticky" as const) : undefined,
-      };
       this.#consumer = new BunConsumer(
         this.#getter().acquire(),
-        consumerOptions,
+        createCompatConsumerOptions(this.#options),
         this.#getter().release,
       );
     }
-    return this.#consumer!;
+    return this.#consumer;
   }
 
   async connect(): Promise<void> {
@@ -193,38 +203,52 @@ export class CompatConsumer {
       : undefined;
     commitTimer?.unref?.();
     try {
-      while (this.#running) {
-        this.#emitter.emit(CONSUMER_EVENTS.FETCH_START);
-        const o = this.#options;
-        const messages = await consumer.fetch({
-          maxMessages: 200,
-          // Capped wire wait keeps stop()/pause()/resume() responsive even when
-          // applications configure multi-second maxWaitTimeInMs.
-          maxWaitMs: Math.min(numberOption(o.maxWaitTimeInMs) ?? 500, 1_000),
-          minBytes: numberOption(o.minBytes),
-          maxBytes: numberOption(o.maxBytes),
-          maxPartitionBytes: numberOption(o.maxBytesPerPartition),
-        });
-        if (!this.#running) break;
-        this.#emitter.emit(CONSUMER_EVENTS.FETCH, { numberOfMessages: messages.length });
-        if (!messages.length) continue;
-        const groups = this.#groupByPartition(messages);
-        for (let i = 0; i < groups.length; i += concurrent) {
-          await Promise.all(
-            groups
-              .slice(i, i + concurrent)
-              .map(([key, items]) =>
-                this.#processGroup(key, items, consumer, options, autoCommitEnabled),
-              ),
-          );
-          if (!this.#running) break;
-        }
-        if (autoCommitEnabled && !options.autoCommitInterval && !options.autoCommitThreshold) {
-          await this.#flushCommits(consumer, options);
-        }
-      }
+      while (this.#running)
+        await this.#loopIteration(consumer, options, autoCommitEnabled, concurrent);
     } finally {
       if (commitTimer) clearInterval(commitTimer);
+    }
+  }
+
+  async #loopIteration(
+    consumer: BunConsumer,
+    options: RunOptions,
+    autoCommitEnabled: boolean,
+    concurrent: number,
+  ): Promise<void> {
+    this.#emitter.emit(CONSUMER_EVENTS.FETCH_START);
+    const messages = await consumer.fetch({
+      maxMessages: 200,
+      maxWaitMs: Math.min(numberOption(this.#options.maxWaitTimeInMs) ?? 500, 1_000),
+      minBytes: numberOption(this.#options.minBytes),
+      maxBytes: numberOption(this.#options.maxBytes),
+      maxPartitionBytes: numberOption(this.#options.maxBytesPerPartition),
+    });
+    if (!this.#running) return;
+    this.#emitter.emit(CONSUMER_EVENTS.FETCH, { numberOfMessages: messages.length });
+    if (messages.length)
+      await this.#processGroups(messages, consumer, options, autoCommitEnabled, concurrent);
+    if (autoCommitEnabled && !options.autoCommitInterval && !options.autoCommitThreshold)
+      await this.#flushCommits(consumer, options);
+  }
+
+  async #processGroups(
+    messages: ConsumedMessage[],
+    consumer: BunConsumer,
+    options: RunOptions,
+    autoCommitEnabled: boolean,
+    concurrent: number,
+  ): Promise<void> {
+    const groups = this.#groupByPartition(messages);
+    for (let i = 0; i < groups.length; i += concurrent) {
+      await Promise.all(
+        groups
+          .slice(i, i + concurrent)
+          .map(([key, items]) =>
+            this.#processGroup(key, items, consumer, options, autoCommitEnabled),
+          ),
+      );
+      if (!this.#running) break;
     }
   }
 
@@ -259,33 +283,12 @@ export class CompatConsumer {
       partition,
       size: items.length,
     });
-    const heartbeat = async () => {
-      this.#emitter.emit(CONSUMER_EVENTS.HEARTBEAT);
-    };
-    const pause = () => {
-      this.pause([{ topic, partitions: [partition] }]);
-    };
+    const heartbeat = async () => this.#emitter.emit(CONSUMER_EVENTS.HEARTBEAT);
+    const pause = () => this.pause([{ topic, partitions: [partition] }]);
     try {
-      if (options.eachMessage) {
-        for (const raw of items) {
-          if (!this.#running) return;
-          this.#track(topic, partition, raw.offset + 1n);
-          await options.eachMessage({
-            topic,
-            partition,
-            message: toKafkajsMessage(raw),
-            heartbeat,
-            pause,
-          });
-          this.#uncommittedCount++;
-          if (
-            options.autoCommitThreshold &&
-            this.#uncommittedCount >= options.autoCommitThreshold
-          ) {
-            await this.#flushCommits(consumer, options);
-          }
-        }
-      } else if (options.eachBatch) {
+      if (options.eachMessage)
+        await this.#processMessages(topic, partition, items, consumer, options, heartbeat, pause);
+      else if (options.eachBatch)
         await this.#runBatch(
           topic,
           partition,
@@ -296,9 +299,33 @@ export class CompatConsumer {
           heartbeat,
           pause,
         );
-      }
     } finally {
       this.#emitter.emit(CONSUMER_EVENTS.END_BATCH_PROCESS, { topic, partition });
+    }
+  }
+
+  async #processMessages(
+    topic: string,
+    partition: number,
+    items: ConsumedMessage[],
+    consumer: BunConsumer,
+    options: RunOptions,
+    heartbeat: () => Promise<void>,
+    pause: () => void,
+  ): Promise<void> {
+    for (const raw of items) {
+      if (!this.#running) return;
+      this.#track(topic, partition, raw.offset + 1n);
+      await options.eachMessage!({
+        topic,
+        partition,
+        message: toKafkajsMessage(raw),
+        heartbeat,
+        pause,
+      });
+      this.#uncommittedCount++;
+      if (options.autoCommitThreshold && this.#uncommittedCount >= options.autoCommitThreshold)
+        await this.#flushCommits(consumer, options);
     }
   }
 
@@ -312,18 +339,63 @@ export class CompatConsumer {
     heartbeat: () => Promise<void>,
     pause: () => void,
   ): Promise<void> {
-    let highWatermark = "";
-    try {
-      const marks = await consumer.watermarks(topic, partition);
-      highWatermark = String(marks.high);
-    } catch {
-      highWatermark = String(items[items.length - 1]!.offset + 1n);
-    }
+    const highWatermark = await this.#highWatermark(topic, partition, items, consumer);
     const messages = items.map(toKafkajsMessage);
-    const firstRaw = items[0]!;
-    const lastRaw = items[items.length - 1]!;
     const resolved = new Set<string>();
-    const batch = {
+    const batch = this.#createBatch(
+      topic,
+      partition,
+      highWatermark,
+      messages,
+      resolved,
+      consumer,
+      options,
+      autoCommitEnabled,
+      heartbeat,
+    );
+    await options.eachBatch!({
+      batch,
+      heartbeat,
+      pause,
+      isRunning: () => this.#running,
+      isStale: () => !this.#running,
+    });
+    await this.#finishBatch(
+      topic,
+      partition,
+      items,
+      resolved,
+      consumer,
+      options,
+      autoCommitEnabled,
+    );
+  }
+
+  async #highWatermark(
+    topic: string,
+    partition: number,
+    items: ConsumedMessage[],
+    consumer: BunConsumer,
+  ): Promise<string> {
+    try {
+      return String((await consumer.watermarks(topic, partition)).high);
+    } catch {
+      return String(items[items.length - 1]!.offset + 1n);
+    }
+  }
+
+  #createBatch(
+    topic: string,
+    partition: number,
+    highWatermark: string,
+    messages: KafkaJsConsumedMessage[],
+    resolved: Set<string>,
+    consumer: BunConsumer,
+    options: RunOptions,
+    autoCommitEnabled: boolean,
+    heartbeat: () => Promise<void>,
+  ): CompatEachBatchPayload["batch"] {
+    return {
       topic,
       partition,
       highWatermark,
@@ -334,44 +406,40 @@ export class CompatConsumer {
       offsetLag: () =>
         (BigInt(highWatermark) - BigInt(messages[messages.length - 1]!.offset) - 1n).toString(),
       isStale: () => !this.#running,
-      resolveOffset: (offset: string | number | bigint) => {
-        resolved.add(BigInt(offset).toString());
-      },
+      resolveOffset: (offset) => resolved.add(BigInt(offset).toString()),
       commitOffsetsIfNecessary: async () => {
         if (autoCommitEnabled) await this.#flushCommits(consumer, options);
       },
       heartbeat,
     };
-    await options.eachBatch!({
-      batch,
-      heartbeat,
-      pause,
-      isRunning: () => this.#running,
-      isStale: () => !this.#running,
-    });
-    const autoResolve = options.eachBatchAutoResolve !== false;
-    if (autoResolve) for (const raw of items) resolved.add(raw.offset.toString());
-    let nextOffset: bigint;
-    if (resolved.size) {
-      const highest = [...resolved].map(BigInt).reduce((a, b) => (b > a ? b : a));
-      nextOffset = highest + 1n;
-    } else {
-      nextOffset = firstRaw.offset;
-    }
-    if (nextOffset <= lastRaw.offset) {
-      // Unresolved tail: rewind so the remainder is delivered again.
+  }
+
+  async #finishBatch(
+    topic: string,
+    partition: number,
+    items: ConsumedMessage[],
+    resolved: Set<string>,
+    consumer: BunConsumer,
+    options: RunOptions,
+    autoCommitEnabled: boolean,
+  ): Promise<void> {
+    if (options.eachBatchAutoResolve !== false)
+      for (const raw of items) resolved.add(raw.offset.toString());
+    const first = items[0]!;
+    const last = items[items.length - 1]!;
+    const nextOffset = resolved.size ? highestOffset(resolved) + 1n : first.offset;
+    if (nextOffset <= last.offset) {
       consumer.seek({ topic, partition, offset: nextOffset });
-    } else {
-      this.#track(topic, partition, nextOffset);
-      this.#uncommittedCount++;
-      if (
-        autoCommitEnabled &&
-        options.autoCommitThreshold &&
-        this.#uncommittedCount >= options.autoCommitThreshold
-      ) {
-        await this.#flushCommits(consumer, options);
-      }
+      return;
     }
+    this.#track(topic, partition, nextOffset);
+    this.#uncommittedCount++;
+    if (
+      autoCommitEnabled &&
+      options.autoCommitThreshold &&
+      this.#uncommittedCount >= options.autoCommitThreshold
+    )
+      await this.#flushCommits(consumer, options);
   }
 
   #track(topic: string, partition: number, offset: bigint): void {

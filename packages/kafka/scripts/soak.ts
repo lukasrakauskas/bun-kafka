@@ -28,6 +28,7 @@
 
 import { mkdirSync, readdirSync } from "node:fs";
 import { Kafka } from "../index.ts";
+import type { ConsumedMessage } from "../src/types.ts";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -300,9 +301,6 @@ function sendLatency(ms: number): void {
 // ---------------------------------------------------------------------------
 
 async function consumerLoop(): Promise<void> {
-  // A dedicated Kafka instance keeps the consumer's long-poll fetches off the
-  // producer's connections so delayed fetch responses cannot head-of-line
-  // block acknowledged produce traffic.
   const consumerKafka = new Kafka({ brokers: BROKERS, clientId: "bun-kafka-soak-consumer" });
   const consumer = consumerKafka.consumer({ fromBeginning: true });
   const decoder = new TextDecoder();
@@ -314,28 +312,34 @@ async function consumerLoop(): Promise<void> {
     })),
   );
   try {
-    // Keep draining past the production end until lag closes or drain budget expires.
     while (Date.now() < endAt + 120_000) {
       const t0 = performance.now();
       const messages = await consumer.fetch({ maxMessages: MAX_MESSAGES, maxWaitMs: 250 });
       fetchLatency(performance.now() - t0);
-      for (const message of messages) {
-        const partition = message.partition;
-        const seqValue = Number(decoder.decode(message.key!));
-        if (seqValue < 0) continue; // warm-up record
-        consumedPerPartition[partition]++;
-        const previous = lastSeqPerPartition[partition]!;
-        if (seqValue > previous) lastSeqPerPartition[partition] = seqValue;
-        else if (seqValue === previous) counters.duplicates++;
-        else counters.orderViolations++;
-        counters.consumed++;
-      }
+      processConsumedMessages(messages, decoder);
       if (!messages.length && Date.now() >= endAt && lag() === 0) break;
     }
   } finally {
     await consumer.close();
     await consumerKafka.disconnect();
   }
+}
+
+function processConsumedMessages(messages: ConsumedMessage[], decoder: TextDecoder): void {
+  for (const message of messages) {
+    const sequence = Number(decoder.decode(message.key!));
+    if (sequence < 0) continue;
+    consumedPerPartition[message.partition]++;
+    updateSequence(message.partition, sequence);
+    counters.consumed++;
+  }
+}
+
+function updateSequence(partition: number, sequence: number): void {
+  const previous = lastSeqPerPartition[partition]!;
+  if (sequence > previous) lastSeqPerPartition[partition] = sequence;
+  else if (sequence === previous) counters.duplicates++;
+  else counters.orderViolations++;
 }
 
 function fetchLatency(ms: number): void {
@@ -410,127 +414,122 @@ interface GateResult {
 }
 
 function evaluateGates(durationS: number): GateResult[] {
-  const gates: GateResult[] = [];
+  return [
+    ...basicGates(),
+    ...memoryGates(),
+    ...throughputGates(durationS),
+    ...latencyGates(),
+    ...burstGates(durationS),
+  ];
+}
 
-  gates.push(
+function basicGates(): GateResult[] {
+  const missing = lag();
+  return [
     gate("zero-failed-acks", counters.failed === 0, `${counters.failed} failed acknowledgements`),
-  );
-  gates.push(
     gate(
       "zero-duplicates",
       counters.duplicates === 0,
       `${counters.duplicates} duplicate records observed by the oracle`,
     ),
-  );
-  gates.push(
     gate(
       "per-partition-order",
       counters.orderViolations === 0,
       `${counters.orderViolations} out-of-order sequences`,
     ),
-  );
-  const missing = lag();
-  gates.push(
     gate(
       "zero-missing-after-drain",
       missing === 0,
       `${missing} acknowledged-but-unconsumed records after final drain`,
     ),
-  );
-  gates.push(
     gate(
       "no-unhandled-rejections",
       unhandled.length === 0,
       `${unhandled.length} unhandled promise rejections`,
     ),
-  );
+  ];
+}
 
-  // Memory gate: RSS range from end-of-warmup onward below 64 MiB.
-  const warmupEndT = DURATION_S * WARMUP_FRACTION;
-  const postWarmup = samples.filter((s) => s.t_s >= warmupEndT);
-  if (postWarmup.length >= 2) {
-    const minRss = Math.min(...postWarmup.map((s) => s.rss_bytes));
-    const maxRss = Math.max(...postWarmup.map((s) => s.rss_bytes));
-    const growthMiB = (maxRss - minRss) / 1048576;
-    gates.push(
-      gate(
-        "memory-growth-below-64mib",
-        growthMiB < 64,
-        `${growthMiB.toFixed(1)} MiB RSS range after ${round(warmupEndT)}s warmup`,
-      ),
-    );
+function memoryGates(): GateResult[] {
+  const postWarmup = samples.filter((sample) => sample.t_s >= DURATION_S * WARMUP_FRACTION);
+  if (postWarmup.length < 2) return [];
+  const rss = postWarmup.map((sample) => sample.rss_bytes);
+  const growthMiB = (Math.max(...rss) - Math.min(...rss)) / 1048576;
+  return [
+    gate(
+      "memory-growth-below-64mib",
+      growthMiB < 64,
+      `${growthMiB.toFixed(1)} MiB RSS range after ${round(DURATION_S * WARMUP_FRACTION)}s warmup`,
+    ),
+  ];
+}
+
+function throughputGates(durationS: number): GateResult[] {
+  if (samples.length < 4) return [];
+  const quarter = Math.max(1, Math.floor(samples.length / 4));
+  const first = avg(samples.slice(0, quarter), (sample) => sample.produce_mps);
+  const last = avg(samples.slice(-quarter), (sample) => sample.produce_mps);
+  const enforced = durationS >= 900;
+  return [
+    gate(
+      "throughput-decay-below-5-percent",
+      !enforced || last >= first * 0.95,
+      `first quarter ${first.toFixed(0)} msg/s vs final quarter ${last.toFixed(0)} msg/s` +
+        (enforced ? "" : " (informational; run shorter than 15 min)"),
+    ),
+  ];
+}
+
+function latencyGates(): GateResult[] {
+  if (samples.length < 2) return [];
+  const half = Math.max(1, Math.floor(samples.length / 2));
+  const first = samples.slice(0, half);
+  const last = samples.slice(-half);
+  const p95First = avg(first, (sample) => sample.send_p95_ms);
+  const p95Last = avg(last, (sample) => sample.send_p95_ms);
+  const p99First = avg(first, (sample) => sample.send_p99_ms);
+  const p99Last = avg(last, (sample) => sample.send_p99_ms);
+  const drift95 = p95First > 0 ? (p95Last / p95First - 1) * 100 : 0;
+  const drift99 = p99First > 0 ? (p99Last / p99First - 1) * 100 : 0;
+  return [
+    gate(
+      "send-p95-drift-below-20-percent",
+      drift95 <= 20,
+      `p95 ${p95First.toFixed(1)}ms -> ${p95Last.toFixed(1)}ms (${drift95.toFixed(1)}%)`,
+    ),
+    gate(
+      "send-p99-drift-below-25-percent",
+      drift99 <= 25,
+      `p99 ${p99First.toFixed(1)}ms -> ${p99Last.toFixed(1)}ms (${drift99.toFixed(1)}%)`,
+    ),
+  ];
+}
+
+function burstGates(durationS: number): GateResult[] {
+  if (BURST_INTERVAL_S <= 0) return [];
+  const recoverBoundS = Math.min(600, SAMPLE_INTERVAL_S * 3);
+  let recovered = true;
+  let worstOvershoot = 0;
+  for (const burstStart of burstTimes()) {
+    const burstEnd = burstStart + BURST_S;
+    const preLag = minLagBetween(burstStart - BURST_INTERVAL_S / 2, burstStart);
+    const deadline = Math.min(burstEnd + recoverBoundS, durationS + 120);
+    const postWindow = samples.filter((sample) => sample.t_s >= burstEnd && sample.t_s <= deadline);
+    const peak = postWindow.length
+      ? Math.max(...postWindow.map((sample) => sample.lag_total))
+      : lag();
+    if (preLag === null) continue;
+    const overshoot = peak - preLag;
+    worstOvershoot = Math.max(worstOvershoot, overshoot);
+    if (peak > preLag + BASE_RATE * BURST_FACTOR * 0.05) recovered = false;
   }
-
-  // Throughput decay: final quarter vs first quarter of sampled windows.
-  if (samples.length >= 4) {
-    const quarter = Math.max(1, Math.floor(samples.length / 4));
-    const firstQuarterMps = avg(samples.slice(0, quarter), (s) => s.produce_mps);
-    const finalQuarterMps = avg(samples.slice(-quarter), (s) => s.produce_mps);
-    const enforce = durationS >= 900;
-    gates.push(
-      gate(
-        "throughput-decay-below-5-percent",
-        !enforce || finalQuarterMps >= firstQuarterMps * 0.95,
-        `first quarter ${firstQuarterMps.toFixed(0)} msg/s vs final quarter ${finalQuarterMps.toFixed(0)} msg/s` +
-          (enforce ? "" : " (informational; run shorter than 15 min)"),
-      ),
-    );
-  }
-
-  // Latency drift between halves of the run.
-  if (samples.length >= 2) {
-    const half = Math.max(1, Math.floor(samples.length / 2));
-    const p95First = avg(samples.slice(0, half), (s) => s.send_p95_ms);
-    const p95Last = avg(samples.slice(-half), (s) => s.send_p95_ms);
-    const p99First = avg(samples.slice(0, half), (s) => s.send_p99_ms);
-    const p99Last = avg(samples.slice(-half), (s) => s.send_p99_ms);
-    const drift95 = p95First > 0 ? (p95Last / p95First - 1) * 100 : 0;
-    const drift99 = p99First > 0 ? (p99Last / p99First - 1) * 100 : 0;
-    gates.push(
-      gate(
-        "send-p95-drift-below-20-percent",
-        drift95 <= 20,
-        `p95 ${p95First.toFixed(1)}ms -> ${p95Last.toFixed(1)}ms (${drift95.toFixed(1)}%)`,
-      ),
-    );
-    gates.push(
-      gate(
-        "send-p99-drift-below-25-percent",
-        drift99 <= 25,
-        `p99 ${p99First.toFixed(1)}ms -> ${p99Last.toFixed(1)}ms (${drift99.toFixed(1)}%)`,
-      ),
-    );
-  }
-
-  // Lag recovery after each burst within three sampling windows (bounded by 10 min).
-  if (BURST_INTERVAL_S > 0) {
-    const recoverBoundS = Math.min(600, SAMPLE_INTERVAL_S * 3);
-    let recovered = true;
-    let worstOvershoot = 0;
-    for (const burstStart of burstTimes()) {
-      const burstEnd = burstStart + BURST_S;
-      const preLag = minLagBetween(burstStart - BURST_INTERVAL_S / 2, burstStart);
-      const deadline = Math.min(burstEnd + recoverBoundS, durationS + 120);
-      const postWindow = samples.filter((s) => s.t_s >= burstEnd && s.t_s <= deadline);
-      const peakAfterLag = postWindow.length
-        ? Math.max(...postWindow.map((s) => s.lag_total))
-        : lag();
-      if (preLag !== null) {
-        const overshoot = peakAfterLag - preLag;
-        if (overshoot > worstOvershoot) worstOvershoot = overshoot;
-        if (peakAfterLag > preLag + BASE_RATE * BURST_FACTOR * 0.05) recovered = false;
-      }
-    }
-    gates.push(
-      gate(
-        "lag-recovers-after-each-burst",
-        recovered,
-        `worst post-burst lag overshoot ${worstOvershoot} records within ${recoverBoundS}s of burst end`,
-      ),
-    );
-  }
-
-  return gates;
+  return [
+    gate(
+      "lag-recovers-after-each-burst",
+      recovered,
+      `worst post-burst lag overshoot ${worstOvershoot} records within ${recoverBoundS}s of burst end`,
+    ),
+  ];
 }
 
 function gate(name: string, passed: boolean, detail: string): GateResult {

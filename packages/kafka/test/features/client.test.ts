@@ -4,6 +4,134 @@ import { Writer } from "../../src/bun/protocol.ts";
 
 const UNREACHABLE_BROKER = "127.0.0.1:1";
 
+function plainAuthBody(key: number, port: number): Writer {
+  if (key === 18) return apiVersions();
+  if (key === 17)
+    return new Writer().i16(0).array(["PLAIN"], (writer, mechanism) => writer.string(mechanism));
+  if (key === 36) return new Writer().i16(0).string(null).bytes(new Uint8Array()).i64(0);
+  return new Writer()
+    .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
+      writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
+    )
+    .string(null)
+    .i32(1)
+    .array([{ name: "events" }], (writer, topic) =>
+      writer
+        .i16(0)
+        .string(topic.name)
+        .bool(false)
+        .array([0], (partitionWriter) =>
+          partitionWriter
+            .i16(0)
+            .i32(0)
+            .i32(1)
+            .array([1], (item) => item.i32(1))
+            .array([1], (item) => item.i32(1)),
+        ),
+    );
+}
+
+function writeClientResponse(socket: Bun.Socket, request: Uint8Array, body: Writer): void {
+  const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
+  const response = new Writer().i32(0).i32(view.getInt32(8)).raw(body.result());
+  response.patchI32(0, response.length - 4);
+  socket.write(response.result());
+}
+
+function clientGroupBody(key: number, port: number): Writer {
+  const memberMetadata = new Writer()
+    .i16(0)
+    .array(["events"], (writer, topic) => writer.string(topic))
+    .bytes(null)
+    .result();
+  const assignment = new Writer()
+    .i16(0)
+    .array(["events"], (writer, topic) =>
+      writer.string(topic).array([0], (item, partition) => item.i32(partition)),
+    )
+    .bytes(null)
+    .result();
+  if (key === 18) return apiVersions();
+  if (key === 10) return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
+  if (key === 3)
+    return new Writer()
+      .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
+        writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
+      )
+      .string(null)
+      .i32(1)
+      .array(["events"], (writer, topic) =>
+        writer
+          .i16(0)
+          .string(topic)
+          .bool(false)
+          .array([0], (partitionWriter, partition) =>
+            partitionWriter
+              .i16(0)
+              .i32(partition)
+              .i32(1)
+              .array([1], (item) => item.i32(1))
+              .array([1], (item) => item.i32(1)),
+          ),
+      );
+  if (key === 11)
+    return new Writer()
+      .i32(0)
+      .i16(0)
+      .i32(1)
+      .string("range")
+      .string("member-1")
+      .string("member-1")
+      .array(["member-1"], (writer, member) => writer.string(member).bytes(memberMetadata));
+  if (key === 14) return new Writer().i16(0).bytes(assignment);
+  if (key === 9)
+    return new Writer()
+      .array(["events"], (writer, topic) =>
+        writer
+          .string(topic)
+          .array([0], (item, partition) => item.i32(partition).i64(12).string(null).i16(0)),
+      )
+      .i16(0);
+  if (key === 8)
+    return new Writer().array(["events"], (writer, topic) =>
+      writer.string(topic).array([0], (item, partition) => item.i32(partition).i16(0)),
+    );
+  return new Writer().i16(0);
+}
+
+function clientAdminBody(key: number, port: number): Writer {
+  if (key === 18) return apiVersions();
+  if (key === 3)
+    return new Writer()
+      .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
+        writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
+      )
+      .string(null)
+      .i32(1)
+      .array([], () => {});
+  if (key === 32)
+    return new Writer().i32(0).array([{ resourceType: 2, name: "events" }], (writer, resource) =>
+      writer
+        .i16(0)
+        .string(null)
+        .i8(resource.resourceType)
+        .string(resource.name)
+        .array([{ name: "cleanup.policy", value: "delete" }], (configWriter, config) =>
+          configWriter.string(config.name).string(config.value).bool(false).bool(false).bool(false),
+        ),
+    );
+  if (key === 33)
+    return new Writer()
+      .i32(0)
+      .array(["events"], (writer, name) => writer.i16(0).string(null).i8(2).string(name));
+  return new Writer()
+    .i32(key === 19 ? 7 : 0)
+    .array([{ name: "events", error: 0, message: null }], (writer, result) => {
+      writer.string(result.name).i16(result.error);
+      if (key !== 20) writer.string(result.message);
+    });
+}
+
 const apiVersions = () =>
   new Writer().i16(0).array(
     Array.from({ length: 64 }, (_, key) => key),
@@ -73,43 +201,9 @@ describe("Bun native Kafka client (mock brokers)", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           requestKeys.push(key);
-          const correlation = view.getInt32(8);
           if (key === 36)
             authPayload = new TextDecoder().decode(request.subarray(request.length - 10));
-          const body =
-            key === 18
-              ? apiVersions()
-              : key === 17
-                ? new Writer()
-                    .i16(0)
-                    .array(["PLAIN"], (writer, mechanism) => writer.string(mechanism))
-                : key === 36
-                  ? new Writer().i16(0).string(null).bytes(new Uint8Array()).i64(0)
-                  : new Writer()
-                      .array(
-                        [{ id: 1, host: "127.0.0.1", port: listener.port }],
-                        (writer, broker) =>
-                          writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
-                      )
-                      .string(null)
-                      .i32(1)
-                      .array([{ name: "events" }], (writer, topic) =>
-                        writer
-                          .i16(0)
-                          .string(topic.name)
-                          .bool(false)
-                          .array([0], (partitionWriter) => {
-                            partitionWriter
-                              .i16(0)
-                              .i32(0)
-                              .i32(1)
-                              .array([1], (itemWriter) => itemWriter.i32(1))
-                              .array([1], (itemWriter) => itemWriter.i32(1));
-                          }),
-                      );
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
-          response.patchI32(0, response.length - 4);
-          socket.write(response.result());
+          writeClientResponse(socket, request, plainAuthBody(key, listener.port));
         },
       },
     });
@@ -205,82 +299,8 @@ describe("Bun native Kafka client (mock brokers)", () => {
       socket: {
         data(socket, request) {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
-          const key = view.getInt16(4);
-          requestKeys.push(key);
-          const correlation = view.getInt32(8);
-          const metadata = () =>
-            new Writer()
-              .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) =>
-                writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
-              )
-              .string(null)
-              .i32(1)
-              .array(["events"], (writer, topic) =>
-                writer
-                  .i16(0)
-                  .string(topic)
-                  .bool(false)
-                  .array([0], (partitionWriter, partition) =>
-                    partitionWriter
-                      .i16(0)
-                      .i32(partition)
-                      .i32(1)
-                      .array([1], (item) => item.i32(1))
-                      .array([1], (item) => item.i32(1)),
-                  ),
-              );
-          const memberMetadata = new Writer()
-            .i16(0)
-            .array(["events"], (writer, topic) => writer.string(topic))
-            .bytes(null)
-            .result();
-          const assignment = new Writer()
-            .i16(0)
-            .array(["events"], (writer, topic) =>
-              writer.string(topic).array([0], (item, partition) => item.i32(partition)),
-            )
-            .bytes(null)
-            .result();
-          const body =
-            key === 18
-              ? apiVersions()
-              : key === 10
-                ? new Writer().i16(0).i32(1).string("127.0.0.1").i32(listener.port)
-                : key === 3
-                  ? metadata()
-                  : key === 11
-                    ? new Writer()
-                        .i32(0)
-                        .i16(0)
-                        .i32(1)
-                        .string("range")
-                        .string("member-1")
-                        .string("member-1")
-                        .array(["member-1"], (writer, member) =>
-                          writer.string(member).bytes(memberMetadata),
-                        )
-                    : key === 14
-                      ? new Writer().i16(0).bytes(assignment)
-                      : key === 9
-                        ? new Writer()
-                            .array(["events"], (writer, topic) =>
-                              writer
-                                .string(topic)
-                                .array([0], (item, partition) =>
-                                  item.i32(partition).i64(12).string(null).i16(0),
-                                ),
-                            )
-                            .i16(0)
-                        : key === 8
-                          ? new Writer().array(["events"], (writer, topic) =>
-                              writer
-                                .string(topic)
-                                .array([0], (item, partition) => item.i32(partition).i16(0)),
-                            )
-                          : new Writer().i16(0);
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
-          response.patchI32(0, response.length - 4);
-          socket.write(response.result());
+          requestKeys.push(view.getInt16(4));
+          writeClientResponse(socket, request, clientGroupBody(view.getInt16(4), listener.port));
         },
       },
     });
@@ -308,54 +328,7 @@ describe("Bun native Kafka client (mock brokers)", () => {
       socket: {
         data(socket, request) {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
-          const key = view.getInt16(4);
-          const correlation = view.getInt32(8);
-          const body =
-            key === 18
-              ? apiVersions()
-              : key === 3
-                ? new Writer()
-                    .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) =>
-                      writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
-                    )
-                    .string(null)
-                    .i32(1)
-                    .array([], () => {})
-                : key === 32
-                  ? new Writer()
-                      .i32(0)
-                      .array([{ resourceType: 2, name: "events" }], (writer, resource) =>
-                        writer
-                          .i16(0)
-                          .string(null)
-                          .i8(resource.resourceType)
-                          .string(resource.name)
-                          .array(
-                            [{ name: "cleanup.policy", value: "delete" }],
-                            (configWriter, config) =>
-                              configWriter
-                                .string(config.name)
-                                .string(config.value)
-                                .bool(false)
-                                .bool(false)
-                                .bool(false),
-                          ),
-                      )
-                  : key === 33
-                    ? new Writer()
-                        .i32(0)
-                        .array(["events"], (writer, name) =>
-                          writer.i16(0).string(null).i8(2).string(name),
-                        )
-                    : new Writer()
-                        .i32(key === 19 ? 7 : 0)
-                        .array([{ name: "events", error: 0, message: null }], (writer, result) => {
-                          writer.string(result.name).i16(result.error);
-                          if (key !== 20) writer.string(result.message);
-                        });
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
-          response.patchI32(0, response.length - 4);
-          socket.write(response.result());
+          writeClientResponse(socket, request, clientAdminBody(view.getInt16(4), listener.port));
         },
       },
     });

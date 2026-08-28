@@ -246,38 +246,56 @@ export class Connection {
         new Writer().string(sasl.mechanism.toUpperCase()),
         timeoutMs,
       );
-      const handshakeError = handshake.i16();
-      if (handshakeError)
-        throw new KafkaError(handshakeError, `SASL handshake failed on ${this.address}`);
+      const error = handshake.i16();
+      if (error) throw new KafkaError(error, `SASL handshake failed on ${this.address}`);
       handshake.array((reader) => reader.string());
-      if (sasl.mechanism === "plain") {
-        const authentication = await this.#sasl(
-          socket,
-          bytes(`\0${sasl.username}\0${sasl.password}`),
-          timeoutMs,
-        );
-        if (authentication.byteLength)
-          throw new KafkaError(-1, `Unexpected SASL/PLAIN challenge from ${this.address}`);
-      } else if (sasl.mechanism === "oauthbearer") {
-        const token = isFunction(sasl.token) ? await sasl.token() : sasl.token;
-        if (!token) throw new KafkaError(-1, `SASL/OAUTHBEARER token is empty for ${this.address}`);
-        const authentication = await this.#sasl(
-          socket,
-          bytes(`n,,\u0001auth=Bearer ${token}\u0001\u0001`),
-          timeoutMs,
-        );
-        if (authentication.byteLength)
-          throw new KafkaError(-1, `Unexpected SASL/OAUTHBEARER challenge from ${this.address}`);
-        // Timed reauthentication (KIP-368): re-run SASL before the token expires.
-        if (this.#sessionLifetimeMs > 0) this.scheduleReauthentication(socket);
-      } else {
-        await this.#scram(socket, sasl, timeoutMs);
-      }
+      await this.#authenticateMechanism(socket, sasl, timeoutMs);
       this.#authenticated = true;
     })().finally(() => {
       this.#authenticating = undefined;
     });
     return this.#authenticating;
+  }
+
+  async #authenticateMechanism(
+    socket: Bun.Socket,
+    sasl: BunKafkaSasl,
+    timeoutMs: number,
+  ): Promise<void> {
+    if (sasl.mechanism === "plain") return this.#authenticatePlain(socket, sasl, timeoutMs);
+    if (sasl.mechanism === "oauthbearer") return this.#authenticateOauth(socket, sasl, timeoutMs);
+    await this.#scram(socket, sasl, timeoutMs);
+  }
+
+  async #authenticatePlain(
+    socket: Bun.Socket,
+    sasl: Extract<BunKafkaSasl, { mechanism: "plain" }>,
+    timeoutMs: number,
+  ): Promise<void> {
+    const authentication = await this.#sasl(
+      socket,
+      bytes(`\0${sasl.username}\0${sasl.password}`),
+      timeoutMs,
+    );
+    if (authentication.byteLength)
+      throw new KafkaError(-1, `Unexpected SASL/PLAIN challenge from ${this.address}`);
+  }
+
+  async #authenticateOauth(
+    socket: Bun.Socket,
+    sasl: Extract<BunKafkaSasl, { mechanism: "oauthbearer" }>,
+    timeoutMs: number,
+  ): Promise<void> {
+    const token = isFunction(sasl.token) ? await sasl.token() : sasl.token;
+    if (!token) throw new KafkaError(-1, `SASL/OAUTHBEARER token is empty for ${this.address}`);
+    const authentication = await this.#sasl(
+      socket,
+      bytes(`n,,\u0001auth=Bearer ${token}\u0001\u0001`),
+      timeoutMs,
+    );
+    if (authentication.byteLength)
+      throw new KafkaError(-1, `Unexpected SASL/OAUTHBEARER challenge from ${this.address}`);
+    if (this.#sessionLifetimeMs > 0) this.scheduleReauthentication(socket);
   }
 
   async #sasl(socket: Bun.Socket, payload: Uint8Array, timeoutMs: number): Promise<Uint8Array> {
@@ -489,49 +507,58 @@ export class Connection {
     let offset = 0;
     while (offset < chunk.byteLength) {
       if (!this.#frame) {
-        const count = Math.min(4 - this.#headerOffset, chunk.byteLength - offset);
-        this.#header.set(chunk.subarray(offset, offset + count), this.#headerOffset);
-        this.#headerOffset += count;
-        offset += count;
-        if (this.#headerOffset < 4) return;
-        const size = new DataView(this.#header.buffer).getInt32(0);
-        this.#headerOffset = 0;
-        if (size < 4 || size > this.#options.maxResponseBytes) {
-          this.#fail(new KafkaError(-1, `Invalid Kafka response size ${size}`));
-          return;
-        }
-        this.#frame = new Uint8Array(size);
-        this.#frameOffset = 0;
+        const nextOffset = this.#readFrameHeader(chunk, offset);
+        if (nextOffset === undefined) return;
+        offset = nextOffset;
       }
-
-      const count = Math.min(this.#frame.byteLength - this.#frameOffset, chunk.byteLength - offset);
-      this.#frame.set(chunk.subarray(offset, offset + count), this.#frameOffset);
+      const count = Math.min(
+        this.#frame!.byteLength - this.#frameOffset,
+        chunk.byteLength - offset,
+      );
+      this.#frame!.set(chunk.subarray(offset, offset + count), this.#frameOffset);
       this.#frameOffset += count;
       offset += count;
-      if (this.#frameOffset === this.#frame.byteLength) {
-        const frame = this.#frame;
-        this.#frame = undefined;
-        this.#frameOffset = 0;
-        this.#bytesReceived += frame.byteLength;
-        const correlation = new DataView(frame.buffer, frame.byteOffset, 4).getInt32(0);
-        const pending = this.#pending.get(correlation);
-        if (pending) {
-          clearTimeout(pending.timer);
-          this.#pending.delete(correlation);
-          const reader = new Reader(frame.subarray(4));
-          if (pending.flexible) {
-            // Flexible responses carry a tagged-field section before the body.
-            try {
-              reader.skipTags();
-            } catch (error) {
-              pending.reject(error instanceof Error ? error : new Error(String(error)));
-              continue;
-            }
-          }
-          pending.resolve(reader);
-        }
+      if (this.#frameOffset === this.#frame!.byteLength) this.#completeFrame();
+    }
+  }
+
+  #readFrameHeader(chunk: Uint8Array, offset: number): number | undefined {
+    const count = Math.min(4 - this.#headerOffset, chunk.byteLength - offset);
+    this.#header.set(chunk.subarray(offset, offset + count), this.#headerOffset);
+    this.#headerOffset += count;
+    offset += count;
+    if (this.#headerOffset < 4) return;
+    const size = new DataView(this.#header.buffer).getInt32(0);
+    this.#headerOffset = 0;
+    if (size < 4 || size > this.#options.maxResponseBytes) {
+      this.#fail(new KafkaError(-1, `Invalid Kafka response size ${size}`));
+      return;
+    }
+    this.#frame = new Uint8Array(size);
+    this.#frameOffset = 0;
+    return offset;
+  }
+
+  #completeFrame(): void {
+    const frame = this.#frame!;
+    this.#frame = undefined;
+    this.#frameOffset = 0;
+    this.#bytesReceived += frame.byteLength;
+    const correlation = new DataView(frame.buffer, frame.byteOffset, 4).getInt32(0);
+    const pending = this.#pending.get(correlation);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.#pending.delete(correlation);
+    const reader = new Reader(frame.subarray(4));
+    if (pending.flexible) {
+      try {
+        reader.skipTags();
+      } catch (error) {
+        pending.reject(error instanceof Error ? error : new Error(String(error)));
+        return;
       }
     }
+    pending.resolve(reader);
   }
 
   #fail(error: Error, socket?: Bun.Socket): void {
