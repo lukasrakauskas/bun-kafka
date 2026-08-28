@@ -2,7 +2,30 @@ import { KafkaError, KafkaErrorCode } from "../errors.ts";
 import { isBigInt, isString, requiredValue } from "../type-guards.ts";
 import type { ConsumedMessage, TopicPartition, Watermarks } from "../types.ts";
 import { Cluster } from "./cluster.ts";
-import { RecordSetDecoder, Reader, Writer } from "./protocol.ts";
+import {
+  type ResponseBody,
+  RequestBody,
+  writeFindCoordinatorRequest,
+  readGroupCoordinatorResponse,
+  writeConsumerSubscription,
+  writeConsumerJoinRequest,
+  readConsumerJoinResponse,
+  writeConsumerSyncRequest,
+  readConsumerSyncResponse,
+  writeConsumerHeartbeatRequest,
+  readConsumerHeartbeatResponse,
+  writeConsumerGroupRequest,
+  writeConsumerOffsetFetchRequest,
+  readConsumerOffsetFetchResponse,
+  readConsumerOffsetCommitResponse,
+  writeListOffsetsRequest,
+  readListOffsetsResponse,
+  writeFetchRequest,
+  readFetchResponse,
+  createRecordSetDecoder,
+  writeLeaveGroupRequest,
+  RecordSetDecoder,
+} from "../protocol/index.ts";
 import {
   API_FETCH,
   API_FIND_COORDINATOR,
@@ -104,26 +127,6 @@ type GroupMember = {
 };
 
 type GroupMetadata = Awaited<ReturnType<Cluster["metadata"]>>;
-
-function readGroupMember(reader: Reader): GroupMember {
-  const memberId = reader.string() ?? "";
-  const metadata = new Reader(reader.bytes() ?? new Uint8Array());
-  const version = metadata.i16();
-  const topics = metadata.array((item) => item.string() ?? "");
-  const owned =
-    version < 1
-      ? []
-      : metadata
-          .array((ownedReader) => {
-            const topic = ownedReader.string() ?? "";
-            return ownedReader
-              .array((item) => item.i32())
-              .map((partition) => ({ topic, partition }));
-          })
-          .flat();
-  metadata.bytes();
-  return { memberId, topics, owned };
-}
 
 function assignGroupPartitions(
   members: GroupMember[],
@@ -346,12 +349,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const response = await this.#cluster.anyRequest(
       API_FIND_COORDINATOR,
       0,
-      new Writer().string(this.#requiredGroupId()),
+      writeFindCoordinatorRequest(this.#requiredGroupId()),
     );
-    const error = response.i16();
-    const coordinator = response.i32();
-    response.string();
-    response.i32();
+    const { error, coordinatorId: coordinator } = readGroupCoordinatorResponse(response);
     if (error) {
       throw kafkaError(error, `Kafka group ${this.#groupId}`);
     }
@@ -364,18 +364,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     topics: string[],
     owned?: Array<{ topic: string; partition: number }>,
   ): Uint8Array {
-    const w = new Writer()
-      .i16(owned ? 1 : 0)
-      .array(topics, (writer, topic) => writer.string(topic));
-    if (owned) {
-      const byTopic = Map.groupBy(owned, (item) => item.topic);
-      w.array([...byTopic], (writer, [name, partitions]) =>
-        writer
-          .string(name)
-          .array(partitions, (partitionWriter, p) => partitionWriter.i32(p.partition)),
-      );
-    }
-    return w.bytes(null).result();
+    return writeConsumerSubscription(topics, owned);
   }
 
   async #joinGroup(topics: string[], fromBeginning: boolean): Promise<void> {
@@ -406,27 +395,22 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     );
     const joinVersion =
       instanceId === undefined ? JOIN_GROUP_BASE_VERSION : GROUP_INSTANCE_API_VERSION;
-    const join = new Writer()
-      .string(this.#requiredGroupId())
-      .i32(this.#options.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS)
-      .i32(this.#options.rebalanceTimeoutMs ?? DEFAULT_REBALANCE_TIMEOUT_MS)
-      .string(this.#memberId);
-    if (instanceId !== undefined) {
-      join.string(instanceId);
-    }
-    join
-      .string("consumer")
-      .array([[protocolName, memberMetadata] as const], (writer, [name, metadata]) =>
-        writer.string(name).bytes(metadata),
-      );
+    const join = writeConsumerJoinRequest(
+      this.#requiredGroupId(),
+      this.#options.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS,
+      this.#options.rebalanceTimeoutMs ?? DEFAULT_REBALANCE_TIMEOUT_MS,
+      this.#memberId,
+      instanceId,
+      protocolName,
+      memberMetadata,
+    );
     const response = await this.#cluster.request(coordinator, API_JOIN_GROUP, joinVersion, join);
-    this.#cluster.throttle(API_JOIN_GROUP, response.i32());
-    const error = response.i16();
-    this.#generationId = response.i32();
-    response.string();
-    const leader = response.string() ?? "";
-    this.#memberId = response.string() ?? "";
-    const members = response.array(readGroupMember);
+    const joined = readConsumerJoinResponse(response);
+    this.#cluster.throttle(API_JOIN_GROUP, joined.throttleMs);
+    const { error, leader } = joined;
+    this.#generationId = joined.generationId;
+    this.#memberId = joined.memberId;
+    const members = joined.members;
     if (error) {
       throw kafkaError(error, `Kafka group ${this.#groupId}`);
     }
@@ -453,40 +437,19 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   ): Promise<ConsumerAssignment[]> {
     const instanceId = this.#options.groupInstanceId;
     const version = instanceId === undefined ? 0 : GROUP_INSTANCE_API_VERSION;
-    const sync = new Writer()
-      .string(this.#requiredGroupId())
-      .i32(this.#generationId)
-      .string(this.#memberId);
-    if (instanceId !== undefined) {
-      sync.string(instanceId);
-    }
-    sync.array([...assignments], (writer, [memberId, memberAssignments]) => {
-      const assignment = new Writer()
-        .i16(0)
-        .array(memberAssignments, (assignmentWriter, item) =>
-          assignmentWriter
-            .string(item.topic)
-            .array(item.partitions, (partitionWriter, partition) => partitionWriter.i32(partition)),
-        )
-        .bytes(null);
-      writer.string(memberId).bytes(assignment.result());
-    });
+    const sync = writeConsumerSyncRequest(
+      this.#requiredGroupId(),
+      this.#generationId,
+      this.#memberId,
+      instanceId,
+      assignments,
+    );
     const response = await this.#cluster.request(coordinator, API_SYNC_GROUP, version, sync);
-    if (version === GROUP_INSTANCE_API_VERSION) {
-      response.i32();
+    const synced = readConsumerSyncResponse(response, version === GROUP_INSTANCE_API_VERSION);
+    if (synced.error) {
+      throw kafkaError(synced.error, `Kafka group ${this.#groupId} sync`);
     }
-    const error = response.i16();
-    if (error) {
-      throw kafkaError(error, `Kafka group ${this.#groupId} sync`);
-    }
-    const reader = new Reader(response.bytes() ?? new Uint8Array());
-    reader.i16();
-    return reader
-      .array((item) => ({
-        topic: item.string() ?? "",
-        partitions: item.array((partition) => partition.i32()),
-      }))
-      .flatMap((item) => item.partitions.map((partition) => ({ topic: item.topic, partition })));
+    return synced.assignment;
   }
 
   async #applyGroupAssignment(
@@ -541,18 +504,18 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   async #sendHeartbeat(coordinator: number): Promise<void> {
     const instanceId = this.#options.groupInstanceId;
     const version = instanceId === undefined ? 0 : GROUP_INSTANCE_API_VERSION;
-    const body = new Writer()
-      .string(this.#requiredGroupId())
-      .i32(this.#generationId)
-      .string(this.#memberId);
-    if (instanceId !== undefined) {
-      body.string(instanceId);
-    }
-    const response = await this.#cluster.request(coordinator, API_HEARTBEAT, version, body);
-    if (version === GROUP_INSTANCE_API_VERSION) {
-      response.i32();
-    }
-    const error = response.i16();
+    const response = await this.#cluster.request(
+      coordinator,
+      API_HEARTBEAT,
+      version,
+      writeConsumerHeartbeatRequest(
+        this.#requiredGroupId(),
+        this.#generationId,
+        this.#memberId,
+        instanceId,
+      ),
+    );
+    const error = readConsumerHeartbeatResponse(response, version === GROUP_INSTANCE_API_VERSION);
     if (!error) {
       return;
     }
@@ -603,31 +566,24 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     }
     const coordinator = await this.#findCoordinator();
     const topics = Map.groupBy(assignments, (assignment) => assignment.topic);
-    const body = new Writer()
-      .string(this.#groupId)
-      .i32(this.#generationId)
-      .string(this.#memberId)
-      .i64(-1n)
-      .array([...topics], (writer, [topic, values]) =>
-        writer.string(topic).array(values, (partitionWriter, value) =>
-          partitionWriter
-            .i32(value.partition)
-            .i64(
-              isBigInt(value.offset)
-                ? value.offset
-                : (this.#positions.get(partitionKey(topic, value.partition)) ?? 0n),
-            )
-            .string(null),
-        ),
-      );
+    const body = writeConsumerGroupRequest(
+      this.#groupId,
+      this.#generationId,
+      this.#memberId,
+      new Map(
+        [...topics].map(([topic, values]) => [
+          topic,
+          values.map((value) => ({
+            partition: value.partition,
+            offset: isBigInt(value.offset)
+              ? value.offset
+              : (this.#positions.get(partitionKey(topic, value.partition)) ?? 0n),
+          })),
+        ]),
+      ),
+    );
     const response = await this.#cluster.request(coordinator, API_OFFSET_COMMIT, 2, body);
-    for (const result of response.array((reader) => ({
-      topic: reader.string() ?? "",
-      partitions: reader.array((partitionReader) => ({
-        partition: partitionReader.i32(),
-        error: partitionReader.i16(),
-      })),
-    }))) {
+    for (const result of readConsumerOffsetCommitResponse(response)) {
       for (const partition of result.partitions) {
         if (partition.error) {
           throw kafkaError(partition.error, `${result.topic}[${partition.partition}]`);
@@ -643,24 +599,19 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     }
     const coordinator = await this.#findCoordinator();
     const topics = Map.groupBy(assignments, (assignment) => assignment.topic);
-    const body = new Writer()
-      .string(this.#groupId)
-      .array([...topics], (writer, [topic, values]) =>
-        writer
-          .string(topic)
-          .array(values, (partitionWriter, value) => partitionWriter.i32(value.partition)),
-      );
+    const body = writeConsumerOffsetFetchRequest(
+      this.#groupId,
+      new Map(
+        [...topics].map(([topic, values]) => [
+          topic,
+          values.map((value) => ({ partition: value.partition })),
+        ]),
+      ),
+    );
     const response = await this.#cluster.request(coordinator, API_OFFSET_FETCH, 2, body);
     const result: CommittedOffset[] = [];
-    for (const topic of response.array((reader) => ({
-      topic: reader.string() ?? "",
-      partitions: reader.array((partitionReader) => ({
-        partition: partitionReader.i32(),
-        offset: partitionReader.i64(),
-        metadata: partitionReader.string(),
-        error: partitionReader.i16(),
-      })),
-    }))) {
+    const committed = readConsumerOffsetFetchResponse(response);
+    for (const topic of committed.topics) {
       for (const partition of topic.partitions) {
         if (partition.error) {
           throw kafkaError(partition.error, `${topic.topic}[${partition.partition}]`);
@@ -672,9 +623,8 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
         });
       }
     }
-    const error = response.i16();
-    if (error) {
-      throw kafkaError(error, `Kafka group ${this.#groupId}`);
+    if (committed.error) {
+      throw kafkaError(committed.error, `Kafka group ${this.#groupId}`);
     }
     return result;
   }
@@ -781,26 +731,19 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     await Promise.all(
       [...leaders].map(async ([leader, values]) => {
         const topics = Map.groupBy(values, (assignment) => assignment.topic);
-        const body = new Writer().i32(-1).array([...topics], (writer, [topic, partitions]) => {
-          writer.string(topic).array(partitions, (partitionWriter, value) => {
-            partitionWriter
-              .i32(value.partition)
-              .i64(value.which === "earliest" ? EARLIEST_OFFSET : -1);
-          });
-        });
+        const body = writeListOffsetsRequest(
+          new Map(
+            [...topics].map(([topic, partitions]) => [
+              topic,
+              partitions.map((value) => ({
+                partition: value.partition,
+                timestamp: BigInt(value.which === "earliest" ? EARLIEST_OFFSET : -1),
+              })),
+            ]),
+          ),
+        );
         const response = await this.#cluster.request(leader, API_LIST_OFFSETS, 1, body);
-        for (const result of response
-          .array((topicReader) => {
-            const topic = topicReader.string() ?? "";
-            return topicReader.array((partitionReader) => {
-              const partition = partitionReader.i32();
-              const error = partitionReader.i16();
-              partitionReader.i64();
-              const offset = partitionReader.i64();
-              return { topic, partition, error, offset };
-            });
-          })
-          .flat()) {
+        for (const result of readListOffsetsResponse(response)) {
           if (result.error) {
             throw kafkaError(result.error, `${result.topic}[${result.partition}]`);
           }
@@ -930,32 +873,24 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     entries: Array<[string, Assigned]>,
     options: FetchOptions,
     isolationLevel: number,
-  ): Writer {
+  ): RequestBody {
     const requested = this.#requestedPartitions(session, entries);
     const forgotten = this.#forgottenPartitions(session);
-    const byTopic = Map.groupBy(requested, ([, assignment]) => assignment.topic);
-    return new Writer()
-      .i32(-1)
-      .i32(options.maxWaitMs ?? DEFAULT_FETCH_MAX_WAIT_MS)
-      .i32(options.minBytes ?? 1)
-      .i32(options.maxBytes ?? this.#options.fetchMaxBytes ?? DEFAULT_FETCH_MAX_BYTES)
-      .i8(isolationLevel)
-      .i32(session.id)
-      .i32(session.epoch)
-      .array([...byTopic], (writer, [topic, partitions]) => {
-        writer.string(topic).array(partitions, (partitionWriter, [key, assignment]) => {
-          partitionWriter
-            .i32(assignment.partition)
-            .i64(this.#positions.get(key) ?? 0n)
-            .i64(-1)
-            .i32(options.maxPartitionBytes ?? DEFAULT_FETCH_MAX_PARTITION_BYTES);
-        });
-      })
-      .array([...forgotten], (writer, [topic, partitions]) =>
-        writer
-          .string(topic)
-          .array(partitions, (partitionWriter, partition) => partitionWriter.i32(partition)),
-      );
+    return writeFetchRequest(
+      options.maxWaitMs ?? DEFAULT_FETCH_MAX_WAIT_MS,
+      options.minBytes ?? 1,
+      options.maxBytes ?? this.#options.fetchMaxBytes ?? DEFAULT_FETCH_MAX_BYTES,
+      isolationLevel,
+      session.id,
+      session.epoch,
+      requested.map(([key, assignment]) => ({
+        topic: assignment.topic,
+        partition: assignment.partition,
+        offset: this.#positions.get(key) ?? 0n,
+        maxPartitionBytes: options.maxPartitionBytes ?? DEFAULT_FETCH_MAX_PARTITION_BYTES,
+      })),
+      forgotten,
+    );
   }
 
   #requestedPartitions(
@@ -993,7 +928,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     options: FetchOptions,
     isolationLevel: number,
     session: FetchSessionState,
-    response: Reader,
+    response: ResponseBody,
   ): Promise<RecordSetDecoder[]> {
     if (process.env.DEBUG_FETCH) {
       console.error(
@@ -1003,9 +938,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
           .join(" "),
       );
     }
-    this.#cluster.throttle(API_FETCH, response.i32());
-    const topError = response.i16();
-    const sessionId = response.i32();
+    const fetched = readFetchResponse(response);
+    this.#cluster.throttle(API_FETCH, fetched.throttleMs);
+    const { topError, sessionId } = fetched;
     if (topError) {
       this.#fetchSessions.delete(leader);
       if (
@@ -1019,55 +954,21 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     session.id = session.id === 0 ? sessionId : session.id;
     session.epoch = session.id === sessionId && session.epoch === 0 ? 1 : session.epoch + 1;
     this.#fetchSessions.set(leader, session);
-    return response
-      .array((topicReader) =>
-        this.#decodeFetchTopic(topicReader, leader, options, isolationLevel, session),
+    return fetched.partitions
+      .map((partition) =>
+        this.#decodeFetchPartition(partition, leader, options, isolationLevel, session),
       )
-      .flat();
-  }
-
-  #decodeFetchTopic(
-    reader: Reader,
-    leader: number,
-    options: FetchOptions,
-    isolationLevel: number,
-    session: FetchSessionState,
-  ): RecordSetDecoder[] {
-    const topic = reader.string() ?? "";
-    return reader
-      .array((partitionReader) => {
-        const partition = partitionReader.i32();
-        return this.#decodeFetchPartition(
-          partitionReader,
-          topic,
-          partition,
-          leader,
-          options,
-          isolationLevel,
-          session,
-        );
-      })
       .filter((decoder): decoder is RecordSetDecoder => decoder !== null);
   }
 
   #decodeFetchPartition(
-    reader: Reader,
-    topic: string,
-    partition: number,
+    decoded: ReturnType<typeof readFetchResponse>["partitions"][number],
     leader: number,
     options: FetchOptions,
     isolationLevel: number,
     session: FetchSessionState,
   ): RecordSetDecoder | null {
-    const error = reader.i16();
-    reader.i64();
-    reader.i64();
-    reader.i64();
-    const abortedTransactions = reader.array((item) => ({
-      producerId: item.i64(),
-      firstOffset: item.i64(),
-    }));
-    const records = reader.bytes();
+    const { topic, partition, error, abortedTransactions, records } = decoded;
     const key = partitionKey(topic, partition);
     session.sent.set(key, this.#positions.get(key) ?? 0n);
     session.streaming.set(key, Boolean(records));
@@ -1075,7 +976,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       throw kafkaError(error, `${topic}[${partition}]`);
     }
     return records
-      ? new RecordSetDecoder(records, topic, partition, leader, {
+      ? createRecordSetDecoder(records, topic, partition, leader, {
           minOffset: this.#positions.get(key) ?? 0n,
           copy: options.copy,
           abortedTransactions: isolationLevel === 1 ? abortedTransactions : undefined,
@@ -1212,26 +1113,16 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       throw new RangeError(`Partition ${partition} does not exist on ${topic}`);
     }
     const query = async (timestamp: number) => {
-      const body = new Writer().i32(-1).array([topic], (writer) =>
-        writer.string(topic).array([partition], (partitionWriter) => {
-          partitionWriter.i32(partition).i64(timestamp);
-        }),
+      const body = writeListOffsetsRequest(
+        new Map([[topic, [{ partition, timestamp: BigInt(timestamp) }]]]),
       );
       const response = await this.#cluster.request(leader, API_LIST_OFFSETS, 1, body);
-      const result = response.array((topicReader) => {
-        topicReader.string();
-        return topicReader.array((partitionReader) => {
-          partitionReader.i32();
-          const error = partitionReader.i16();
-          partitionReader.i64();
-          const offset = partitionReader.i64();
-          if (error) {
-            throw kafkaError(error, `${topic}[${partition}]`);
-          }
-          return offset;
-        });
-      });
-      return result[0]?.[0] ?? -1n;
+      const result = readListOffsetsResponse(response);
+      const item = result[0];
+      if (item?.error) {
+        throw kafkaError(item.error, `${topic}[${partition}]`);
+      }
+      return item?.offset ?? -1n;
     };
     const [low, high] = await Promise.all([query(EARLIEST_OFFSET), query(-1)]);
     return { low, high };
@@ -1252,7 +1143,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
             this.#coordinator,
             API_LEAVE_GROUP,
             0,
-            new Writer().string(this.#groupId).string(this.#memberId),
+            writeLeaveGroupRequest(this.#groupId, this.#memberId),
           );
         } else {
           // LeaveGroup v3+ sends a member list that carries static identity.
@@ -1260,11 +1151,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
             this.#coordinator,
             API_LEAVE_GROUP,
             GROUP_INSTANCE_API_VERSION,
-            new Writer()
-              .string(this.#groupId)
-              .array([{ memberId: this.#memberId, instanceId }], (writer, member) => {
-                writer.string(member.memberId).string(member.instanceId ?? null);
-              }),
+            writeLeaveGroupRequest(this.#groupId, this.#memberId, instanceId),
           );
         }
       } catch {

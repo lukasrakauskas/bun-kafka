@@ -1,7 +1,50 @@
-import { KafkaError } from "../errors.ts";
 import type { ClusterMetadata } from "../types.ts";
 import { Cluster } from "./cluster.ts";
-import { Reader, Writer } from "./protocol.ts";
+import {
+  writeCreateTopicsRequest,
+  readCreateTopicsResponse,
+  writeDeleteTopicsRequest,
+  readDeleteTopicsResponse,
+  writeCreatePartitionsRequest,
+  readCreatePartitionsResponse,
+  writeDescribeConfigsRequest,
+  readDescribeConfigsResponse,
+  writeAlterConfigsRequest,
+  readAlterConfigsResponse,
+  writeIncrementalAlterConfigsRequest,
+  readIncrementalAlterConfigsResponse,
+  writeListGroupsRequest,
+  readListGroupsResponse,
+  writeGroupIdsRequest,
+  readDeleteGroupsResponse,
+  readDescribeGroupsResponse,
+  writeDeleteRecordsRequest,
+  readDeleteRecordsResponse,
+  writeDescribeClientQuotasRequest,
+  readDescribeClientQuotasResponse,
+  writeAlterClientQuotasRequest,
+  readAlterClientQuotasResponse,
+  writeCreateDelegationTokenRequest,
+  readCreateDelegationTokenResponse,
+  writeDescribeDelegationTokenRequest,
+  readDescribeDelegationTokenResponse,
+  writeTokenPeriodRequest,
+  readTokenPeriodResponse,
+  writeCreateAclsRequest,
+  readCreateAclsResponse,
+  writeDescribeAclsRequest,
+  readDescribeAclsResponse,
+  writeDeleteAclsRequest,
+  readDeleteAclsResponse,
+  writeOffsetFetchRequest,
+  readOffsetFetchAdminResponse,
+  writeOffsetCommitRequest,
+  readOffsetCommitResponse,
+  writeAdminListOffsetsRequest,
+  readAdminListOffsetsResponse,
+  writeFindCoordinatorRequest,
+  readGroupCoordinatorResponse,
+} from "../protocol/index.ts";
 import {
   API_ALTER_CLIENT_QUOTAS,
   API_ALTER_CONFIGS,
@@ -26,7 +69,6 @@ import {
   API_OFFSET_COMMIT,
   API_OFFSET_FETCH,
   API_RENEW_DELEGATION_TOKEN,
-  CONFIG_SOURCE_DEFAULT,
   CREATE_TOPICS_API_VERSION,
   DELETE_TOPICS_API_VERSION,
   DESCRIBE_ACLS_API_KEY,
@@ -99,39 +141,22 @@ export class BunAdmin {
     if (!topics.length) {
       return [];
     }
-    const body = new Writer()
-      .array(topics, (writer, topic) => {
-        writer
-          .string(topic.name)
-          .i32(topic.numPartitions)
-          .i16(topic.replicationFactor ?? -1)
-          .array(
-            topic.assignments
-              ? topic.assignments.map((brokers, partition) => ({ partition, brokers }))
-              : [],
-            (assignmentWriter, assignment) =>
-              assignmentWriter
-                .i32(assignment.partition)
-                .array(assignment.brokers, (brokerWriter, broker) => brokerWriter.i32(broker)),
-          )
-          .array(
-            topic.configs ? Object.entries(topic.configs) : [],
-            (configWriter, [name, value]) => configWriter.string(name).string(value),
-          );
-      })
-      .i32(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS)
-      .bool(options.validateOnly ?? false);
+    const body = writeCreateTopicsRequest(
+      topics.map((topic) => ({
+        ...topic,
+        assignments: topic.assignments?.map((brokers, partition) => ({ partition, brokers })) ?? [],
+      })),
+      options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS,
+      options.validateOnly ?? false,
+    );
     const response = await this.#cluster.controllerRequest(
       API_CREATE_TOPICS,
       CREATE_TOPICS_API_VERSION,
       body,
     );
-    this.#cluster.throttle(API_CREATE_TOPICS, response.i32());
-    const results = response.array((reader) => ({
-      name: reader.string() ?? "",
-      error: reader.i16(),
-      message: reader.string(),
-    }));
+    const decoded = readCreateTopicsResponse(response);
+    this.#cluster.throttle(API_CREATE_TOPICS, decoded.throttleMs);
+    const results = decoded.results;
     if (!options.waitForLeaders || !results.some((result) => result.error === 0)) {
       return results;
     }
@@ -166,14 +191,12 @@ export class BunAdmin {
     const response = await this.#cluster.controllerRequest(
       API_DELETE_TOPICS,
       DELETE_TOPICS_API_VERSION,
-      new Writer()
-        .array(topics, (writer, topic) => writer.string(topic))
-        .i32(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS),
+      writeDeleteTopicsRequest(topics, options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS),
     );
-    this.#cluster.throttle(API_DELETE_TOPICS, response.i32());
-    return response.array((reader) => ({
-      name: reader.string() ?? "",
-      error: reader.i16(),
+    const decoded = readDeleteTopicsResponse(response);
+    this.#cluster.throttle(API_DELETE_TOPICS, decoded.throttleMs);
+    return decoded.results.map(({ message: _message, ...result }) => ({
+      ...result,
       message: null,
     }));
   }
@@ -186,24 +209,15 @@ export class BunAdmin {
     if (!topics.length) {
       return [];
     }
-    const body = new Writer()
-      .array(topics, (writer, topic) => {
-        writer
-          .string(topic.name)
-          .i32(topic.count)
-          .array(topic.assignments ?? [], (assignmentWriter, assignment) =>
-            assignmentWriter.array(assignment, (brokerWriter, broker) => brokerWriter.i32(broker)),
-          );
-      })
-      .i32(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS)
-      .bool(options.validateOnly ?? false);
+    const body = writeCreatePartitionsRequest(
+      topics,
+      options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS,
+      options.validateOnly ?? false,
+    );
     const response = await this.#cluster.controllerRequest(API_CREATE_PARTITIONS, 2, body);
-    this.#cluster.throttle(API_CREATE_PARTITIONS, response.i32());
-    return response.array((reader) => ({
-      name: reader.string() ?? "",
-      error: reader.i16(),
-      message: reader.string(),
-    }));
+    const decoded = readCreatePartitionsResponse(response);
+    this.#cluster.throttle(API_CREATE_PARTITIONS, decoded.throttleMs);
+    return decoded.results;
   }
 
   async describeConfigs(
@@ -214,29 +228,11 @@ export class BunAdmin {
     }[],
   ): Promise<ConfigResource[]> {
     this.#open();
-    const body = new Writer().array(resources, (writer, resource) =>
-      writer
-        .i8(resource.resourceType)
-        .string(resource.resourceName)
-        .array(resource.configNames ?? null, (configWriter, name) => configWriter.string(name)),
-    );
+    const body = writeDescribeConfigsRequest(resources);
     const response = await this.#cluster.anyRequest(API_DESCRIBE_CONFIGS, 0, body);
-    this.#cluster.throttle(API_DESCRIBE_CONFIGS, response.i32());
-    return response.array((reader) => {
-      const error = reader.i16();
-      const message = reader.string();
-      const resourceType = reader.i8();
-      const resourceName = reader.string() ?? "";
-      const configs = reader.array((configReader) => {
-        const name = configReader.string() ?? "";
-        const value = configReader.string();
-        const readOnly = configReader.bool();
-        const isDefault = configReader.bool();
-        const sensitive = configReader.bool();
-        return { name, value, source: isDefault ? CONFIG_SOURCE_DEFAULT : 0, sensitive, readOnly };
-      });
-      return { resourceType, resourceName, error, message, configs };
-    });
+    const decoded = readDescribeConfigsResponse(response);
+    this.#cluster.throttle(API_DESCRIBE_CONFIGS, decoded.throttleMs);
+    return decoded.results;
   }
 
   async alterConfigs(
@@ -247,23 +243,11 @@ export class BunAdmin {
     }[],
   ): Promise<TopicResult[]> {
     this.#open();
-    const body = new Writer().array(resources, (writer, resource) =>
-      writer
-        .i8(resource.resourceType)
-        .string(resource.resourceName)
-        .array(Object.entries(resource.configs), (configWriter, [name, value]) =>
-          configWriter.string(name).string(value),
-        ),
-    );
+    const body = writeAlterConfigsRequest(resources);
     const response = await this.#cluster.anyRequest(API_ALTER_CONFIGS, 0, body);
-    this.#cluster.throttle(API_ALTER_CONFIGS, response.i32());
-    return response.array((reader) => {
-      const error = reader.i16();
-      const message = reader.string();
-      reader.i8();
-      const name = reader.string() ?? "";
-      return { name, error, message };
-    });
+    const decoded = readAlterConfigsResponse(response);
+    this.#cluster.throttle(API_ALTER_CONFIGS, decoded.throttleMs);
+    return decoded.results;
   }
 
   /**
@@ -287,33 +271,11 @@ export class BunAdmin {
     if (!resources.length) {
       return [];
     }
-    const operations = { set: 0, delete: 1, append: 2, subtract: 3 } as const;
-    const body = new Writer()
-      .compactArray(resources, (writer, resource) =>
-        writer
-          .i8(resource.resourceType)
-          .compactString(resource.resourceName)
-          .compactArray(resource.ops, (opsWriter, op) =>
-            opsWriter
-              .compactString(op.name)
-              .i8(operations[op.operation])
-              .compactString(op.value ?? null)
-              .tags(),
-          )
-          .tags(),
-      )
-      .bool(options.validateOnly ?? false)
-      .tags();
+    const body = writeIncrementalAlterConfigsRequest(resources, options.validateOnly ?? false);
     const response = await this.#cluster.anyRequest(API_INCREMENTAL_ALTER_CONFIGS, 1, body, true);
-    this.#cluster.throttle(API_INCREMENTAL_ALTER_CONFIGS, response.i32());
-    return response.compactArray((reader) => {
-      const error = reader.i16();
-      const message = reader.compactString();
-      reader.i8();
-      const name = reader.compactString() ?? "";
-      reader.skipTags();
-      return { name, error, message };
-    });
+    const decoded = readIncrementalAlterConfigsResponse(response);
+    this.#cluster.throttle(API_INCREMENTAL_ALTER_CONFIGS, decoded.throttleMs);
+    return decoded.results;
   }
 
   /** List consumer groups (ListGroups v1 wire shape: groupId + protocolType per entry). */
@@ -326,21 +288,14 @@ export class BunAdmin {
       const all = await this.listGroups();
       return statesFilter.length ? all.filter((group) => statesFilter.includes(group.state)) : all;
     }
-    const response = await this.#cluster.anyRequest(
-      API_LIST_GROUPS,
-      1,
-      new Writer().array([], () => {}),
-    );
-    this.#cluster.throttle(API_LIST_GROUPS, response.i32());
-    const error = response.i16();
+    const response = await this.#cluster.anyRequest(API_LIST_GROUPS, 1, writeListGroupsRequest());
+    const decoded = readListGroupsResponse(response);
+    this.#cluster.throttle(API_LIST_GROUPS, decoded.throttleMs);
+    const { error } = decoded;
     if (error) {
       throw kafkaError(error, "ListGroups");
     }
-    return response.array((reader) => ({
-      groupId: reader.string() ?? "",
-      protocolType: reader.string() ?? "",
-      state: "",
-    }));
+    return decoded.groups;
   }
 
   /** Describe consumer groups: state and member details. */
@@ -349,41 +304,11 @@ export class BunAdmin {
     if (!groupIds.length) {
       return [];
     }
-    const body = new Writer().array(groupIds, (writer, group) => writer.string(group));
+    const body = writeGroupIdsRequest(groupIds);
     const response = await this.#cluster.anyRequest(API_DESCRIBE_GROUPS, 1, body);
-    this.#cluster.throttle(API_DESCRIBE_GROUPS, response.i32());
-    // Apache Kafka always writes the nullable error_message; some brokers
-    // (Redpanda) omit it entirely. Trial-parse both shapes and keep the one
-    // that consumes the buffer exactly.
-    const data = response.data;
-    for (const withMessage of [true, false]) {
-      try {
-        const reader = new Reader(data);
-        reader.i32();
-        const parsed: GroupDescription[] = reader.array((entryReader) => {
-          const error = entryReader.i16();
-          const message = withMessage ? entryReader.string() : null;
-          const groupId = entryReader.string() ?? "";
-          const state = entryReader.string() ?? "";
-          const protocolType = entryReader.string() ?? "";
-          const protocol = entryReader.string();
-          const members = entryReader.array((memberReader) => ({
-            memberId: memberReader.string() ?? "",
-            clientId: memberReader.string() ?? "",
-            clientHost: memberReader.string() ?? "",
-            memberMetadata: memberReader.bytes(),
-            memberAssignment: memberReader.bytes(),
-          }));
-          return { error, message, groupId, state, protocolType, protocol, members };
-        });
-        if (reader.remaining === 0) {
-          return parsed;
-        }
-      } catch {
-        // Try the next shape.
-      }
-    }
-    throw new KafkaError(-1, "Malformed DescribeGroups response");
+    const decoded = readDescribeGroupsResponse(response);
+    this.#cluster.throttle(API_DESCRIBE_GROUPS, decoded.throttleMs);
+    return decoded.groups;
   }
 
   /** Delete consumer groups that no longer have active members. */
@@ -392,14 +317,11 @@ export class BunAdmin {
     if (!groupIds.length) {
       return [];
     }
-    const body = new Writer().array(groupIds, (writer, group) => writer.string(group));
+    const body = writeGroupIdsRequest(groupIds);
     const response = await this.#cluster.anyRequest(API_DELETE_GROUPS, 1, body);
-    this.#cluster.throttle(API_DELETE_GROUPS, response.i32());
-    return response.array((reader) => ({
-      name: reader.string() ?? "",
-      error: reader.i16(),
-      message: null,
-    }));
+    const decoded = readDeleteGroupsResponse(response);
+    this.#cluster.throttle(API_DELETE_GROUPS, decoded.throttleMs);
+    return decoded.results;
   }
 
   /** Truncate topic partitions below the given offsets; returns the resulting low watermark per partition. */
@@ -414,28 +336,11 @@ export class BunAdmin {
     if (!topics.length) {
       return [];
     }
-    const body = new Writer()
-      .array(topics, (writer, topic) =>
-        writer
-          .string(topic.name)
-          .array(topic.partitions, (partitionWriter, partition) =>
-            partitionWriter.i32(partition.index).i64(partition.offset),
-          ),
-      )
-      .i32(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS);
+    const body = writeDeleteRecordsRequest(topics, options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS);
     const response = await this.#cluster.anyRequest(API_DELETE_RECORDS, 1, body);
-    this.#cluster.throttle(API_DELETE_RECORDS, response.i32());
-    return response
-      .array((topicReader) => {
-        const name = topicReader.string() ?? "";
-        return topicReader.array((partitionReader) => {
-          const index = partitionReader.i32();
-          const lowWatermark = partitionReader.i64();
-          const error = partitionReader.i16();
-          return { name, index, lowWatermark, error };
-        });
-      })
-      .flat();
+    const decoded = readDeleteRecordsResponse(response);
+    this.#cluster.throttle(API_DELETE_RECORDS, decoded.throttleMs);
+    return decoded.results;
   }
 
   /** Describe client quota entities matching the supplied filters (DescribeClientQuotas v0). */
@@ -453,43 +358,14 @@ export class BunAdmin {
     }>
   > {
     this.#open();
-    const matchTypes = { exact: 0, defaulted: 1, any: 2 } as const;
-    const body = new Writer()
-      .compactArray(components, (writer, component) =>
-        writer
-          .compactString(component.entityType)
-          .i8(matchTypes[component.matchType ?? "exact"])
-          .compactString(component.match),
-      )
-      .bool(options.strict ?? false)
-      .tags();
+    const body = writeDescribeClientQuotasRequest(components, options.strict ?? false);
     const response = await this.#cluster.anyRequest(API_DESCRIBE_CLIENT_QUOTAS, 1, body, true);
-    this.#cluster.throttle(API_DESCRIBE_CLIENT_QUOTAS, response.i32());
-    const error = response.i16();
-    // The nullable error_message field must be consumed regardless of outcome.
-    const errorMessage = response.compactString();
-    if (error) {
-      throw kafkaError(error, "Describe client quotas", errorMessage);
+    const decoded = readDescribeClientQuotasResponse(response);
+    this.#cluster.throttle(API_DESCRIBE_CLIENT_QUOTAS, decoded.throttleMs);
+    if (decoded.error) {
+      throw kafkaError(decoded.error, "Describe client quotas", decoded.message);
     }
-    return response.compactArray((entryReader) => {
-      const entry = {
-        entities: entryReader.compactArray((entityReader) => {
-          const entity = {
-            entityType: entityReader.compactString() ?? "",
-            entityName: entityReader.compactString(),
-          };
-          entityReader.skipTags(); // per-struct tagged fields (KIP-482)
-          return entity;
-        }),
-        values: entryReader.compactArray((valueReader) => {
-          const value = { name: valueReader.compactString() ?? "", value: valueReader.f64() };
-          valueReader.skipTags();
-          return value;
-        }),
-      };
-      entryReader.skipTags(); // entry-level tags
-      return entry;
-    });
+    return decoded.entries;
   }
 
   /** Alter client quota entity values (AlterClientQuotas v1). */
@@ -512,38 +388,11 @@ export class BunAdmin {
     }
     // Flexible versions close every struct (array elements included) with a
     // tagged-field section.
-    const body = new Writer()
-      .compactArray(entries, (writer, entry) => {
-        writer.compactArray(entry.entity, (entityWriter, item) =>
-          entityWriter.compactString(item.entityType).compactString(item.entityName).tags(),
-        );
-        writer.compactArray(entry.ops, (opsWriter, op) =>
-          opsWriter
-            .compactString(op.key)
-            .f64(op.value ?? Number.NaN)
-            .bool(op.remove ?? false)
-            .tags(),
-        );
-        writer.tags(); // entry-level tags
-      })
-      .bool(entries.some((entry) => entry.validateOnly) ?? false)
-      .tags();
+    const body = writeAlterClientQuotasRequest(entries);
     const response = await this.#cluster.anyRequest(API_ALTER_CLIENT_QUOTAS, 1, body, true);
-    this.#cluster.throttle(API_ALTER_CLIENT_QUOTAS, response.i32());
-    return response.compactArray((entryReader) => {
-      const error = entryReader.i16();
-      const message = entryReader.compactString();
-      const entity = entryReader.compactArray((entityReader) => {
-        const item = {
-          entityType: entityReader.compactString() ?? "",
-          entityName: entityReader.compactString(),
-        };
-        entityReader.skipTags();
-        return item;
-      });
-      entryReader.skipTags(); // entry-level tags
-      return { error, message, entity };
-    });
+    const decoded = readAlterClientQuotasResponse(response);
+    this.#cluster.throttle(API_ALTER_CLIENT_QUOTAS, decoded.throttleMs);
+    return decoded.entries;
   }
 
   /**
@@ -570,29 +419,18 @@ export class BunAdmin {
     hmac: Uint8Array | null;
   }> {
     this.#open();
-    const body = new Writer()
-      .compactString(options.ownerPrincipalType ?? null)
-      .compactString(options.ownerPrincipalName ?? null)
-      .i64(options.renewalPeriodMs === undefined ? -1n : BigInt(options.renewalPeriodMs))
-      .tags();
+    const body = writeCreateDelegationTokenRequest(
+      options.ownerPrincipalType ?? null,
+      options.ownerPrincipalName ?? null,
+      options.renewalPeriodMs ?? -1,
+    );
     const response = await this.#cluster.anyRequest(API_CREATE_DELEGATION_TOKEN, 2, body, true);
-    this.#cluster.throttle(API_CREATE_DELEGATION_TOKEN, response.i32());
-    const error = response.i16();
-    const message = response.compactString();
-    if (error) {
-      throw kafkaError(error, "Create delegation token", message);
+    const decoded = readCreateDelegationTokenResponse(response);
+    this.#cluster.throttle(API_CREATE_DELEGATION_TOKEN, decoded.throttleMs);
+    if (decoded.error) {
+      throw kafkaError(decoded.error, "Create delegation token", decoded.message);
     }
-    return {
-      error,
-      principalType: response.compactString() ?? "",
-      principalName: response.compactString() ?? "",
-      tokenRequester: response.compactString() ?? "",
-      issueTimestampMs: response.i64(),
-      expiryTimestampMs: response.i64(),
-      maxTimestampMs: response.i64(),
-      tokenId: response.compactString() ?? "",
-      hmac: response.compactBytes(),
-    };
+    return { error: decoded.error, ...decoded.token };
   }
 
   /** List delegation tokens visible to the authenticated principal (DescribeDelegationToken v2). */
@@ -611,32 +449,34 @@ export class BunAdmin {
     }>
   > {
     this.#open();
-    const body = new Writer()
-      .compactArray(ownersFilters.length ? ownersFilters : null, (writer, owner) =>
-        writer.compactString(owner.principalType).compactString(owner.principalName).tags(),
-      )
-      .tags();
+    const body = writeDescribeDelegationTokenRequest(ownersFilters);
     const response = await this.#cluster.anyRequest(API_DESCRIBE_DELEGATION_TOKEN, 2, body, true);
-    this.#cluster.throttle(API_DESCRIBE_DELEGATION_TOKEN, response.i32());
-    const error = response.i16();
-    const message = response.compactString();
-    if (error) {
-      throw kafkaError(error, "Describe delegation tokens", message);
+    const decoded = readDescribeDelegationTokenResponse(response);
+    this.#cluster.throttle(API_DESCRIBE_DELEGATION_TOKEN, decoded.throttleMs);
+    if (decoded.error) {
+      throw kafkaError(decoded.error, "Describe delegation tokens", decoded.message);
     }
-    return response.compactArray((tokenReader) => {
-      const token = {
-        ownerPrincipalType: tokenReader.compactString() ?? "",
-        ownerPrincipalName: tokenReader.compactString() ?? "",
-        tokenRequester: tokenReader.compactString() ?? "",
-        issueTimestampMs: tokenReader.i64(),
-        expiryTimestampMs: tokenReader.i64(),
-        maxTimestampMs: tokenReader.i64(),
-        tokenId: tokenReader.compactString() ?? "",
-        hmac: tokenReader.compactBytes(),
-      };
-      tokenReader.skipTags();
-      return token;
-    });
+    return decoded.tokens.map(
+      ({
+        principalType,
+        principalName,
+        tokenRequester,
+        issueTimestampMs,
+        expiryTimestampMs,
+        maxTimestampMs,
+        tokenId,
+        hmac,
+      }) => ({
+        ownerPrincipalType: principalType,
+        ownerPrincipalName: principalName,
+        tokenRequester,
+        issueTimestampMs,
+        expiryTimestampMs,
+        maxTimestampMs,
+        tokenId,
+        hmac,
+      }),
+    );
   }
 
   /** Renew a delegation token before its expiry (RenewDelegationToken v2). */
@@ -645,15 +485,14 @@ export class BunAdmin {
     renewPeriodMs: number | bigint,
   ): Promise<{ error: number; expiryTimestampMs: bigint }> {
     this.#open();
-    const body = new Writer().compactBytes(tokenHmac).i64(BigInt(renewPeriodMs)).tags();
+    const body = writeTokenPeriodRequest(tokenHmac, renewPeriodMs);
     const response = await this.#cluster.anyRequest(API_RENEW_DELEGATION_TOKEN, 2, body, true);
-    this.#cluster.throttle(API_RENEW_DELEGATION_TOKEN, response.i32());
-    const error = response.i16();
-    const message = response.compactString();
-    if (error) {
-      throw kafkaError(error, "Renew delegation token", message);
+    const decoded = readTokenPeriodResponse(response);
+    this.#cluster.throttle(API_RENEW_DELEGATION_TOKEN, decoded.throttleMs);
+    if (decoded.error) {
+      throw kafkaError(decoded.error, "Renew delegation token", decoded.message);
     }
-    return { error, expiryTimestampMs: response.i64() };
+    return { error: decoded.error, expiryTimestampMs: decoded.expiryTimestampMs };
   }
 
   /** Expire a delegation token early (ExpireDelegationToken v2). */
@@ -662,15 +501,14 @@ export class BunAdmin {
     expiryTimePeriodMs: number | bigint = -1,
   ): Promise<{ error: number; expiryTimestampMs: bigint }> {
     this.#open();
-    const body = new Writer().compactBytes(tokenHmac).i64(BigInt(expiryTimePeriodMs)).tags();
+    const body = writeTokenPeriodRequest(tokenHmac, expiryTimePeriodMs);
     const response = await this.#cluster.anyRequest(API_EXPIRE_DELEGATION_TOKEN, 2, body, true);
-    this.#cluster.throttle(API_EXPIRE_DELEGATION_TOKEN, response.i32());
-    const error = response.i16();
-    const message = response.compactString();
-    if (error) {
-      throw kafkaError(error, "Expire delegation token", message);
+    const decoded = readTokenPeriodResponse(response);
+    this.#cluster.throttle(API_EXPIRE_DELEGATION_TOKEN, decoded.throttleMs);
+    if (decoded.error) {
+      throw kafkaError(decoded.error, "Expire delegation token", decoded.message);
     }
-    return { error, expiryTimestampMs: response.i64() };
+    return { error: decoded.error, expiryTimestampMs: decoded.expiryTimestampMs };
   }
 
   /** Create ACL bindings on the broker. */
@@ -682,20 +520,11 @@ export class BunAdmin {
     if (!bindings.length) {
       return [];
     }
-    const body = new Writer()
-      .array(bindings, (writer, acl) =>
-        writer
-          .i8(acl.resourceType)
-          .string(acl.resourceName)
-          .string(acl.principal)
-          .string(acl.host)
-          .i8(acl.operation)
-          .i8(acl.permissionType),
-      )
-      .i32(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS);
+    const body = writeCreateAclsRequest(bindings, options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS);
     const response = await this.#cluster.anyRequest(API_CREATE_ACLS, 0, body);
-    this.#cluster.throttle(API_CREATE_ACLS, response.i32());
-    return response.array((reader) => ({ error: reader.i16(), message: reader.string() }));
+    const decoded = readCreateAclsResponse(response);
+    this.#cluster.throttle(API_CREATE_ACLS, decoded.throttleMs);
+    return decoded.results;
   }
 
   /** List ACLs matching the filter; null filter fields match anything. */
@@ -703,32 +532,16 @@ export class BunAdmin {
     filter: AclFilter,
   ): Promise<{ error: number; message: string | null; acls: AclListing[] }> {
     this.#open();
-    const body = new Writer()
-      .i8(filter.resourceType)
-      .string(filter.resourceName ?? null)
-      .string(filter.principal ?? null)
-      .string(filter.host ?? null)
-      .i8(filter.operation)
-      .i8(filter.permissionType);
+    const body = writeDescribeAclsRequest({
+      ...filter,
+      resourceName: filter.resourceName ?? null,
+      principal: filter.principal ?? null,
+      host: filter.host ?? null,
+    });
     const response = await this.#cluster.anyRequest(API_DESCRIBE_ACLS, 0, body);
-    this.#cluster.throttle(DESCRIBE_ACLS_API_KEY, response.i32());
-    const error = response.i16();
-    const message = response.string();
-    const acls = response
-      .array((reader) => {
-        const resourceType = reader.i8();
-        const resourceName = reader.string() ?? "";
-        return reader.array((aclReader) => ({
-          resourceType,
-          resourceName,
-          principal: aclReader.string() ?? "",
-          host: aclReader.string() ?? "",
-          operation: aclReader.i8(),
-          permissionType: aclReader.i8(),
-        }));
-      })
-      .flat();
-    return { error, message, acls };
+    const decoded = readDescribeAclsResponse(response);
+    this.#cluster.throttle(DESCRIBE_ACLS_API_KEY, decoded.throttleMs);
+    return decoded;
   }
 
   /** Delete ACLs matching the filters; null filter fields match anything. */
@@ -737,35 +550,19 @@ export class BunAdmin {
     options: { timeoutMs?: number } = {},
   ): Promise<Array<{ error: number; message: string | null; acls: AclListing[] }>> {
     this.#open();
-    const body = new Writer()
-      .array(filters, (writer, filter) =>
-        writer
-          .i8(filter.resourceType)
-          .string(filter.resourceName ?? null)
-          .string(filter.principal ?? null)
-          .string(filter.host ?? null)
-          .i8(filter.operation)
-          .i8(filter.permissionType),
-      )
-      .i32(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS);
+    const body = writeDeleteAclsRequest(
+      filters.map((filter) => ({
+        ...filter,
+        resourceName: filter.resourceName ?? null,
+        principal: filter.principal ?? null,
+        host: filter.host ?? null,
+      })),
+      options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS,
+    );
     const response = await this.#cluster.anyRequest(API_DELETE_ACLS, 0, body);
-    this.#cluster.throttle(API_DELETE_ACLS, response.i32());
-    return response.array((reader) => {
-      const error = reader.i16();
-      const message = reader.string();
-      // Matching ACLs are flat; each carries its own error code/message.
-      const acls = reader.array((aclReader) => ({
-        error: aclReader.i16(),
-        message: aclReader.string(),
-        resourceType: aclReader.i8(),
-        resourceName: aclReader.string() ?? "",
-        principal: aclReader.string() ?? "",
-        host: aclReader.string() ?? "",
-        operation: aclReader.i8(),
-        permissionType: aclReader.i8(),
-      }));
-      return { error, message, acls };
-    });
+    const decoded = readDeleteAclsResponse(response);
+    this.#cluster.throttle(API_DELETE_ACLS, decoded.throttleMs);
+    return decoded.results;
   }
 
   /**
@@ -801,27 +598,10 @@ export class BunAdmin {
         continue;
       }
       const partitions = meta.partitions.map((p) => p.id);
-      const body = new Writer()
-        .string(groupId)
-        .array([topic], (writer, name) =>
-          writer
-            .string(name)
-            .array(partitions, (partitionWriter, partition) => partitionWriter.i32(partition)),
-        );
+      const body = writeOffsetFetchRequest(groupId, topic, partitions);
       const response = await this.#cluster.request(coordinator, API_OFFSET_FETCH, 2, body);
-      const parsed = response
-        .array((topicReader) => {
-          const name = topicReader.string() ?? "";
-          return topicReader.array((partitionReader) => ({
-            name,
-            partition: partitionReader.i32(),
-            offset: partitionReader.i64(),
-            metadata: partitionReader.string(),
-            error: partitionReader.i16(),
-          }));
-        })
-        .flat();
-      response.i16(); // top-level error code
+      const offsetResponse = readOffsetFetchAdminResponse(response);
+      const parsed = offsetResponse.topics;
       result.push({
         topic,
         partitions: parsed
@@ -845,24 +625,9 @@ export class BunAdmin {
       return;
     }
     const coordinator = await this.#findGroupCoordinator(groupId);
-    const body = new Writer()
-      .string(groupId)
-      .i32(-1)
-      .string("")
-      .i64(-1n)
-      .array(topics, (writer, { topic, partitions }) =>
-        writer.string(topic).array(partitions, (partitionWriter, entry) =>
-          partitionWriter
-            .i32(entry.partition)
-            .i64(entry.offset)
-            .string(entry.metadata ?? null),
-        ),
-      );
+    const body = writeOffsetCommitRequest(groupId, topics);
     const response = await this.#cluster.request(coordinator, API_OFFSET_COMMIT, 2, body);
-    for (const topicResult of response.array((reader) => ({
-      topic: reader.string() ?? "",
-      partitions: reader.array((p) => ({ partition: p.i32(), error: p.i16() })),
-    }))) {
+    for (const topicResult of readOffsetCommitResponse(response)) {
       for (const partition of topicResult.partitions) {
         if (partition.error) {
           throw kafkaError(partition.error, `${topicResult.topic}[${partition.partition}]`);
@@ -911,36 +676,24 @@ export class BunAdmin {
     if (leader === undefined) {
       throw new RangeError(`Partition ${partition} does not exist on ${topic}`);
     }
-    const body = new Writer().i32(-1).array([topic], (writer, name) =>
-      writer.string(name).array([partition], (partitionWriter, index) => {
-        partitionWriter.i32(index).i64(BigInt(timestamp));
-      }),
-    );
+    const body = writeAdminListOffsetsRequest(topic, partition, BigInt(timestamp));
     const response = await this.#cluster.request(leader, API_LIST_OFFSETS, 1, body);
-    const result = response.array((topicReader) => {
-      topicReader.string();
-      return topicReader.array((partitionReader) => {
-        partitionReader.i32();
-        const error = partitionReader.i16();
-        partitionReader.i64();
-        const offset = partitionReader.i64();
-        if (error) {
-          throw kafkaError(error, `${topic}[${partition}]`);
-        }
-        return offset;
-      });
-    });
-    return result[0]?.[0] ?? -1n;
+    const result = readAdminListOffsetsResponse(response);
+    const item = result[0];
+    if (item?.error) {
+      throw kafkaError(item.error, `${topic}[${partition}]`);
+    }
+    return item?.offset ?? -1n;
   }
 
   async #findGroupCoordinator(groupId: string): Promise<number> {
     const response = await this.#cluster.anyRequest(
       API_FIND_COORDINATOR,
       0,
-      new Writer().string(groupId),
+      writeFindCoordinatorRequest(groupId),
     );
-    const error = response.i16();
-    const coordinator = response.i32();
+    const coordinatorResponse = readGroupCoordinatorResponse(response);
+    const { error, coordinatorId: coordinator } = coordinatorResponse;
     if (error) {
       throw kafkaError(error, `Kafka group ${groupId}`);
     }

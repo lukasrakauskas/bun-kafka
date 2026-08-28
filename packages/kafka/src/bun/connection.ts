@@ -1,6 +1,17 @@
 import { KafkaError, KafkaErrorCode } from "../errors.ts";
 import { arrayBufferBytes, isFunction, isString, requiredValue } from "../type-guards.ts";
-import { Reader, Writer } from "./protocol.ts";
+import {
+  RequestBody,
+  ResponseBody,
+  readApiVersionsResponse,
+  readSaslAuthenticateResponse,
+  readSaslHandshakeResponse,
+  writeEmptyRequest,
+  writeSaslAuthenticateRequest,
+  writeSaslHandshakeRequest,
+  readResponsePayload,
+  writeRequestFrame,
+} from "../protocol/index.ts";
 import {
   API_API_VERSIONS,
   API_SASL_AUTHENTICATE,
@@ -29,7 +40,7 @@ export type ConnectionOptions = {
 };
 
 type Pending = {
-  resolve: (reader: Reader) => void;
+  resolve: (body: ResponseBody) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
   flexible?: boolean;
@@ -171,10 +182,10 @@ export class Connection {
   async request(
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
     timeoutMs = this.#options.requestTimeoutMs,
     flexible = false,
-  ): Promise<Reader> {
+  ): Promise<ResponseBody> {
     if (this.#closed) {
       throw new Error(CLOSED_MESSAGE);
     }
@@ -187,7 +198,7 @@ export class Connection {
   async sendOnly(
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
     timeoutMs = this.#options.requestTimeoutMs,
   ): Promise<void> {
     if (this.#closed) {
@@ -197,18 +208,16 @@ export class Connection {
     await this.#prepare(socket, apiKey, apiVersion, timeoutMs);
     this.#correlation = (this.#correlation + 1) & INT32_MAX;
     const correlation = this.#correlation;
-    const frame = new Writer();
-    frame
-      .i32(0)
-      .i16(apiKey)
-      .i16(apiVersion)
-      .i32(correlation)
-      .string(this.#options.clientId)
-      .raw(body.result());
-    frame.patchI32(0, frame.length - SIZE_I32);
+    const frame = writeRequestFrame({
+      apiKey,
+      apiVersion,
+      correlationId: correlation,
+      clientId: this.#options.clientId,
+      body,
+    });
     this.#requests++;
-    this.#bytesSent += frame.length;
-    if (socket.write(frame.result()) < 0) {
+    this.#bytesSent += frame.byteLength;
+    if (socket.write(frame) < 0) {
       throw new KafkaError(-1, `Could not write to Kafka broker ${this.address}`, {
         retriable: true,
       });
@@ -253,16 +262,14 @@ export class Connection {
       return this.#negotiating;
     }
     this.#negotiating = (async () => {
-      const response = await this.#send(socket, API_API_VERSIONS, 0, new Writer(), timeoutMs);
-      const error = response.i16();
-      if (error) {
-        throw new KafkaError(error, `ApiVersions negotiation failed on ${this.address}`);
-      }
-      this.#versions = new Map(
-        response.array(
-          (reader) => [reader.i16(), { min: reader.i16(), max: reader.i16() }] as const,
-        ),
+      const response = await this.#send(
+        socket,
+        API_API_VERSIONS,
+        0,
+        writeEmptyRequest(),
+        timeoutMs,
       );
+      this.#versions = readApiVersionsResponse(response);
     })().finally(() => {
       this.#negotiating = undefined;
     });
@@ -285,14 +292,13 @@ export class Connection {
         socket,
         API_SASL_HANDSHAKE,
         1,
-        new Writer().string(sasl.mechanism.toUpperCase()),
+        writeSaslHandshakeRequest(sasl.mechanism.toUpperCase()),
         timeoutMs,
       );
-      const error = handshake.i16();
+      const { error } = readSaslHandshakeResponse(handshake);
       if (error) {
         throw new KafkaError(error, `SASL handshake failed on ${this.address}`);
       }
-      handshake.array((reader) => reader.string());
       await this.#authenticateMechanism(socket, sasl, timeoutMs);
       this.#authenticated = true;
     })().finally(() => {
@@ -357,13 +363,11 @@ export class Connection {
       socket,
       API_SASL_AUTHENTICATE,
       1,
-      new Writer().bytes(payload),
+      writeSaslAuthenticateRequest(payload),
       timeoutMs,
     );
-    const error = response.i16();
-    const message = response.string();
-    const authBytes = response.bytes() ?? new Uint8Array();
-    this.#sessionLifetimeMs = Number(response.i64());
+    const { error, message, authBytes, sessionLifetimeMs } = readSaslAuthenticateResponse(response);
+    this.#sessionLifetimeMs = Number(sessionLifetimeMs);
     if (error) {
       throw new KafkaError(error, message ?? `SASL authentication failed on ${this.address}`);
     }
@@ -467,23 +471,22 @@ export class Connection {
     socket: Bun.Socket,
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
     timeoutMs: number,
     flexible = false,
-  ): Promise<Reader> {
+  ): Promise<ResponseBody> {
     this.#correlation = (this.#correlation + 1) & INT32_MAX;
     const correlation = this.#correlation;
-    const frame = new Writer();
-    frame.i32(0).i16(apiKey).i16(apiVersion).i32(correlation).string(this.#options.clientId);
-    // Flexible requests append a tagged-field section to the header itself
-    // (KIP-482 keeps the non-compact client_id there).
-    if (flexible) {
-      frame.uvarint(0);
-    }
-    frame.raw(body.result());
-    frame.patchI32(0, frame.length - SIZE_I32);
+    const frame = writeRequestFrame({
+      apiKey,
+      apiVersion,
+      correlationId: correlation,
+      clientId: this.#options.clientId,
+      body,
+      flexible,
+    });
     this.#requests++;
-    this.#bytesSent += frame.length;
+    this.#bytesSent += frame.byteLength;
     if (process.env.DEBUG_TXKEYS) {
       console.error("TX", apiKey, `v${apiVersion}`);
     }
@@ -492,14 +495,14 @@ export class Connection {
         "FRAME",
         apiKey,
         `v${apiVersion}`,
-        Array.from(frame.result())
+        Array.from(frame)
           .slice(0, HEX_DUMP_BYTES)
           .map((b) => b.toString(RADIX_HEX).padStart(2, "0"))
           .join(" "),
       );
     }
 
-    return new Promise<Reader>((resolve, reject) => {
+    return new Promise<ResponseBody>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(correlation);
         reject(
@@ -509,7 +512,7 @@ export class Connection {
         );
       }, timeoutMs);
       this.#pending.set(correlation, { resolve, reject, timer, flexible });
-      const written = socket.write(frame.result());
+      const written = socket.write(frame);
       if (written < 0) {
         clearTimeout(timer);
         this.#pending.delete(correlation);
@@ -648,16 +651,12 @@ export class Connection {
     }
     clearTimeout(pending.timer);
     this.#pending.delete(correlation);
-    const reader = new Reader(frame.subarray(SIZE_I32));
-    if (pending.flexible) {
-      try {
-        reader.skipTags();
-      } catch (error) {
-        pending.reject(error instanceof Error ? error : new Error(String(error)));
-        return;
-      }
+    try {
+      const { body } = readResponsePayload(frame, pending.flexible === true);
+      pending.resolve(body);
+    } catch (error) {
+      pending.reject(error instanceof Error ? error : new Error(String(error)));
     }
-    pending.resolve(reader);
   }
 
   #fail(error: Error, socket?: Bun.Socket): void {

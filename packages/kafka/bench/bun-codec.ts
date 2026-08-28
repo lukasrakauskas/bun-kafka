@@ -1,4 +1,4 @@
-import { decodeRecordSet, encodeRecordBatch } from "../src/bun/protocol.ts";
+import { decodeRecordSet, encodeRecordBatch } from "../src/protocol/index.ts";
 import { requiredValue } from "../src/type-guards.ts";
 
 const width = Number(process.argv[2] ?? 100);

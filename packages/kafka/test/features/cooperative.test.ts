@@ -1,5 +1,5 @@
-function writeResponse(socket: Bun.Socket, correlation: number, body: Writer): void {
-  const response = new Writer().i32(0).i32(correlation).raw(body.result());
+function writeResponse(socket: Bun.Socket, correlation: number, body: KafkaEncoder): void {
+  const response = encoder().i32(0).i32(correlation).raw(body.result());
   response.patchI32(0, response.length - 4);
   socket.write(response.result());
 }
@@ -9,7 +9,7 @@ type OwnedPartitionsResult = { protocol: string; version: number; partitions: nu
 function readOwnedPartitions(request: Uint8Array): OwnedPartitionsResult {
   const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
   const clientIdLength = view.getInt16(12);
-  const reader = new Reader(
+  const reader = decoder(
     new Uint8Array(
       request.buffer,
       request.byteOffset + 14 + clientIdLength,
@@ -25,7 +25,7 @@ function readOwnedPartitions(request: Uint8Array): OwnedPartitionsResult {
     name: item.string() ?? "",
     metadata: item.bytes() ?? new Uint8Array(),
   }));
-  const metadata = new Reader(protocols[0].metadata);
+  const metadata = decoder(protocols[0].metadata);
   const version = metadata.i16();
   metadata.array((item) => item.string());
   const partitions = metadata
@@ -37,15 +37,15 @@ function readOwnedPartitions(request: Uint8Array): OwnedPartitionsResult {
   return { protocol: protocols[0].name, version, partitions };
 }
 
-function cooperativeBody(key: number, port: number): Writer {
+function cooperativeBody(key: number, port: number): KafkaEncoder {
   if (key === 18) {
     return apiVersions();
   }
   if (key === 10) {
-    return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
+    return encoder().i16(0).i32(1).string("127.0.0.1").i32(port);
   }
   if (key === 3) {
-    return new Writer()
+    return encoder()
       .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
         writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
       )
@@ -67,7 +67,7 @@ function cooperativeBody(key: number, port: number): Writer {
       );
   }
   if (key === 11) {
-    const metadata = new Writer()
+    const metadata = encoder()
       .i16(1)
       .array(["events"], (writer, topic) => writer.string(topic))
       .array([{ topic: "events", partitions: [0] }], (writer, item) =>
@@ -76,7 +76,7 @@ function cooperativeBody(key: number, port: number): Writer {
           .array(item.partitions, (partitionWriter, partition) => partitionWriter.i32(partition)),
       )
       .bytes(null);
-    return new Writer()
+    return encoder()
       .i32(0)
       .i16(0)
       .i32(10)
@@ -88,16 +88,16 @@ function cooperativeBody(key: number, port: number): Writer {
       );
   }
   if (key === 14) {
-    const assignment = new Writer()
+    const assignment = encoder()
       .i16(0)
       .array(["events"], (writer, topic) =>
         writer.string(topic).array([0, 1], (item, partition) => item.i32(partition)),
       )
       .bytes(null);
-    return new Writer().i16(0).bytes(assignment.result());
+    return encoder().i16(0).bytes(assignment.result());
   }
   if (key === 9) {
-    return new Writer()
+    return encoder()
       .array(["events"], (writer, topic) =>
         writer
           .string(topic)
@@ -106,18 +106,18 @@ function cooperativeBody(key: number, port: number): Writer {
       .i16(0);
   }
   if (key === 2) {
-    return new Writer()
+    return encoder()
       .i32(0)
       .array(["events"], (writer, topic) =>
         writer.string(topic).array([0, 1], (item, partition) => item.i32(partition).i16(0).i64(10)),
       );
   }
   if (key === 8) {
-    return new Writer().array(["events"], (writer, topic) =>
+    return encoder().array(["events"], (writer, topic) =>
       writer.string(topic).array([0, 1], (item) => item.i16(0)),
     );
   }
-  return new Writer().i16(0);
+  return encoder().i16(0);
 }
 
 function retainPartitions(
@@ -168,16 +168,23 @@ function assignRemaining(
 
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { Reader, Writer } from "../../src/bun/protocol.ts";
+import {
+  decoder,
+  type KafkaDecoder,
+  encoder,
+  type KafkaEncoder,
+} from "../../src/protocol/index.ts";
 
 const COOPERATIVE_STICKY = "cooperative-sticky";
 const MEMBER_ID = "member-1";
 
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 
 describe("Cooperative-sticky assignor (mock broker)", () => {
   test("JoinGroup declares the cooperative-sticky protocol and owned partitions", async () => {

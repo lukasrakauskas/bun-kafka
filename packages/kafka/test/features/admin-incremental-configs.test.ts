@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { Reader, Writer } from "../../src/bun/protocol.ts";
+import {
+  decoder,
+  type KafkaDecoder,
+  encoder,
+  type KafkaEncoder,
+} from "../../src/protocol/index.ts";
 
-const apiVersionsBody = new Writer()
+const apiVersionsBody = encoder()
   .i16(0)
   .array([18, 32, 33, 44], (writer, key) => writer.i16(key).i16(0).i16(1))
   .i32(0);
@@ -13,9 +18,9 @@ function requestBodyBytes(buffer: ArrayBuffer, byteOffset: number, byteLength: n
   return new Uint8Array(buffer, start, byteLength - (14 + clientIdLen + 1));
 }
 
-function reply(socket: Bun.TcpSocket, correlation: number, body: Writer) {
-  const response = new Writer().i32(correlation).uvarint(0).raw(body.result());
-  socket.write(new Writer().i32(0).patchI32(0, response.length).raw(response.result()).result());
+function reply(socket: Bun.TcpSocket, correlation: number, body: KafkaEncoder) {
+  const response = encoder().i32(correlation).uvarint(0).raw(body.result());
+  socket.write(encoder().i32(0).patchI32(0, response.length).raw(response.result()).result());
 }
 
 describe("IncrementalAlterConfigs (mock broker)", () => {
@@ -38,7 +43,7 @@ describe("IncrementalAlterConfigs (mock broker)", () => {
             return;
           }
           sawKey = true;
-          const req = new Reader(
+          const req = decoder(
             requestBodyBytes(request.buffer, request.byteOffset, request.byteLength),
           );
           const resources = req.compactArray((r) => {
@@ -63,7 +68,7 @@ describe("IncrementalAlterConfigs (mock broker)", () => {
           reply(
             socket,
             correlation,
-            new Writer()
+            encoder()
               .i32(7) // throttle
               .compactArray(
                 [

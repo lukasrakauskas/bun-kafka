@@ -1,17 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { Writer } from "../../src/bun/protocol.ts";
+import { encoder, type KafkaEncoder } from "../../src/protocol/index.ts";
 
 const TEST_PRINCIPAL = "User:bun-kafka-test";
 
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 
 function metadataBody(listenerPort: number) {
-  return new Writer()
+  return encoder()
     .array([{ id: 1, host: "127.0.0.1", port: listenerPort }], (writer, b) =>
       writer.i32(b.id).string(b.host).i32(b.port).string(null),
     )
@@ -36,7 +38,7 @@ function metadataBody(listenerPort: number) {
 function handleFrames(
   socket: Bun.Socket,
   request: Uint8Array,
-  bodyFor: (key: number) => Writer,
+  bodyFor: (key: number) => KafkaEncoder,
   observe: (key: number) => void = () => {},
 ): void {
   let offset = 0;
@@ -46,14 +48,14 @@ function handleFrames(
     const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
     const key = view.getInt16(4);
     observe(key);
-    const response = new Writer().i32(0).i32(view.getInt32(8)).raw(bodyFor(key).result());
+    const response = encoder().i32(0).i32(view.getInt32(8)).raw(bodyFor(key).result());
     response.patchI32(0, response.length - 4);
     socket.write(response.result());
     offset += 4 + size;
   }
 }
 
-function adminGroupBody(key: number, port: number): Writer {
+function adminGroupBody(key: number, port: number): KafkaEncoder {
   if (key === 18) {
     return apiVersions();
   }
@@ -61,35 +63,39 @@ function adminGroupBody(key: number, port: number): Writer {
     return metadataBody(port);
   }
   if (key === 16) {
-    return new Writer()
+    return encoder()
       .i32(0)
       .i16(0)
       .array(["workers"], (writer, group) => writer.string(group).string("consumer"));
   }
   if (key === 15) {
-    return new Writer().i32(0).array(["workers"], (writer, group) =>
-      writer
-        .i16(0)
-        .string(null)
-        .string(group)
-        .string("Stable")
-        .string("consumer")
-        .string("range")
-        .array(["member-1"], (memberWriter, member) =>
-          memberWriter
-            .string(member)
-            .string("app-1")
-            .string("host-1")
-            .bytes(null)
-            .bytes(new Uint8Array([0, 1, 2])),
-        ),
-    );
+    return encoder()
+      .i32(0)
+      .array(["workers"], (writer, group) =>
+        writer
+          .i16(0)
+          .string(null)
+          .string(group)
+          .string("Stable")
+          .string("consumer")
+          .string("range")
+          .array(["member-1"], (memberWriter, member) =>
+            memberWriter
+              .string(member)
+              .string("app-1")
+              .string("host-1")
+              .bytes(null)
+              .bytes(new Uint8Array([0, 1, 2])),
+          ),
+      );
   }
   if (key === 42) {
-    return new Writer().i32(0).array(["workers"], (writer, group) => writer.string(group).i16(0));
+    return encoder()
+      .i32(0)
+      .array(["workers"], (writer, group) => writer.string(group).i16(0));
   }
   if (key === 21) {
-    return new Writer()
+    return encoder()
       .i32(0)
       .array(["events"], (writer, name) =>
         writer
@@ -99,10 +105,10 @@ function adminGroupBody(key: number, port: number): Writer {
           ),
       );
   }
-  return new Writer().i16(0);
+  return encoder().i16(0);
 }
 
-function aclBody(key: number, port: number): Writer {
+function aclBody(key: number, port: number): KafkaEncoder {
   if (key === 18) {
     return apiVersions();
   }
@@ -110,10 +116,12 @@ function aclBody(key: number, port: number): Writer {
     return metadataBody(port);
   }
   if (key === 30) {
-    return new Writer().i32(0).array(["acl"], (writer) => writer.i16(0).string(null));
+    return encoder()
+      .i32(0)
+      .array(["acl"], (writer) => writer.i16(0).string(null));
   }
   if (key === 29) {
-    return new Writer()
+    return encoder()
       .i32(0)
       .i16(0)
       .string(null)
@@ -127,29 +135,31 @@ function aclBody(key: number, port: number): Writer {
       );
   }
   if (key === 31) {
-    return new Writer().i32(0).array([true], (writer) =>
-      writer
-        .i16(0)
-        .string(null)
-        .array([{ error: 0, principal: TEST_PRINCIPAL }], (aclWriter, acl) =>
-          aclWriter
-            .i16(acl.error)
-            .string(null)
-            .i8(2)
-            .string("acl-topic")
-            .string(acl.principal)
-            .string("*")
-            .i8(3)
-            .i8(3),
-        ),
-    );
+    return encoder()
+      .i32(0)
+      .array([true], (writer) =>
+        writer
+          .i16(0)
+          .string(null)
+          .array([{ error: 0, principal: TEST_PRINCIPAL }], (aclWriter, acl) =>
+            aclWriter
+              .i16(acl.error)
+              .string(null)
+              .i8(2)
+              .string("acl-topic")
+              .string(acl.principal)
+              .string("*")
+              .i8(3)
+              .i8(3),
+          ),
+      );
   }
-  return new Writer().i16(0);
+  return encoder().i16(0);
 }
 
 type OffsetState = { listOffsets: number };
 
-function listOffsetBody(state: OffsetState): Writer {
+function listOffsetBody(state: OffsetState): KafkaEncoder {
   const request = state.listOffsets++;
   let resolved = 7n;
   if (request === 0) {
@@ -157,7 +167,7 @@ function listOffsetBody(state: OffsetState): Writer {
   } else if (request === 1) {
     resolved = 9n;
   }
-  return new Writer().array(["events"], (writer, name) =>
+  return encoder().array(["events"], (writer, name) =>
     writer
       .string(name)
       .array([0], (partitionWriter, partition) =>
@@ -166,7 +176,7 @@ function listOffsetBody(state: OffsetState): Writer {
   );
 }
 
-function offsetBody(key: number, port: number, state: OffsetState): Writer {
+function offsetBody(key: number, port: number, state: OffsetState): KafkaEncoder {
   if (key === 18) {
     return apiVersions();
   }
@@ -174,13 +184,13 @@ function offsetBody(key: number, port: number, state: OffsetState): Writer {
     return metadataBody(port);
   }
   if (key === 10) {
-    return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
+    return encoder().i16(0).i32(1).string("127.0.0.1").i32(port);
   }
   if (key === 2) {
     return listOffsetBody(state);
   }
   if (key === 9) {
-    return new Writer()
+    return encoder()
       .array(["events"], (writer, name) =>
         writer
           .string(name)
@@ -191,24 +201,26 @@ function offsetBody(key: number, port: number, state: OffsetState): Writer {
       .i16(0);
   }
   if (key === 8) {
-    return new Writer().array(["events"], (writer, name) =>
+    return encoder().array(["events"], (writer, name) =>
       writer
         .string(name)
         .array([0], (partitionWriter, partition) => partitionWriter.i32(partition).i16(0)),
     );
   }
   if (key === 15) {
-    return new Writer().i32(0).array(["g"], (writer, group) =>
-      writer
-        .i16(0)
-        .string(group)
-        .string("Dead")
-        .string(null)
-        .string(null)
-        .array([], (memberWriter) => memberWriter),
-    );
+    return encoder()
+      .i32(0)
+      .array(["g"], (writer, group) =>
+        writer
+          .i16(0)
+          .string(group)
+          .string("Dead")
+          .string(null)
+          .string(null)
+          .array([], (memberWriter) => memberWriter),
+      );
   }
-  return new Writer().i16(0);
+  return encoder().i16(0);
 }
 
 describe("Admin: group and record management", () => {
@@ -222,7 +234,7 @@ describe("Admin: group and record management", () => {
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
           const body = key === 18 ? apiVersions() : metadataBody(listener.port);
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
+          const response = encoder().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());
         },

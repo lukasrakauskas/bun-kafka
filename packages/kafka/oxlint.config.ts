@@ -17,12 +17,14 @@ export default defineConfig({
     ".roo/**",
     ".windsurf/**",
     "tools/oxlint/anti-slop/**",
+    "tools/oxlint/protocol-boundary/**",
     "scripts/**",
     "bench/**",
     "test/**",
   ],
   jsPlugins: [
     { name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" },
+    { name: "protocol-boundary", specifier: "./tools/oxlint/protocol-boundary/index.ts" },
     { name: "sonarjs", specifier: "eslint-plugin-sonarjs" },
   ],
   plugins: ["typescript", "unicorn", "import", "promise", "oxc"],
@@ -79,6 +81,7 @@ export default defineConfig({
     "anti-slop/no-unknown-type-aliases": "error",
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
+    "protocol-boundary/no-private-wire-types": "error",
   },
   env: {
     builtin: true,

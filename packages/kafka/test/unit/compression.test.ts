@@ -5,14 +5,14 @@ import {
   lz4Decompress,
   lz4DecompressBlock,
   xxhash32,
-} from "../../src/bun/lz4.ts";
+} from "../../src/protocol/lz4.ts";
 import {
   snappyCompress,
   snappyCompressBlock,
   snappyDecompress,
   snappyDecompressBlock,
-} from "../../src/bun/snappy.ts";
-import { decodeRecordSet, encodeRecordBatch } from "../../src/bun/protocol.ts";
+} from "../../src/protocol/snappy.ts";
+import { decodeRecordSet, encodeRecordBatch } from "../../src/protocol/index.ts";
 
 const decode = (value: Uint8Array) => new TextDecoder().decode(value);
 

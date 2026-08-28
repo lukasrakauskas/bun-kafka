@@ -1,20 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { Writer } from "../../src/bun/protocol.ts";
+import { encoder, type KafkaEncoder } from "../../src/protocol/index.ts";
 
 const UNREACHABLE_BROKER = "127.0.0.1:1";
 
-function plainAuthBody(key: number, port: number): Writer {
+function plainAuthBody(key: number, port: number): KafkaEncoder {
   if (key === 18) {
     return apiVersions();
   }
   if (key === 17) {
-    return new Writer().i16(0).array(["PLAIN"], (writer, mechanism) => writer.string(mechanism));
+    return encoder()
+      .i16(0)
+      .array(["PLAIN"], (writer, mechanism) => writer.string(mechanism));
   }
   if (key === 36) {
-    return new Writer().i16(0).string(null).bytes(new Uint8Array()).i64(0);
+    return encoder().i16(0).string(null).bytes(new Uint8Array()).i64(0);
   }
-  return new Writer()
+  return encoder()
     .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
       writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
     )
@@ -36,20 +38,20 @@ function plainAuthBody(key: number, port: number): Writer {
     );
 }
 
-function writeClientResponse(socket: Bun.Socket, request: Uint8Array, body: Writer): void {
+function writeClientResponse(socket: Bun.Socket, request: Uint8Array, body: KafkaEncoder): void {
   const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
-  const response = new Writer().i32(0).i32(view.getInt32(8)).raw(body.result());
+  const response = encoder().i32(0).i32(view.getInt32(8)).raw(body.result());
   response.patchI32(0, response.length - 4);
   socket.write(response.result());
 }
 
-function clientGroupBody(key: number, port: number): Writer {
-  const memberMetadata = new Writer()
+function clientGroupBody(key: number, port: number): KafkaEncoder {
+  const memberMetadata = encoder()
     .i16(0)
     .array(["events"], (writer, topic) => writer.string(topic))
     .bytes(null)
     .result();
-  const assignment = new Writer()
+  const assignment = encoder()
     .i16(0)
     .array(["events"], (writer, topic) =>
       writer.string(topic).array([0], (item, partition) => item.i32(partition)),
@@ -60,10 +62,10 @@ function clientGroupBody(key: number, port: number): Writer {
     return apiVersions();
   }
   if (key === 10) {
-    return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
+    return encoder().i16(0).i32(1).string("127.0.0.1").i32(port);
   }
   if (key === 3) {
-    return new Writer()
+    return encoder()
       .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
         writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
       )
@@ -85,7 +87,7 @@ function clientGroupBody(key: number, port: number): Writer {
       );
   }
   if (key === 11) {
-    return new Writer()
+    return encoder()
       .i32(0)
       .i16(0)
       .i32(1)
@@ -95,10 +97,10 @@ function clientGroupBody(key: number, port: number): Writer {
       .array(["member-1"], (writer, member) => writer.string(member).bytes(memberMetadata));
   }
   if (key === 14) {
-    return new Writer().i16(0).bytes(assignment);
+    return encoder().i16(0).bytes(assignment);
   }
   if (key === 9) {
-    return new Writer()
+    return encoder()
       .array(["events"], (writer, topic) =>
         writer
           .string(topic)
@@ -107,19 +109,19 @@ function clientGroupBody(key: number, port: number): Writer {
       .i16(0);
   }
   if (key === 8) {
-    return new Writer().array(["events"], (writer, topic) =>
+    return encoder().array(["events"], (writer, topic) =>
       writer.string(topic).array([0], (item, partition) => item.i32(partition).i16(0)),
     );
   }
-  return new Writer().i16(0);
+  return encoder().i16(0);
 }
 
-function clientAdminBody(key: number, port: number): Writer {
+function clientAdminBody(key: number, port: number): KafkaEncoder {
   if (key === 18) {
     return apiVersions();
   }
   if (key === 3) {
-    return new Writer()
+    return encoder()
       .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
         writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
       )
@@ -128,23 +130,30 @@ function clientAdminBody(key: number, port: number): Writer {
       .array([], () => {});
   }
   if (key === 32) {
-    return new Writer().i32(0).array([{ resourceType: 2, name: "events" }], (writer, resource) =>
-      writer
-        .i16(0)
-        .string(null)
-        .i8(resource.resourceType)
-        .string(resource.name)
-        .array([{ name: "cleanup.policy", value: "delete" }], (configWriter, config) =>
-          configWriter.string(config.name).string(config.value).bool(false).bool(false).bool(false),
-        ),
-    );
+    return encoder()
+      .i32(0)
+      .array([{ resourceType: 2, name: "events" }], (writer, resource) =>
+        writer
+          .i16(0)
+          .string(null)
+          .i8(resource.resourceType)
+          .string(resource.name)
+          .array([{ name: "cleanup.policy", value: "delete" }], (configWriter, config) =>
+            configWriter
+              .string(config.name)
+              .string(config.value)
+              .bool(false)
+              .bool(false)
+              .bool(false),
+          ),
+      );
   }
   if (key === 33) {
-    return new Writer()
+    return encoder()
       .i32(0)
       .array(["events"], (writer, name) => writer.i16(0).string(null).i8(2).string(name));
   }
-  return new Writer()
+  return encoder()
     .i32(key === 19 ? 7 : 0)
     .array([{ name: "events", error: 0, message: null }], (writer, result) => {
       writer.string(result.name).i16(result.error);
@@ -155,10 +164,12 @@ function clientAdminBody(key: number, port: number): Writer {
 }
 
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 
 describe("Bun native Kafka client (mock brokers)", () => {
   test("uses Bun TCP framing for metadata", async () => {
@@ -170,7 +181,7 @@ describe("Bun native Kafka client (mock brokers)", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          const metadata = new Writer()
+          const metadata = encoder()
             .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) => {
               writer.i32(broker.id).string(broker.host).i32(broker.port).string(null);
             })
@@ -190,7 +201,7 @@ describe("Bun native Kafka client (mock brokers)", () => {
                     .array([1], (itemWriter, id) => itemWriter.i32(id));
                 });
             });
-          const response = new Writer()
+          const response = encoder()
             .i32(0)
             .i32(correlation)
             .raw((key === 18 ? apiVersions() : metadata).result());
@@ -259,11 +270,11 @@ describe("Bun native Kafka client (mock brokers)", () => {
             socket.end();
             return;
           }
-          let body: Writer;
+          let body: KafkaEncoder;
           if (key === 18) {
             body = apiVersions();
           } else if (key === 3) {
-            body = new Writer()
+            body = encoder()
               .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) =>
                 writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
               )
@@ -284,7 +295,7 @@ describe("Bun native Kafka client (mock brokers)", () => {
                   ),
               );
           } else {
-            body = new Writer().array(["events"], (writer, topic) =>
+            body = encoder().array(["events"], (writer, topic) =>
               writer
                 .string(topic)
                 .array([0], (partitions, partition) =>
@@ -292,7 +303,7 @@ describe("Bun native Kafka client (mock brokers)", () => {
                 ),
             );
           }
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
+          const response = encoder().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());
         },

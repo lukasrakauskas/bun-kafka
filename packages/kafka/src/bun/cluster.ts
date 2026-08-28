@@ -1,7 +1,15 @@
 import { KafkaError } from "../errors.ts";
 import type { ClusterMetadata } from "../types.ts";
 import { Connection, type ConnectionOptions } from "./connection.ts";
-import { Reader, Writer, readMetadataResponse } from "./protocol.ts";
+import {
+  RequestBody,
+  ResponseBody,
+  readFindCoordinatorResponse,
+  readMetadataResponse,
+  writeEmptyRequest,
+  writeFindCoordinatorRequestV1,
+  writeMetadataRequest,
+} from "../protocol/index.ts";
 import {
   API_API_VERSIONS,
   API_FIND_COORDINATOR,
@@ -126,18 +134,18 @@ export class Cluster {
   async anyRequest(
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
     flexible = false,
-  ): Promise<Reader> {
+  ): Promise<ResponseBody> {
     return this.#anyRequest(apiKey, apiVersion, body, flexible);
   }
 
   async #anyRequest(
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
     flexible = false,
-  ): Promise<Reader> {
+  ): Promise<ResponseBody> {
     let lastError: unknown;
     const candidates = [...new Set([...this.#brokers.values(), ...this.#bootstrap])];
     for (const broker of candidates) {
@@ -157,7 +165,7 @@ export class Cluster {
   }
 
   async metadata(topics: string[] | null = null): Promise<ClusterMetadata> {
-    const body = new Writer().array(topics, (writer, topic) => writer.string(topic));
+    const body = writeMetadataRequest(topics);
     const response = readMetadataResponse(await this.#anyRequest(API_METADATA, 2, body));
     for (const broker of response.brokers) {
       this.#brokers.set(broker.id, address(broker.host, broker.port));
@@ -187,11 +195,11 @@ export class Cluster {
     brokerId: number,
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
     timeoutMs?: number,
     retry = true,
     flexible = false,
-  ): Promise<Reader> {
+  ): Promise<ResponseBody> {
     return this.#requestWithRetry(brokerId, apiKey, apiVersion, body, timeoutMs, retry, flexible);
   }
 
@@ -199,11 +207,11 @@ export class Cluster {
     brokerId: number,
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
     timeoutMs: number | undefined,
     retry: boolean,
     flexible: boolean,
-  ): Promise<Reader> {
+  ): Promise<ResponseBody> {
     const maxRetries = retry ? this.#retry.maxRetries : 0;
     let lastError: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -224,10 +232,10 @@ export class Cluster {
     brokerId: number,
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
     timeoutMs: number | undefined,
     flexible: boolean,
-  ): Promise<Reader> {
+  ): Promise<ResponseBody> {
     let broker = this.#brokers.get(brokerId);
     if (!broker) {
       await this.metadata();
@@ -249,7 +257,11 @@ export class Cluster {
     }
   }
 
-  async controllerRequest(apiKey: number, apiVersion: number, body: Writer): Promise<Reader> {
+  async controllerRequest(
+    apiKey: number,
+    apiVersion: number,
+    body: RequestBody,
+  ): Promise<ResponseBody> {
     if (this.#controller === undefined) {
       await this.metadata();
     }
@@ -270,14 +282,13 @@ export class Cluster {
     const response = await this.#anyRequest(
       API_FIND_COORDINATOR,
       2,
-      new Writer().string(transactionalId).i8(1),
+      writeFindCoordinatorRequestV1(transactionalId, 1),
     );
-    const throttleMs = response.i32();
-    if (throttleMs > 0) {
-      this.throttle(API_FIND_COORDINATOR, throttleMs);
+    const coordinator = readFindCoordinatorResponse(response);
+    if (coordinator.throttleMs > 0) {
+      this.throttle(API_FIND_COORDINATOR, coordinator.throttleMs);
     }
-    const error = response.i16();
-    const message = response.string();
+    const { error, message } = coordinator;
     if (error) {
       throw kafkaError(
         error,
@@ -286,10 +297,7 @@ export class Cluster {
           : `Find transaction coordinator ${transactionalId}`,
       );
     }
-    const coordinatorId = response.i32();
-    response.string(); // host
-    response.i32(); // port
-    return coordinatorId;
+    return coordinator.coordinatorId;
   }
 
   /** Send a Produce request without waiting for a response (acks=0). */
@@ -297,7 +305,7 @@ export class Cluster {
     brokerId: number,
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
   ): Promise<void> {
     let broker = this.#brokers.get(brokerId);
     if (!broker) {
@@ -405,7 +413,7 @@ export class Cluster {
       [...targets].map(async ([addr, brokerId]) => {
         const startedAt = performance.now();
         try {
-          await this.#connection(addr).request(API_API_VERSIONS, 0, new Writer(), timeoutMs);
+          await this.#connection(addr).request(API_API_VERSIONS, 0, writeEmptyRequest(), timeoutMs);
           return {
             address: addr,
             brokerId,

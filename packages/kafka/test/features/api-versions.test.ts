@@ -1,19 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { Writer } from "../../src/bun/protocol.ts";
+import { encoder, type KafkaEncoder } from "../../src/protocol/index.ts";
 
 const apiVersions = (produceMin = 0) =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) =>
-      writer
-        .i16(key)
-        .i16(key === 0 ? produceMin : 0)
-        .i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) =>
+        writer
+          .i16(key)
+          .i16(key === 0 ? produceMin : 0)
+          .i16(20),
+    );
 
 function metadataBody(listenerPort: number) {
-  return new Writer()
+  return encoder()
     .array([{ id: 1, host: "127.0.0.1", port: listenerPort }], (writer, b) =>
       writer.i32(b.id).string(b.host).i32(b.port).string(null),
     )
@@ -56,19 +58,19 @@ describe("API version pinning", () => {
               4,
             ).getInt32(0);
             seen.set(key, version);
-            let body: Writer;
+            let body: KafkaEncoder;
             if (key === 18) {
               body = apiVersions();
             } else if (key === 3) {
               body = metadataBody(listener.port);
             } else if (key === 10) {
-              body = new Writer().i16(0).i32(1).string("127.0.0.1").i32(listener.port);
+              body = encoder().i16(0).i32(1).string("127.0.0.1").i32(listener.port);
             } else if (key === 2) {
-              body = new Writer().array(["events"], (writer, name) =>
+              body = encoder().array(["events"], (writer, name) =>
                 writer.string(name).array([0], (pWriter, p) => pWriter.i32(p).i16(0).i64(0).i64(7)),
               );
             } else if (key === 9) {
-              body = new Writer()
+              body = encoder()
                 .array(["events"], (writer, name) =>
                   writer
                     .string(name)
@@ -76,11 +78,11 @@ describe("API version pinning", () => {
                 )
                 .i16(0);
             } else if (key === 8) {
-              body = new Writer().array(["events"], (writer, name) =>
+              body = encoder().array(["events"], (writer, name) =>
                 writer.string(name).array([0], (pWriter, p) => pWriter.i32(p).i16(0)),
               );
             } else if (key === 0) {
-              body = new Writer()
+              body = encoder()
                 .array(["events"], (writer, name) =>
                   writer
                     .string(name)
@@ -88,9 +90,9 @@ describe("API version pinning", () => {
                 )
                 .i32(0);
             } else {
-              body = new Writer().i16(0);
+              body = encoder().i16(0);
             }
-            const response = new Writer().i32(0).i32(correlation).raw(body.result());
+            const response = encoder().i32(0).i32(correlation).raw(body.result());
             response.patchI32(0, response.length - 4);
             socket.write(response.result());
             offset += 4 + size;
@@ -145,16 +147,16 @@ describe("API version pinning", () => {
             if (key === 0) {
               sawProduce = true;
             }
-            let body: Writer;
+            let body: KafkaEncoder;
             if (key === 18) {
               body = apiVersions(4);
             } // Produce supported only from v4 up
             else if (key === 3) {
               body = metadataBody(listener.port);
             } else {
-              body = new Writer().i16(0);
+              body = encoder().i16(0);
             }
-            const response = new Writer().i32(0).i32(correlation).raw(body.result());
+            const response = encoder().i32(0).i32(correlation).raw(body.result());
             response.patchI32(0, response.length - 4);
             socket.write(response.result());
             offset += 4 + size;
@@ -194,36 +196,38 @@ describe("API version pinning", () => {
               request.byteOffset + offset + 8,
               4,
             ).getInt32(0);
-            let body: Writer;
+            let body: KafkaEncoder;
             if (key === 18) {
               body = apiVersions();
             } else if (key === 3) {
               body = metadataBody(listener.port);
             } else if (key === 32) {
-              body = new Writer().i32(0).array([{ type: 2, name: "events" }], (writer, r) =>
-                writer
-                  .i16(0)
-                  .string(null)
-                  .i8(r.type)
-                  .string(r.name)
-                  .array(
-                    [
-                      { name: "retention.ms", value: "60000", isDefault: true },
-                      { name: "cleanup.policy", value: "delete", isDefault: false },
-                    ],
-                    (cWriter, c) =>
-                      cWriter
-                        .string(c.name)
-                        .string(c.value)
-                        .bool(false)
-                        .bool(c.isDefault)
-                        .bool(false),
-                  ),
-              );
+              body = encoder()
+                .i32(0)
+                .array([{ type: 2, name: "events" }], (writer, r) =>
+                  writer
+                    .i16(0)
+                    .string(null)
+                    .i8(r.type)
+                    .string(r.name)
+                    .array(
+                      [
+                        { name: "retention.ms", value: "60000", isDefault: true },
+                        { name: "cleanup.policy", value: "delete", isDefault: false },
+                      ],
+                      (cWriter, c) =>
+                        cWriter
+                          .string(c.name)
+                          .string(c.value)
+                          .bool(false)
+                          .bool(c.isDefault)
+                          .bool(false),
+                    ),
+                );
             } else {
-              body = new Writer().i16(0);
+              body = encoder().i16(0);
             }
-            const response = new Writer().i32(0).i32(correlation).raw(body.result());
+            const response = encoder().i32(0).i32(correlation).raw(body.result());
             response.patchI32(0, response.length - 4);
             socket.write(response.result());
             offset += 4 + size;
@@ -261,7 +265,7 @@ describe("API version pinning", () => {
         data(socket, request) {
           // Pre-0.10 broker shape: reject every ApiVersions attempt outright.
           const correlation = new DataView(request.buffer, request.byteOffset + 8, 4).getInt32(0);
-          const response = new Writer().i32(0).i32(correlation).raw(new Writer().i16(35).result());
+          const response = encoder().i32(0).i32(correlation).raw(encoder().i16(35).result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());
         },

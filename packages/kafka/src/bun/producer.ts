@@ -2,13 +2,23 @@ import { KafkaError, KafkaErrorCode } from "../errors.ts";
 import { isFunction, isString, requiredValue } from "../type-guards.ts";
 import { Cluster } from "./cluster.ts";
 import {
-  Reader,
-  Writer,
+  RequestBody,
+  ResponseBody,
+  writeEndTransactionRequest,
+  readEndTransactionResponse,
+  writeAddOffsetsToTransactionRequest,
+  writeTransactionOffsetCommitRequest,
+  readTransactionOffsetCommitResponse,
+  writeAddPartitionsToTransactionRequest,
+  readTopicPartitionErrors,
+  writeInitProducerIdRequest,
+  readInitProducerIdResponse,
+  writeProduceRequest,
+  readProduceResponse,
   asBytes,
-  encodeRecordBatch,
   murmur2,
   type WireRecord,
-} from "./protocol.ts";
+} from "../protocol/index.ts";
 import {
   API_ADD_OFFSETS_TO_TXN,
   API_ADD_PARTITIONS_TO_TXN,
@@ -359,16 +369,18 @@ export class BunProducer {
     }
     await this.flush();
     const producer = requiredValue(this.#producer, "Producer identity is not initialized");
-    const body = new Writer()
-      .string(this.#transactionalId)
-      .i64(producer.id)
-      .i16(producer.epoch)
-      .bool(committed);
+    const body = writeEndTransactionRequest(
+      this.#transactionalId,
+      producer.id,
+      producer.epoch,
+      committed,
+    );
     // EndTxn v1: same wire shape as v0 but its response carries
     // throttle_time_ms on every broker implementation.
     const response = await this.#txnCoordinatorRequest(API_END_TXN, 1, body);
-    this.#cluster.throttle(API_END_TXN, response.i32());
-    const error = response.i16();
+    const endTransaction = readEndTransactionResponse(response);
+    this.#cluster.throttle(API_END_TXN, endTransaction.throttleMs);
+    const { error } = endTransaction;
     if (error) {
       throw kafkaError(error, label);
     }
@@ -396,39 +408,34 @@ export class BunProducer {
     }
     const producer = requiredValue(this.#producer, "Producer identity is not initialized");
     const topics = Map.groupBy(offsets, (o) => o.topic);
-    const body = new Writer()
-      .string(this.#transactionalId)
-      .string(groupId)
-      .i64(producer.id)
-      .i16(producer.epoch)
-      .array([...topics], (writer, [topicName, values]) =>
-        writer
-          .string(topicName)
-          .array(values, (partitionWriter, value) =>
-            partitionWriter.i32(value.partition).i64(value.offset).string(null),
-          ),
-      );
-    const addOffsetsBody = new Writer()
-      .string(this.#transactionalId)
-      .i64(producer.id)
-      .i16(producer.epoch)
-      .string(groupId);
+    const body = writeTransactionOffsetCommitRequest(
+      this.#transactionalId,
+      groupId,
+      producer.id,
+      producer.epoch,
+      topics,
+    );
+    const addOffsetsBody = writeAddOffsetsToTransactionRequest(
+      this.#transactionalId,
+      producer.id,
+      producer.epoch,
+      groupId,
+    );
     const addOffsetsResponse = await this.#txnCoordinatorRequest(
       API_ADD_OFFSETS_TO_TXN,
       0,
       addOffsetsBody,
     );
-    this.#cluster.throttle(API_ADD_OFFSETS_TO_TXN, addOffsetsResponse.i32());
-    const addOffsetsError = addOffsetsResponse.i16();
+    const addOffsets = readEndTransactionResponse(addOffsetsResponse);
+    this.#cluster.throttle(API_ADD_OFFSETS_TO_TXN, addOffsets.throttleMs);
+    const addOffsetsError = addOffsets.error;
     if (addOffsetsError) {
       throw kafkaError(addOffsetsError, `AddOffsetsToTxn group ${groupId}`);
     }
     const response = await this.#txnCoordinatorRequest(API_TXN_OFFSET_COMMIT, 0, body);
-    this.#cluster.throttle(API_TXN_OFFSET_COMMIT, response.i32());
-    for (const result of response.array((reader) => ({
-      topic: reader.string() ?? "",
-      partitions: reader.array((p) => ({ index: p.i32(), error: p.i16() })),
-    }))) {
+    const offsetCommit = readTransactionOffsetCommitResponse(response);
+    this.#cluster.throttle(API_TXN_OFFSET_COMMIT, offsetCommit.throttleMs);
+    for (const result of offsetCommit.topics) {
       for (const partition of result.partitions) {
         if (partition.error) {
           throw kafkaError(partition.error, `${result.topic}[${partition.index}]`);
@@ -437,7 +444,11 @@ export class BunProducer {
     }
   }
 
-  async #txnCoordinatorRequest(apiKey: number, apiVersion: number, body: Writer): Promise<Reader> {
+  async #txnCoordinatorRequest(
+    apiKey: number,
+    apiVersion: number,
+    body: RequestBody,
+  ): Promise<ResponseBody> {
     if (this.#transactionalId) {
       if (this.#txnCoordinator === undefined) {
         this.#txnCoordinator = await this.#cluster.findTxnCoordinator(this.#transactionalId);
@@ -463,21 +474,16 @@ export class BunProducer {
     const response = await this.#txnCoordinatorRequest(
       API_ADD_PARTITIONS_TO_TXN,
       1,
-      new Writer()
-        .string(this.#transactionalId)
-        .i64(producer.id)
-        .i16(producer.epoch)
-        .array([...byTopic], (writer, [name, groups]) =>
-          writer
-            .string(name)
-            .array(groups, (partitionWriter, g) => partitionWriter.i32(g.partition)),
-        ),
+      writeAddPartitionsToTransactionRequest(
+        this.#transactionalId,
+        producer.id,
+        producer.epoch,
+        byTopic,
+      ),
     );
-    this.#cluster.throttle(API_ADD_PARTITIONS_TO_TXN, response.i32());
-    for (const topic of response.array((reader) => ({
-      name: reader.string() ?? "",
-      partitions: reader.array((p) => ({ index: p.i32(), error: p.i16() })),
-    }))) {
+    const addedPartitions = readTopicPartitionErrors(response);
+    this.#cluster.throttle(API_ADD_PARTITIONS_TO_TXN, addedPartitions.throttleMs);
+    for (const topic of addedPartitions.topics) {
       for (const partition of topic.partitions) {
         if (partition.error) {
           throw kafkaError(partition.error, `AddPartitionsToTxn ${topic.name}[${partition.index}]`);
@@ -501,14 +507,16 @@ export class BunProducer {
     let lastError: unknown;
     const { maxRetries, initialBackoffMs, maxBackoffMs } = this.#cluster.retryOptions;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      const body = new Writer()
-        .string(this.#transactionalId ?? null)
-        .i32(this.#transactionTimeoutMs);
+      const body = writeInitProducerIdRequest(
+        this.#transactionalId ?? null,
+        this.#transactionTimeoutMs,
+      );
       const response = await this.#txnCoordinatorRequest(API_INIT_PRODUCER_ID, 1, body);
-      this.#cluster.throttle(API_INIT_PRODUCER_ID, response.i32());
-      const error = response.i16();
+      const initProducerId = readInitProducerIdResponse(response);
+      this.#cluster.throttle(API_INIT_PRODUCER_ID, initProducerId.throttleMs);
+      const { error } = initProducerId;
       if (!error) {
-        this.#producer = { id: response.i64(), epoch: response.i16() };
+        this.#producer = { id: initProducerId.producerId, epoch: initProducerId.producerEpoch };
         this.#sequences.clear();
         return;
       }
@@ -737,34 +745,22 @@ export class BunProducer {
     acks: number,
     timeoutMs: number,
     compression = this.#options.compression,
-  ): Writer {
-    const topics = Map.groupBy(leaderPartitions, (partition) => partition.topic);
-    // Produce v3+: brokers reject transactional batches whose request omits the
-    // matching transactional_id, so it must ride along on every produce.
-    return new Writer()
-      .string(this.#transactionalId ?? null)
-      .i16(acks)
-      .i32(timeoutMs)
-      .array([...topics], (writer, [topic, topicPartitions]) => {
-        writer.string(topic).array(topicPartitions, (partitionWriter, value) => {
-          const key = partitionKey(value.topic, value.partition);
-          const producer = this.#producer && {
-            ...this.#producer,
-            sequence: this.#sequences.get(key) ?? 0,
-            transactional: Boolean(this.#transactionalId && this.#txnOpen),
-          };
-          partitionWriter
-            .i32(value.partition)
-            .bytes(
-              encodeRecordBatch(
-                value.records,
-                Date.now(),
-                compression ?? this.#options.compression,
-                producer,
-              ),
-            );
-        });
-      });
+  ): RequestBody {
+    return writeProduceRequest(
+      this.#transactionalId ?? null,
+      acks,
+      timeoutMs,
+      leaderPartitions.map((value) => {
+        const key = partitionKey(value.topic, value.partition);
+        const producer = this.#producer && {
+          ...this.#producer,
+          sequence: this.#sequences.get(key) ?? 0,
+          transactional: Boolean(this.#transactionalId && this.#txnOpen),
+        };
+        return { ...value, producer };
+      }),
+      compression ?? this.#options.compression ?? "none",
+    );
   }
 
   async #produce(
@@ -785,22 +781,14 @@ export class BunProducer {
           timeoutMs,
           false,
         );
-        const results = response
-          .array((topicReader) => {
-            const topic = topicReader.string() ?? "";
-            return topicReader.array((partitionReader) => {
-              const partition = partitionReader.i32();
-              const error = partitionReader.i16();
-              const baseOffset = partitionReader.i64();
-              const logAppendTime = partitionReader.i64();
-              if (error) {
-                throw kafkaError(error, `${topic}[${partition}]`);
-              }
-              return { topic, partition, baseOffset, logAppendTime };
-            });
-          })
-          .flat();
-        this.#cluster.throttle(API_PRODUCE, response.i32());
+        const produce = readProduceResponse(response);
+        const results = produce.results.map(({ error, ...result }) => {
+          if (error) {
+            throw kafkaError(error, `${result.topic}[${result.partition}]`);
+          }
+          return result;
+        });
+        this.#cluster.throttle(API_PRODUCE, produce.throttleMs);
         return results;
       }),
     );

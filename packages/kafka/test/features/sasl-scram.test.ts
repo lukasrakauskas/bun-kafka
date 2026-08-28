@@ -1,16 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { Writer } from "../../src/bun/protocol.ts";
+import { encoder, type KafkaEncoder } from "../../src/protocol/index.ts";
 import { isString } from "../../src/type-guards.ts";
 
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 
 function metadataBody(port: number) {
-  return new Writer()
+  return encoder()
     .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
       writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
     )
@@ -32,7 +34,7 @@ function metadataBody(port: number) {
     );
 }
 
-const encoder = new TextEncoder();
+const textEncoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 async function hmac(key: Uint8Array, message: string | Uint8Array): Promise<Uint8Array> {
@@ -43,7 +45,7 @@ async function hmac(key: Uint8Array, message: string | Uint8Array): Promise<Uint
     false,
     ["sign"],
   );
-  const data = isString(message) ? encoder.encode(message) : message;
+  const data = isString(message) ? textEncoder.encode(message) : message;
   return new Uint8Array(await crypto.subtle.sign("HMAC", cryptoKey, data));
 }
 
@@ -94,12 +96,12 @@ async function createScramResponse(
   state: ScramState,
   options: ScramListenerOptions,
   salt: Uint8Array,
-): Promise<Writer> {
+): Promise<KafkaEncoder> {
   if (frame.key === 18) {
     return apiVersions();
   }
   if (frame.key === 17) {
-    return new Writer()
+    return encoder()
       .i16(0)
       .array(["SCRAM-SHA-256"], (writer, mechanism) => writer.string(mechanism));
   }
@@ -107,7 +109,7 @@ async function createScramResponse(
     state.clientFirstBare = frame.auth.replace(/^n,,/, "");
     const clientNonce = /r=([^,\s]+)/.exec(state.clientFirstBare)?.[1] ?? "";
     state.serverFirst = `r=${clientNonce}serverpart,s=${b64(salt)},i=4096`;
-    return new Writer().i16(0).string(null).bytes(encoder.encode(state.serverFirst)).i64(0);
+    return encoder().i16(0).string(null).bytes(textEncoder.encode(state.serverFirst)).i64(0);
   }
   if (frame.key === 36) {
     return createFinalScramResponse(frame.auth, state, options, salt);
@@ -120,7 +122,7 @@ async function createFinalScramResponse(
   state: ScramState,
   options: ScramListenerOptions,
   salt: Uint8Array,
-): Promise<Writer> {
+): Promise<KafkaEncoder> {
   const withoutProof = /^((?:c=[^,]+,r=[^,]+))(?:,p=([A-Za-z0-9+/=]+))?$/.exec(auth);
   const proof = withoutProof?.[2]
     ? Uint8Array.from(atob(withoutProof[2]), (char) => char.charCodeAt(0))
@@ -128,7 +130,7 @@ async function createFinalScramResponse(
   const saltedPassword = new Uint8Array(
     await crypto.subtle.deriveBits(
       { name: "PBKDF2", salt, iterations: 4096, hash: "SHA-256" },
-      await crypto.subtle.importKey("raw", encoder.encode(options.password), "PBKDF2", false, [
+      await crypto.subtle.importKey("raw", textEncoder.encode(options.password), "PBKDF2", false, [
         "deriveBits",
       ]),
       256,
@@ -143,14 +145,14 @@ async function createFinalScramResponse(
     (await sha256(xor(proof, clientSignature))).every((byte, index) => byte === storedKey[index]);
   options.onProofVerified?.(verified);
   if (!verified) {
-    return new Writer().i16(49).string("SCRAM proof mismatch").bytes(new Uint8Array()).i64(0);
+    return encoder().i16(49).string("SCRAM proof mismatch").bytes(new Uint8Array()).i64(0);
   }
   const serverKey = await hmac(saltedPassword, "Server Key");
   const verifier = b64(await hmac(serverKey, authMessage));
-  return new Writer()
+  return encoder()
     .i16(0)
     .string(null)
-    .bytes(encoder.encode(`v=${verifier}`))
+    .bytes(textEncoder.encode(`v=${verifier}`))
     .i64(0);
 }
 
@@ -172,15 +174,15 @@ async function handleScramFrames(
   }
 }
 
-function writeResponse(socket: Bun.Socket, correlation: number, body: Writer): void {
-  const response = new Writer().i32(0).i32(correlation).raw(body.result());
+function writeResponse(socket: Bun.Socket, correlation: number, body: KafkaEncoder): void {
+  const response = encoder().i32(0).i32(correlation).raw(body.result());
   response.patchI32(0, response.length - 4);
   socket.write(response.result());
 }
 
 function scramListener(options: ScramListenerOptions) {
   const state: ScramState = { round: 0, clientFirstBare: "", serverFirst: "" };
-  const salt = encoder.encode("scram-salt-0001");
+  const salt = textEncoder.encode("scram-salt-0001");
   return Bun.listen({
     hostname: "127.0.0.1",
     port: 0,

@@ -1,16 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
 import { isString, isUint8Array } from "../../src/type-guards.ts";
-import {
-  Writer,
-  decodeRecordSet,
-  encodeRecordBatch,
-  RecordSetDecoder,
-} from "../../src/bun/protocol.ts";
+import { decodeRecordSet, encodeRecordBatch, RecordSetDecoder } from "../../src/protocol/index.ts";
+import { encoder, type KafkaEncoder } from "../../src/protocol/index.ts";
 import type { AbortedTransaction } from "../../src/types.ts";
 
-function writeConsumerResponse(socket: Bun.Socket, correlation: number, body: Writer): void {
-  const response = new Writer().i32(0).i32(correlation).raw(body.result());
+function writeConsumerResponse(socket: Bun.Socket, correlation: number, body: KafkaEncoder): void {
+  const response = encoder().i32(0).i32(correlation).raw(body.result());
   response.patchI32(0, response.length - 4);
   socket.write(response.result());
 }
@@ -19,7 +15,7 @@ function handleConsumerFrames(
   socket: Bun.Socket,
   request: Uint8Array,
   port: number,
-  bodyFor: (key: number, port: number, version: number) => Writer,
+  bodyFor: (key: number, port: number, version: number) => KafkaEncoder,
   observe: (key: number, version: number) => void,
 ): void {
   let offset = 0;
@@ -34,13 +30,13 @@ function handleConsumerFrames(
   }
 }
 
-function consumerFeatureBody(key: number, port: number, version: number): Writer {
-  const memberMetadata = new Writer()
+function consumerFeatureBody(key: number, port: number, version: number): KafkaEncoder {
+  const memberMetadata = encoder()
     .i16(0)
     .array(["events"], (writer, topic) => writer.string(topic))
     .bytes(null)
     .result();
-  const assignment = new Writer()
+  const assignment = encoder()
     .i16(0)
     .array(["events"], (writer, topic) =>
       writer.string(topic).array([0], (item, partition) => item.i32(partition)),
@@ -51,10 +47,10 @@ function consumerFeatureBody(key: number, port: number, version: number): Writer
     return apiVersions();
   }
   if (key === 10) {
-    return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
+    return encoder().i16(0).i32(1).string("127.0.0.1").i32(port);
   }
   if (key === 3) {
-    return new Writer()
+    return encoder()
       .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
         writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
       )
@@ -76,7 +72,7 @@ function consumerFeatureBody(key: number, port: number, version: number): Writer
       );
   }
   if (key === 11) {
-    return new Writer()
+    return encoder()
       .i32(0)
       .i16(0)
       .i32(1)
@@ -87,11 +83,11 @@ function consumerFeatureBody(key: number, port: number, version: number): Writer
   }
   if (key === 14) {
     return version === 3
-      ? new Writer().i32(0).i16(0).bytes(assignment)
-      : new Writer().i16(0).bytes(assignment);
+      ? encoder().i32(0).i16(0).bytes(assignment)
+      : encoder().i16(0).bytes(assignment);
   }
   if (key === 9) {
-    return new Writer()
+    return encoder()
       .array(["events"], (writer, topic) =>
         writer
           .string(topic)
@@ -100,18 +96,20 @@ function consumerFeatureBody(key: number, port: number, version: number): Writer
       .i16(0);
   }
   if (key === 8) {
-    return new Writer().array(["events"], (writer, topic) =>
+    return encoder().array(["events"], (writer, topic) =>
       writer.string(topic).array([0], (item, partition) => item.i32(partition).i16(0)),
     );
   }
-  return new Writer().i16(0);
+  return encoder().i16(0);
 }
 
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 
 function decode(value: Uint8Array | null | unknown): string | null {
   if (value === null || value === undefined) {
@@ -311,11 +309,11 @@ describe("Read-committed isolation", () => {
             at += 16; // replica_id + max_wait_ms + min_bytes + max_bytes (isolation sits before session fields)
             isolationByte = new DataView(request.buffer, request.byteOffset + at, 1).getInt8(0);
           }
-          let body: Writer;
+          let body: KafkaEncoder;
           if (key === 18) {
             body = apiVersions();
           } else if (key === 3) {
-            body = new Writer()
+            body = encoder()
               .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) =>
                 writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
               )
@@ -336,11 +334,11 @@ describe("Read-committed isolation", () => {
                   ),
               );
           } else if (key === 2) {
-            body = new Writer().array(["events"], (w, t) =>
+            body = encoder().array(["events"], (w, t) =>
               w.string(t).array([0], (p, partition) => p.i32(partition).i16(0).i64(0).i64(0)),
             );
           } else {
-            body = new Writer()
+            body = encoder()
               .i32(0)
               .i16(0)
               .i32(0)
@@ -357,7 +355,7 @@ describe("Read-committed isolation", () => {
                 ),
               );
           }
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
+          const response = encoder().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());
         },
@@ -393,11 +391,11 @@ describe("Deserializers", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          let body: Writer;
+          let body: KafkaEncoder;
           if (key === 18) {
             body = apiVersions();
           } else if (key === 3) {
-            body = new Writer()
+            body = encoder()
               .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) =>
                 writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
               )
@@ -418,11 +416,11 @@ describe("Deserializers", () => {
                   ),
               );
           } else if (key === 2) {
-            body = new Writer().array(["events"], (w, t) =>
+            body = encoder().array(["events"], (w, t) =>
               w.string(t).array([0], (p, partition) => p.i32(partition).i64(0)),
             );
           } else {
-            body = new Writer()
+            body = encoder()
               .i32(0)
               .i16(0)
               .i32(0)
@@ -439,7 +437,7 @@ describe("Deserializers", () => {
                 ),
               );
           }
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
+          const response = encoder().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());
         },

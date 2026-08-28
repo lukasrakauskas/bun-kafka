@@ -23,7 +23,7 @@ import {
   SIZE_I32,
   SIZE_I64,
   UINT32_MAX,
-} from "./shared.ts";
+} from "../bun/shared.ts";
 
 const MALFORMED_RESPONSE = "Malformed Kafka response";
 const VARINT_DATA_MASK = 0x7f;

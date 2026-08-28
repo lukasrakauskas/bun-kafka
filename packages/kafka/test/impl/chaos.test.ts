@@ -2,43 +2,51 @@ import { describe, expect, test } from "bun:test";
 import { Kafka, KafkaError } from "../../index.ts";
 import { isUint8Array } from "../../src/type-guards.ts";
 import {
-  Reader,
+  decoder,
+  type KafkaDecoder,
   RecordSetDecoder,
-  Writer,
+  encoder,
+  type KafkaEncoder,
   crc32c,
   encodeRecordBatch,
-} from "../../src/bun/protocol.ts";
+} from "../../src/protocol/index.ts";
 
 type Request = { apiKey: number; correlation: number; count: number; socket: Bun.Socket };
 type MockBroker = { address: string; close(): void; active(): number };
 type Handler = (
   request: Request,
-  reply: (body: Writer | Uint8Array, correlation?: number) => void,
+  reply: (body: KafkaEncoder | Uint8Array, correlation?: number) => void,
 ) => boolean | void;
 
 const topic = "chaos";
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 const recordBatch = (value: string, offset = 0n) => {
   const batch = encodeRecordBatch([{ value }]);
   new DataView(batch.buffer, batch.byteOffset, batch.byteLength).setBigInt64(0, offset);
   return batch;
 };
 
-function response(correlation: number, body: Writer | Uint8Array): Uint8Array {
-  const frame = new Writer()
+function response(correlation: number, body: KafkaEncoder | Uint8Array): Uint8Array {
+  const frame = encoder()
     .i32(0)
     .i32(correlation)
-    .raw(body instanceof Writer ? body.result() : body);
+    .raw(body instanceof KafkaEncoder ? body.result() : body);
   frame.patchI32(0, frame.length - 4);
   return frame.result();
 }
 
-function metadataBody(brokers: Array<Pick<MockBroker, "address">>, leader = 1, error = 0): Writer {
-  return new Writer()
+function metadataBody(
+  brokers: Array<Pick<MockBroker, "address">>,
+  leader = 1,
+  error = 0,
+): KafkaEncoder {
+  return encoder()
     .array(brokers, (writer, broker) => {
       const url = new URL(`tcp://${broker.address}`);
       writer
@@ -71,7 +79,7 @@ function metadataBody(brokers: Array<Pick<MockBroker, "address">>, leader = 1, e
     );
 }
 
-function defaultBody(apiKey: number, brokerAddress: string, fetchOffset = 0n): Writer {
+function defaultBody(apiKey: number, brokerAddress: string, fetchOffset = 0n): KafkaEncoder {
   if (apiKey === 18) {
     return apiVersions();
   }
@@ -79,14 +87,14 @@ function defaultBody(apiKey: number, brokerAddress: string, fetchOffset = 0n): W
     return metadataBody([{ address: brokerAddress }]);
   }
   if (apiKey === 2) {
-    return new Writer().array([topic], (writer, name) =>
+    return encoder().array([topic], (writer, name) =>
       writer
         .string(name)
         .array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(0).i64(0)),
     );
   }
   if (apiKey === 0) {
-    return new Writer()
+    return encoder()
       .array([topic], (writer, name) =>
         writer
           .string(name)
@@ -95,7 +103,7 @@ function defaultBody(apiKey: number, brokerAddress: string, fetchOffset = 0n): W
       .i32(0);
   }
   if (apiKey === 1) {
-    return new Writer()
+    return encoder()
       .i32(0)
       .i16(0)
       .i32(0)
@@ -113,9 +121,9 @@ function defaultBody(apiKey: number, brokerAddress: string, fetchOffset = 0n): W
       );
   }
   if (apiKey === 22) {
-    return new Writer().i32(0).i16(0).i64(1).i16(0);
+    return encoder().i32(0).i16(0).i64(1).i16(0);
   }
-  return new Writer();
+  return encoder();
 }
 
 function mockBroker(handler: Handler = () => false): MockBroker {
@@ -149,7 +157,7 @@ function mockBroker(handler: Handler = () => false): MockBroker {
           const correlation = view.getInt32(8);
           const count = (counts.get(apiKey) ?? 0) + 1;
           counts.set(apiKey, count);
-          const reply = (body: Writer | Uint8Array, responseCorrelation = correlation) =>
+          const reply = (body: KafkaEncoder | Uint8Array, responseCorrelation = correlation) =>
             socket.write(response(responseCorrelation, body));
           if (handler({ apiKey, correlation, count, socket }, reply) === false) {
             reply(
@@ -347,7 +355,7 @@ describe("deterministic Kafka chaos", () => {
           firstProduce = false;
           leader = 2;
           reply(
-            new Writer()
+            encoder()
               .array([topic], (writer, name) =>
                 writer.string(name).array([0], (part) => part.i32(0).i16(6).i64(-1).i64(-1)),
               )
@@ -408,7 +416,7 @@ describe("deterministic Kafka chaos", () => {
     const broker = mockBroker(({ apiKey }, reply) => {
       if (apiKey === 0) {
         reply(
-          new Writer()
+          encoder()
             .array([topic], (writer, name) =>
               writer.string(name).array([0], (part) => part.i32(0).i16(56).i64(-1).i64(-1)),
             )
@@ -442,7 +450,7 @@ describe("deterministic Kafka chaos", () => {
   test("rejects malformed frames and accepts a valid frame after an unknown correlation ID", async () => {
     for (const size of [-1, 1025]) {
       const broker = mockBroker(({ socket }) => {
-        const header = new Writer().i32(size).result();
+        const header = encoder().i32(size).result();
         socket.write(header);
         return true;
       });
@@ -470,14 +478,14 @@ describe("deterministic Kafka chaos", () => {
   });
 
   test("rejects truncated fields, invalid arrays, varints, records, CRCs, and compression", () => {
-    expect(() => new Reader(new Uint8Array([0])).i32()).toThrow(KafkaError);
-    expect(() => new Reader(new Uint8Array([0, 0, 0, 2])).array((reader) => reader.i8())).toThrow(
+    expect(() => decoder(new Uint8Array([0])).i32()).toThrow(KafkaError);
+    expect(() => decoder(new Uint8Array([0, 0, 0, 2])).array((reader) => reader.i8())).toThrow(
       KafkaError,
     );
-    expect(() => new Reader(new Uint8Array([0x80, 0x80, 0x80, 0x80, 0x80])).varInt()).toThrow(
+    expect(() => decoder(new Uint8Array([0x80, 0x80, 0x80, 0x80, 0x80])).varInt()).toThrow(
       KafkaError,
     );
-    expect(() => new Reader(new Uint8Array(10).fill(0x80)).varLong()).toThrow(KafkaError);
+    expect(() => decoder(new Uint8Array(10).fill(0x80)).varLong()).toThrow(KafkaError);
 
     const invalidRecord = recordBatch("x");
     invalidRecord[61] = 0x7e;

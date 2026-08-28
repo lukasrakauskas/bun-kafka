@@ -1,14 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { KafkaError } from "../../index.ts";
 import {
-  Reader,
   RecordSetDecoder,
-  Writer,
   crc32c,
   decodeRecordSet,
   encodeRecordBatch,
   murmur2,
-} from "../../src/bun/protocol.ts";
+} from "../../src/protocol/index.ts";
+import {
+  decoder,
+  type KafkaDecoder,
+  encoder,
+  type KafkaEncoder,
+} from "../../src/protocol/index.ts";
 
 const decode = (value: Uint8Array | null) =>
   value === null ? null : new TextDecoder().decode(value);
@@ -58,14 +62,14 @@ describe("Kafka wire protocol primitives", () => {
   });
 
   test("uses fast number varints and bigint varlongs", () => {
-    const writer = new Writer();
+    const writer = encoder();
     for (const value of [-2147483648, -1, 0, 1, 2147483647]) {
       writer.varInt(value);
     }
     for (const value of [-9007199254740991n, -1n, 0n, 1n, 9007199254740991n]) {
       writer.varLong(value);
     }
-    const reader = new Reader(writer.result());
+    const reader = decoder(writer.result());
     expect(Array.from({ length: 5 }, () => reader.varInt())).toEqual([
       -2147483648, -1, 0, 1, 2147483647,
     ]);
@@ -117,6 +121,6 @@ describe("Kafka wire protocol primitives", () => {
   });
 
   test("reader rejects truncated input", () => {
-    expect(() => new Reader(new Uint8Array([0])).i32()).toThrow(KafkaError);
+    expect(() => decoder(new Uint8Array([0])).i32()).toThrow(KafkaError);
   });
 });
