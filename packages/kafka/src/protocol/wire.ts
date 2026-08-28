@@ -7,8 +7,12 @@ import type {
   KafkaMessage,
   MessageHeaders,
 } from "../types.ts";
-import { snappyCompress, snappyDecompress } from "./snappy.ts";
-import { lz4Compress, lz4Decompress } from "./lz4.ts";
+import {
+  getCompressionStrategy,
+  getCompressionStrategyByCode,
+  type RecordCompression,
+} from "./compression.ts";
+export type { RecordCompression } from "./compression.ts";
 import {
   COMPRESSION_MASK,
   INT16_MAX,
@@ -46,7 +50,6 @@ const SHIFT_16 = 16;
 const SHIFT_24 = 24;
 const MURMUR_SHIFT_MIX = 13;
 const MURMUR_SHIFT_FINAL = 15;
-const COMPRESSION_LZ4 = 3;
 const MURMUR_TAIL_THREE = 3;
 const BYTE_1 = 1;
 const BYTE_2 = 2;
@@ -571,24 +574,13 @@ function readRecordBytes(reader: Reader, field: string, copy: boolean): Uint8Arr
   return bytes && copy ? bytes.slice() : bytes;
 }
 
-function ownedBytes(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  return copy;
-}
-
 function decompressBatchRecords(compression: number, records: Uint8Array): Uint8Array<ArrayBuffer> {
   try {
-    switch (compression) {
-      case 1:
-        return ownedBytes(Bun.gunzipSync(ownedBytes(records)));
-      case 2:
-        return ownedBytes(snappyDecompress(records));
-      case COMPRESSION_LZ4:
-        return ownedBytes(lz4Decompress(records));
-      default:
-        return ownedBytes(Bun.zstdDecompressSync(ownedBytes(records)));
+    const strategy = getCompressionStrategyByCode(compression);
+    if (!strategy) {
+      throw new RangeError(`Unsupported Kafka compression codec ${compression}`);
     }
+    return strategy.decompress(records);
   } catch (error) {
     throw new KafkaError(-1, `Invalid Kafka compressed record batch: ${error}`);
   }
@@ -613,10 +605,6 @@ function varLongSize(value: bigint): number {
   }
   return size;
 }
-
-export type RecordCompression = "none" | "gzip" | "snappy" | "lz4" | "zstd";
-
-const compressionAttributes = { none: 0, gzip: 1, snappy: 2, lz4: 3, zstd: 4 } as const;
 
 function prepareRecord(
   record: WireRecord,
@@ -684,24 +672,6 @@ function writeRecord(
   }
 }
 
-function compressRecords(
-  records: Uint8Array,
-  compression: RecordCompression,
-): Uint8Array<ArrayBuffer> {
-  switch (compression) {
-    case "gzip":
-      return ownedBytes(Bun.gzipSync(ownedBytes(records)));
-    case "zstd":
-      return ownedBytes(Bun.zstdCompressSync(ownedBytes(records)));
-    case "snappy":
-      return ownedBytes(snappyCompress(records));
-    case "lz4":
-      return ownedBytes(lz4Compress(records));
-    default:
-      return ownedBytes(records);
-  }
-}
-
 export function encodeRecordBatch(
   records: readonly WireRecord[],
   now = Date.now(),
@@ -718,13 +688,10 @@ export function encodeRecordBatch(
   if (!records.length) {
     throw new RangeError("A record batch cannot be empty");
   }
-  if (!(compression in compressionAttributes)) {
-    throw new RangeError(`Unsupported Kafka compression: ${compression}`);
-  }
+  const strategy = getCompressionStrategy(compression);
   const recordAttributes = producer.control ? RECORD_ATTR_CONTROL : 0;
   const batchAttributes =
-    compressionAttributes[compression] |
-    (producer.transactional && !producer.control ? RECORD_ATTR_TRANSACTIONAL : 0);
+    strategy.code | (producer.transactional && !producer.control ? RECORD_ATTR_TRANSACTIONAL : 0);
   const baseTimestamp = BigInt(requiredValue(records[0]).timestamp ?? now);
   const prepared = records.map((record, offset) =>
     prepareRecord(record, offset, baseTimestamp, now),
@@ -743,10 +710,7 @@ export function encodeRecordBatch(
   prepared.forEach((record, offset) =>
     writeRecord(recordsWriter, record, offset, baseTimestamp, recordAttributes),
   );
-  const recordBytes = compressRecords(
-    new Uint8Array(arrayBufferBytes(recordsWriter.result())),
-    compression,
-  );
+  const recordBytes = strategy.compress(new Uint8Array(arrayBufferBytes(recordsWriter.result())));
   const writer = new Writer(RECORD_BATCH_HEADER_SIZE + recordBytes.byteLength);
   writer
     .i64(baseOffset)
