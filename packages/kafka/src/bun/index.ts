@@ -1,5 +1,5 @@
 export { Kafka } from "./client.ts";
-export { BunProducer } from "./producer.ts";
+export { Producer } from "./producer/index.ts";
 export { Consumer } from "../consumer/index.ts";
 export { BunAdmin } from "./admin.ts";
 export type {
@@ -19,7 +19,7 @@ export type {
   ProducerSend,
   ProducerBatch,
   ProduceResult,
-} from "./producer.ts";
+} from "./producer/index.ts";
 export type {
   ConsumerOptions,
   ConsumerSubscribe,

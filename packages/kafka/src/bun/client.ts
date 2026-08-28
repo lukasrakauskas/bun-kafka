@@ -1,7 +1,7 @@
 import { Cluster } from "./cluster.ts";
 import { BunAdmin } from "./admin.ts";
 import { Consumer, type ConsumerOptions } from "../consumer/index.ts";
-import { BunProducer, type ProducerOptions } from "./producer.ts";
+import { Producer, type ProducerOptions } from "./producer/index.ts";
 import {
   DEFAULT_HEALTH_CHECK_TIMEOUT_MS,
   type ClusterStats,
@@ -32,8 +32,8 @@ export class Kafka {
     );
   }
 
-  producer(options: ProducerOptions = {}): BunProducer {
-    const producer = new BunProducer(this.#cluster, options, () => this.#clients.delete(producer));
+  producer(options: ProducerOptions = {}): Producer {
+    const producer = new Producer(this.#cluster, options, () => this.#clients.delete(producer));
     this.#clients.add(producer);
     return producer;
   }

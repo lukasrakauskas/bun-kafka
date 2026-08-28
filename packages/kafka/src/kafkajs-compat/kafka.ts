@@ -1,7 +1,7 @@
 import { Cluster } from "../bun/cluster.ts";
 import { BunAdmin } from "../bun/admin.ts";
 import { Consumer } from "../consumer/index.ts";
-import { BunProducer } from "../bun/producer.ts";
+import { Producer } from "../bun/producer/index.ts";
 import { ClusterHub, type ClusterGetter, unwrapKafkaJs, type KafkaConfig } from "./config.ts";
 import { Logger } from "./logger.ts";
 import { logLevel } from "./constants.ts";
@@ -60,4 +60,4 @@ export class Kafka {
   }
 }
 
-export { BunProducer, Consumer, BunAdmin, Cluster };
+export { Producer, Consumer, BunAdmin, Cluster };

@@ -1,6 +1,6 @@
 import type { ConsumedMessage } from "../types.ts";
 import { KafkaJSNonRetriableError } from "./errors.ts";
-import type { Partitioner, PartitionerContext, ProducerMessage } from "../bun/producer.ts";
+import type { Partitioner, PartitionerContext, ProducerMessage } from "../bun/producer/index.ts";
 import { isFunction, isNumber } from "../type-guards.ts";
 
 export interface KafkaJsMessage {

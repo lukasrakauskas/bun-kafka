@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { BunProducer, KafkaError } from "../../index.ts";
+import { Producer, KafkaError } from "../../index.ts";
 import { admin, producer, topic } from "../helpers.ts";
 
 describe("Producer", () => {
@@ -37,7 +37,7 @@ describe("Producer", () => {
   }, 30_000);
 
   test("invalid batching options throw", () => {
-    expect(() => new BunProducer({ brokers: ["127.0.0.1:9092"] }, { lingerMs: -1 })).toThrow(
+    expect(() => new Producer({ brokers: ["127.0.0.1:9092"] }, { lingerMs: -1 })).toThrow(
       RangeError,
     );
   });

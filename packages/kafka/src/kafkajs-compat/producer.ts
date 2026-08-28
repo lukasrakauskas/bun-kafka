@@ -1,4 +1,4 @@
-import { BunProducer } from "../bun/producer.ts";
+import { Producer } from "../bun/producer/index.ts";
 import { isNumber, isString } from "../type-guards.ts";
 import { COMPRESSION_NAMES, PRODUCER_EVENTS, CompressionTypes } from "./constants.ts";
 import { wrapError, KafkaJSNonRetriableError } from "./errors.ts";
@@ -42,8 +42,8 @@ export class CompatProducer {
   #logger: Logger;
   #options: CompatOptions;
   #emitter = new Emitter();
-  #producer?: BunProducer;
-  #transaction?: BunProducer;
+  #producer?: Producer;
+  #transaction?: Producer;
 
   constructor(getter: () => ClusterGetter, logger: Logger, options: CompatOptions) {
     this.#getter = getter;
@@ -81,8 +81,8 @@ export class CompatProducer {
   }
 
   /** Core accepts per-send compression, so one underlying producer covers every codec. */
-  #underlying(): BunProducer {
-    this.#producer ??= new BunProducer(
+  #underlying(): Producer {
+    this.#producer ??= new Producer(
       this.#getter().acquire(),
       producerOptions(this.#options),
       this.#getter().release,
@@ -167,7 +167,7 @@ export class CompatProducer {
       );
     }
     if (!this.#transaction) {
-      this.#transaction = new BunProducer(
+      this.#transaction = new Producer(
         this.#getter().acquire(),
         {
           ...producerOptions(this.#options),
@@ -187,8 +187,8 @@ export class CompatProducer {
 }
 
 export class CompatTransaction {
-  #producer: BunProducer;
-  constructor(producer: BunProducer) {
+  #producer: Producer;
+  constructor(producer: Producer) {
     this.#producer = producer;
   }
   async send(record: KafkaJsSendRecord): Promise<void> {
