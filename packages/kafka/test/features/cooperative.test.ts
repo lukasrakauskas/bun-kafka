@@ -38,9 +38,13 @@ function readOwnedPartitions(request: Uint8Array): OwnedPartitionsResult {
 }
 
 function cooperativeBody(key: number, port: number): Writer {
-  if (key === 18) return apiVersions();
-  if (key === 10) return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
-  if (key === 3)
+  if (key === 18) {
+    return apiVersions();
+  }
+  if (key === 10) {
+    return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
+  }
+  if (key === 3) {
     return new Writer()
       .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
         writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
@@ -61,6 +65,7 @@ function cooperativeBody(key: number, port: number): Writer {
               .array([1], (w) => w.i32(1)),
           ),
       );
+  }
   if (key === 11) {
     const metadata = new Writer()
       .i16(1)
@@ -91,7 +96,7 @@ function cooperativeBody(key: number, port: number): Writer {
       .bytes(null);
     return new Writer().i16(0).bytes(assignment.result());
   }
-  if (key === 9)
+  if (key === 9) {
     return new Writer()
       .array(["events"], (writer, topic) =>
         writer
@@ -99,16 +104,19 @@ function cooperativeBody(key: number, port: number): Writer {
           .array([0, 1], (item, partition) => item.i32(partition).i64(7).string(null).i16(0)),
       )
       .i16(0);
-  if (key === 2)
+  }
+  if (key === 2) {
     return new Writer()
       .i32(0)
       .array(["events"], (writer, topic) =>
         writer.string(topic).array([0, 1], (item, partition) => item.i32(partition).i16(0).i64(10)),
       );
-  if (key === 8)
+  }
+  if (key === 8) {
     return new Writer().array(["events"], (writer, topic) =>
       writer.string(topic).array([0, 1], (item) => item.i16(0)),
     );
+  }
   return new Writer().i16(0);
 }
 
@@ -119,14 +127,19 @@ function retainPartitions(
   finals: Map<string, number[]>,
   ownedBy: Map<number, string>,
 ): void {
-  for (const member of members)
+  for (const member of members) {
     for (const owned of member.owned) {
-      if (!partitions.includes(owned.partition) || ownedBy.has(owned.partition)) continue;
+      if (!partitions.includes(owned.partition) || ownedBy.has(owned.partition)) {
+        continue;
+      }
       const mine = finals.get(member.memberId)!;
-      if (mine.length >= targetSize.get(member.memberId)!) continue;
+      if (mine.length >= targetSize.get(member.memberId)!) {
+        continue;
+      }
       ownedBy.set(owned.partition, member.memberId);
       mine.push(owned.partition);
     }
+  }
 }
 
 function assignRemaining(
@@ -137,7 +150,9 @@ function assignRemaining(
   targetSize: Map<string, number>,
 ): void {
   for (const partition of partitions) {
-    if (ownedBy.has(partition)) continue;
+    if (ownedBy.has(partition)) {
+      continue;
+    }
     const chosen =
       members
         .filter((member) => finals.get(member.memberId)!.length < targetSize.get(member.memberId)!)

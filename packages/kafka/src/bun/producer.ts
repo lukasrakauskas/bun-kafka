@@ -107,9 +107,11 @@ function notifyDeliveryFailures(
   error: Error,
   notified: Set<NonNullable<ProducerMessage["onDelivery"]>>,
 ): void {
-  for (const { input } of pending)
+  for (const { input } of pending) {
     for (const message of input.messages) {
-      if (!message.onDelivery || notified.has(message.onDelivery)) continue;
+      if (!message.onDelivery || notified.has(message.onDelivery)) {
+        continue;
+      }
       notified.add(message.onDelivery);
       notifyDeliveryCallback(
         message.onDelivery,
@@ -117,6 +119,7 @@ function notifyDeliveryFailures(
         null,
       );
     }
+  }
 }
 
 function notifyDeliverySuccess(
@@ -129,9 +132,13 @@ function notifyDeliverySuccess(
   );
   for (const routed of routedPartitions) {
     const result = byPartition.get(partitionKey(routed.topic, routed.partition));
-    if (!result) continue;
+    if (!result) {
+      continue;
+    }
     for (const message of routed.messages) {
-      if (!message.onDelivery || notified.has(message.onDelivery)) continue;
+      if (!message.onDelivery || notified.has(message.onDelivery)) {
+        continue;
+      }
       notified.add(message.onDelivery);
       notifyDeliveryCallback(message.onDelivery, null, result);
     }
@@ -147,8 +154,12 @@ function appendProducerMessage(
   partition: number,
 ): void {
   const meta = metadata.get(partition);
-  if (!meta) throw new RangeError(`Partition ${partition} does not exist on ${topic}`);
-  if (meta.err) throw kafkaError(meta.err, `${topic}[${partition}]`);
+  if (!meta) {
+    throw new RangeError(`Partition ${partition} does not exist on ${topic}`);
+  }
+  if (meta.err) {
+    throw kafkaError(meta.err, `${topic}[${partition}]`);
+  }
   let group = partitions.get(partition);
   if (!group) {
     group = { topic, partition, leader: meta.leader, records: [], messages: [] };
@@ -166,16 +177,21 @@ function chooseProducerPartition(
   roundRobin: Map<string, number>,
   key: Uint8Array | null,
 ): number {
-  if (message.partition !== undefined) return message.partition;
+  if (message.partition !== undefined) {
+    return message.partition;
+  }
   if (partitioner) {
     const partition = partitioner({ topic, partitionCount, key });
-    if (!Number.isInteger(partition) || partition < 0 || partition >= partitionCount)
+    if (!Number.isInteger(partition) || partition < 0 || partition >= partitionCount) {
       throw new RangeError(
         `Custom partitioner returned invalid partition ${partition} for ${topic}`,
       );
+    }
     return partition;
   }
-  if (key) return (murmur2(key) & 0x7fffffff) % partitionCount;
+  if (key) {
+    return (murmur2(key) & 0x7fffffff) % partitionCount;
+  }
   const partition = roundRobin.get(topic) ?? 0;
   roundRobin.set(topic, (partition + 1) % partitionCount);
   return partition;
@@ -242,13 +258,17 @@ export class BunProducer {
 
   send(input: ProducerSend): Promise<ProduceResult[]> {
     this.#open();
-    if (!input.topic) throw new TypeError("Kafka topic is required");
+    if (!input.topic) {
+      throw new TypeError("Kafka topic is required");
+    }
     if (input.acks === 0 && (this.#options.idempotent || this.#transactionalId)) {
       throw new TypeError(
         "A transactional or idempotent producer requires acknowledged Produce requests",
       );
     }
-    if (!input.messages.length) return Promise.resolve([]);
+    if (!input.messages.length) {
+      return Promise.resolve([]);
+    }
     return new Promise((resolve, reject) => {
       this.#pending.push({ input, resolve, reject });
       this.#queuedMessages += input.messages.length;
@@ -275,7 +295,9 @@ export class BunProducer {
         await this.#flushing;
         continue;
       }
-      if (this.#timer) clearTimeout(this.#timer);
+      if (this.#timer) {
+        clearTimeout(this.#timer);
+      }
       this.#timer = undefined;
       const pending = this.#pending.splice(0);
       this.#queuedMessages = 0;
@@ -292,10 +314,15 @@ export class BunProducer {
    */
   async beginTransaction(): Promise<void> {
     this.#open();
-    if (!this.#transactionalId)
+    if (!this.#transactionalId) {
       throw new Error("beginTransaction requires a transactionalId producer option");
-    if (this.#txnOpen) throw new Error("A transaction is already in progress");
-    if (!this.#producer) await this.initProducerId();
+    }
+    if (this.#txnOpen) {
+      throw new Error("A transaction is already in progress");
+    }
+    if (!this.#producer) {
+      await this.initProducerId();
+    }
     this.#txnOpen = true;
     this.#txnAddedPartitions.clear();
   }
@@ -314,7 +341,9 @@ export class BunProducer {
 
   async #endTxn(committed: boolean, label: string): Promise<void> {
     this.#open();
-    if (!this.#transactionalId || !this.#txnOpen) throw new Error("No transaction is in progress");
+    if (!this.#transactionalId || !this.#txnOpen) {
+      throw new Error("No transaction is in progress");
+    }
     await this.flush();
     const body = new Writer()
       .string(this.#transactionalId)
@@ -326,7 +355,9 @@ export class BunProducer {
     const response = await this.#txnCoordinatorRequest(API_END_TXN, 1, body);
     this.#cluster.throttle(API_END_TXN, response.i32());
     const error = response.i16();
-    if (error) throw kafkaError(error, label);
+    if (error) {
+      throw kafkaError(error, label);
+    }
   }
 
   async endTxnCleanup(): Promise<void> {
@@ -343,9 +374,12 @@ export class BunProducer {
     groupId: string,
   ): Promise<void> {
     this.#open();
-    if (!this.#transactionalId || !this.#txnOpen)
+    if (!this.#transactionalId || !this.#txnOpen) {
       throw new Error("sendOffsetsToTransaction requires an open transaction");
-    if (!offsets.length) return;
+    }
+    if (!offsets.length) {
+      return;
+    }
     const topics = Map.groupBy(offsets, (o) => o.topic);
     const body = new Writer()
       .string(this.#transactionalId)
@@ -371,16 +405,20 @@ export class BunProducer {
     );
     this.#cluster.throttle(API_ADD_OFFSETS_TO_TXN, addOffsetsResponse.i32());
     const addOffsetsError = addOffsetsResponse.i16();
-    if (addOffsetsError) throw kafkaError(addOffsetsError, `AddOffsetsToTxn group ${groupId}`);
+    if (addOffsetsError) {
+      throw kafkaError(addOffsetsError, `AddOffsetsToTxn group ${groupId}`);
+    }
     const response = await this.#txnCoordinatorRequest(API_TXN_OFFSET_COMMIT, 0, body);
     this.#cluster.throttle(API_TXN_OFFSET_COMMIT, response.i32());
     for (const result of response.array((reader) => ({
       topic: reader.string() ?? "",
       partitions: reader.array((p) => ({ index: p.i32(), error: p.i16() })),
     }))) {
-      for (const partition of result.partitions)
-        if (partition.error)
+      for (const partition of result.partitions) {
+        if (partition.error) {
           throw kafkaError(partition.error, `${result.topic}[${partition.index}]`);
+        }
+      }
     }
   }
 
@@ -396,11 +434,15 @@ export class BunProducer {
 
   /** Register newly touched partitions of the open transaction with the coordinator. */
   async #addPartitionsToTxn(partitions: PartitionRecords[]): Promise<void> {
-    if (!this.#transactionalId || !this.#txnOpen || !this.#producer) return;
+    if (!this.#transactionalId || !this.#txnOpen || !this.#producer) {
+      return;
+    }
     const fresh = partitions.filter(
       (group) => !this.#txnAddedPartitions.has(partitionKey(group.topic, group.partition)),
     );
-    if (!fresh.length) return;
+    if (!fresh.length) {
+      return;
+    }
     const byTopic = Map.groupBy(fresh, (group) => group.topic);
     const response = await this.#txnCoordinatorRequest(
       API_ADD_PARTITIONS_TO_TXN,
@@ -420,12 +462,15 @@ export class BunProducer {
       name: reader.string() ?? "",
       partitions: reader.array((p) => ({ index: p.i32(), error: p.i16() })),
     }))) {
-      for (const partition of topic.partitions)
-        if (partition.error)
+      for (const partition of topic.partitions) {
+        if (partition.error) {
           throw kafkaError(partition.error, `AddPartitionsToTxn ${topic.name}[${partition.index}]`);
+        }
+      }
     }
-    for (const group of fresh)
+    for (const group of fresh) {
       this.#txnAddedPartitions.add(partitionKey(group.topic, group.partition));
+    }
   }
 
   async initProducerId(): Promise<void> {
@@ -454,8 +499,9 @@ export class BunProducer {
       lastError = kafkaError(error, "Initialize idempotent producer");
       // Fresh transactional ids can briefly answer NOT_COORDINATOR while the
       // coordinator is being elected; retry those like transport failures.
-      if (!(lastError instanceof KafkaError && lastError.retriable) || attempt === maxRetries)
+      if (!(lastError instanceof KafkaError && lastError.retriable) || attempt === maxRetries) {
         break;
+      }
       const delay = Math.round(
         Math.min(maxBackoffMs, initialBackoffMs * 2 ** attempt) * (0.5 + Math.random()),
       );
@@ -475,18 +521,23 @@ export class BunProducer {
   async #flushPending(pending: PendingSend[]): Promise<void> {
     const notified = new Set<NonNullable<ProducerMessage["onDelivery"]>>();
     try {
-      if ((this.#options.idempotent || this.#transactionalId) && !this.#producer)
+      if ((this.#options.idempotent || this.#transactionalId) && !this.#producer) {
         await this.initProducerId();
+      }
       const groups = Map.groupBy(
         pending,
         ({ input }) =>
           `${input.acks ?? 1}\0${input.timeoutMs ?? 30_000}\0${input.compression ?? this.#options.compression}`,
       );
-      for (const group of groups.values()) await this.#flushPendingGroup(group, notified);
+      for (const group of groups.values()) {
+        await this.#flushPendingGroup(group, notified);
+      }
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error));
       notifyDeliveryFailures(pending, failure, notified);
-      for (const item of pending) item.reject(failure);
+      for (const item of pending) {
+        item.reject(failure);
+      }
       throw error;
     }
   }
@@ -497,7 +548,9 @@ export class BunProducer {
   ): Promise<void> {
     const { results, routedPartitions } = await this.#producePendingGroup(group);
     const byTopic = Map.groupBy(results, (result) => result.topic);
-    for (const item of group) item.resolve(byTopic.get(item.input.topic) ?? []);
+    for (const item of group) {
+      item.resolve(byTopic.get(item.input.topic) ?? []);
+    }
     notifyDeliverySuccess(routedPartitions, results, notified);
   }
 
@@ -520,8 +573,12 @@ export class BunProducer {
     try {
       return await this.#producePendingAttempt(topics, first, compression, attempt);
     } catch (error) {
-      if (!(error instanceof KafkaError && error.retriable)) throw error;
-      if (attempt === this.#cluster.retryOptions.maxRetries) throw error;
+      if (!(error instanceof KafkaError && error.retriable)) {
+        throw error;
+      }
+      if (attempt === this.#cluster.retryOptions.maxRetries) {
+        throw error;
+      }
       await this.#retryProduce(attempt, error);
       return this.#retryPendingGroup(topics, first, compression, attempt + 1);
     }
@@ -603,7 +660,9 @@ export class BunProducer {
       delayMs: delay,
       error,
     });
-    if (delay) await Bun.sleep(delay);
+    if (delay) {
+      await Bun.sleep(delay);
+    }
   }
 
   async #route(
@@ -637,11 +696,17 @@ export class BunProducer {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       metadata = await this.#cluster.topic(topic, refresh || !!metadata);
-      if (topicMetadataReady(metadata)) return metadata;
-      if (!topicMetadataRetryable(metadata)) throw kafkaError(metadata.err, topic);
+      if (topicMetadataReady(metadata)) {
+        return metadata;
+      }
+      if (!topicMetadataRetryable(metadata)) {
+        throw kafkaError(metadata.err, topic);
+      }
       await Bun.sleep(10);
     }
-    if (!metadata || !topicMetadataReady(metadata)) throw kafkaError(metadata?.err ?? 3, topic);
+    if (!metadata || !topicMetadataReady(metadata)) {
+      throw kafkaError(metadata?.err ?? 3, topic);
+    }
     return metadata;
   }
 
@@ -706,7 +771,9 @@ export class BunProducer {
               const error = partitionReader.i16();
               const baseOffset = partitionReader.i64();
               const logAppendTime = partitionReader.i64();
-              if (error) throw kafkaError(error, `${topic}[${partition}]`);
+              if (error) {
+                throw kafkaError(error, `${topic}[${partition}]`);
+              }
               return { topic, partition, baseOffset, logAppendTime };
             });
           })
@@ -729,7 +796,9 @@ export class BunProducer {
   }
 
   async close(): Promise<void> {
-    if (this.#closed) return;
+    if (this.#closed) {
+      return;
+    }
     await this.flush();
     if (this.#txnOpen) {
       try {
@@ -739,7 +808,9 @@ export class BunProducer {
       }
     }
     this.#closed = true;
-    if (this.#ownsCluster) this.#cluster.close();
+    if (this.#ownsCluster) {
+      this.#cluster.close();
+    }
     this.#onClose();
   }
 
@@ -747,6 +818,8 @@ export class BunProducer {
     return this.close();
   }
   #open(): void {
-    if (this.#closed) throw new Error("Producer is closed");
+    if (this.#closed) {
+      throw new Error("Producer is closed");
+    }
   }
 }

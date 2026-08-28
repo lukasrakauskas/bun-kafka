@@ -57,15 +57,17 @@ describe("API version pinning", () => {
             ).getInt32(0);
             seen.set(key, version);
             let body: Writer;
-            if (key === 18) body = apiVersions();
-            else if (key === 3) body = metadataBody(listener.port);
-            else if (key === 10)
+            if (key === 18) {
+              body = apiVersions();
+            } else if (key === 3) {
+              body = metadataBody(listener.port);
+            } else if (key === 10) {
               body = new Writer().i16(0).i32(1).string("127.0.0.1").i32(listener.port);
-            else if (key === 2)
+            } else if (key === 2) {
               body = new Writer().array(["events"], (writer, name) =>
                 writer.string(name).array([0], (pWriter, p) => pWriter.i32(p).i16(0).i64(0).i64(7)),
               );
-            else if (key === 9)
+            } else if (key === 9) {
               body = new Writer()
                 .array(["events"], (writer, name) =>
                   writer
@@ -73,11 +75,11 @@ describe("API version pinning", () => {
                     .array([0], (pWriter, p) => pWriter.i32(p).i64(3).string(null).i16(0)),
                 )
                 .i16(0);
-            else if (key === 8)
+            } else if (key === 8) {
               body = new Writer().array(["events"], (writer, name) =>
                 writer.string(name).array([0], (pWriter, p) => pWriter.i32(p).i16(0)),
               );
-            else if (key === 0)
+            } else if (key === 0) {
               body = new Writer()
                 .array(["events"], (writer, name) =>
                   writer
@@ -85,7 +87,9 @@ describe("API version pinning", () => {
                     .array([0], (pWriter, p) => pWriter.i32(p).i16(0).i64(100).i64(-1)),
                 )
                 .i32(0);
-            else body = new Writer().i16(0);
+            } else {
+              body = new Writer().i16(0);
+            }
             const response = new Writer().i32(0).i32(correlation).raw(body.result());
             response.patchI32(0, response.length - 4);
             socket.write(response.result());
@@ -138,12 +142,18 @@ describe("API version pinning", () => {
               request.byteOffset + offset + 8,
               4,
             ).getInt32(0);
-            if (key === 0) sawProduce = true;
+            if (key === 0) {
+              sawProduce = true;
+            }
             let body: Writer;
-            if (key === 18)
-              body = apiVersions(4); // Produce supported only from v4 up
-            else if (key === 3) body = metadataBody(listener.port);
-            else body = new Writer().i16(0);
+            if (key === 18) {
+              body = apiVersions(4);
+            } // Produce supported only from v4 up
+            else if (key === 3) {
+              body = metadataBody(listener.port);
+            } else {
+              body = new Writer().i16(0);
+            }
             const response = new Writer().i32(0).i32(correlation).raw(body.result());
             response.patchI32(0, response.length - 4);
             socket.write(response.result());
@@ -185,9 +195,11 @@ describe("API version pinning", () => {
               4,
             ).getInt32(0);
             let body: Writer;
-            if (key === 18) body = apiVersions();
-            else if (key === 3) body = metadataBody(listener.port);
-            else if (key === 32) {
+            if (key === 18) {
+              body = apiVersions();
+            } else if (key === 3) {
+              body = metadataBody(listener.port);
+            } else if (key === 32) {
               body = new Writer().i32(0).array([{ type: 2, name: "events" }], (writer, r) =>
                 writer
                   .i16(0)
@@ -208,7 +220,9 @@ describe("API version pinning", () => {
                         .bool(false),
                   ),
               );
-            } else body = new Writer().i16(0);
+            } else {
+              body = new Writer().i16(0);
+            }
             const response = new Writer().i32(0).i32(correlation).raw(body.result());
             response.patchI32(0, response.length - 4);
             socket.write(response.result());

@@ -27,6 +27,7 @@ export default defineConfig({
   rules: {
     ...sonarjs.configs.recommended.rules,
     "sonarjs/cognitive-complexity": ["error", 10],
+    curly: ["error", "all"],
     "anti-slop/no-chained-type-assertions": "error",
     "anti-slop/no-conditional-empty-object-spread": "error",
     "anti-slop/no-known-value-widening": "error",

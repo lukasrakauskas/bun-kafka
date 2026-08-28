@@ -10,7 +10,9 @@ export class Kafka {
 
   constructor(options: KafkaOptions) {
     this.#cluster = new Cluster({ ...options, brokers: [...options.brokers] });
-    if (options.statsIntervalMs !== undefined) this.#cluster.trackStats(options.statsIntervalMs);
+    if (options.statsIntervalMs !== undefined) {
+      this.#cluster.trackStats(options.statsIntervalMs);
+    }
   }
 
   /** Aggregate client counters (requests, bytes, retries, throttles). */

@@ -44,7 +44,9 @@ describe("Kafka wire protocol primitives", () => {
     const batch = encodeRecordBatch(Array.from({ length: 25 }, (_, i) => ({ value: `v-${i}` })));
     const decoder = new RecordSetDecoder(batch, "paged", 0, 1);
     const messages = [];
-    while (!decoder.done) messages.push(...decoder.read(7));
+    while (!decoder.done) {
+      messages.push(...decoder.read(7));
+    }
     expect(messages).toHaveLength(25);
     expect(messages.map((message) => message.offset)).toEqual(
       Array.from({ length: 25 }, (_, i) => BigInt(i)),
@@ -57,8 +59,12 @@ describe("Kafka wire protocol primitives", () => {
 
   test("uses fast number varints and bigint varlongs", () => {
     const writer = new Writer();
-    for (const value of [-2147483648, -1, 0, 1, 2147483647]) writer.varInt(value);
-    for (const value of [-9007199254740991n, -1n, 0n, 1n, 9007199254740991n]) writer.varLong(value);
+    for (const value of [-2147483648, -1, 0, 1, 2147483647]) {
+      writer.varInt(value);
+    }
+    for (const value of [-9007199254740991n, -1n, 0n, 1n, 9007199254740991n]) {
+      writer.varLong(value);
+    }
     const reader = new Reader(writer.result());
     expect(Array.from({ length: 5 }, () => reader.varInt())).toEqual([
       -2147483648, -1, 0, 1, 2147483647,

@@ -77,7 +77,9 @@ export class BunAdmin {
   }
 
   metadata(topics: string[] | null = null): Promise<ClusterMetadata> {
-    if (this.#closed) throw new Error("Admin is closed");
+    if (this.#closed) {
+      throw new Error("Admin is closed");
+    }
     return this.#cluster.metadata(topics);
   }
 
@@ -86,7 +88,9 @@ export class BunAdmin {
     options: { timeoutMs?: number; validateOnly?: boolean; waitForLeaders?: boolean } = {},
   ): Promise<TopicResult[]> {
     this.#open();
-    if (!topics.length) return [];
+    if (!topics.length) {
+      return [];
+    }
     const body = new Writer()
       .array(topics, (writer, topic) => {
         writer
@@ -115,7 +119,9 @@ export class BunAdmin {
       error: reader.i16(),
       message: reader.string(),
     }));
-    if (!options.waitForLeaders || !results.some((result) => result.error === 0)) return results;
+    if (!options.waitForLeaders || !results.some((result) => result.error === 0)) {
+      return results;
+    }
     // Wait until every created partition reports a leader so immediate
     // produce/fetch does not race leader election.
     const created = results.filter((result) => result.error === 0).map((result) => result.name);
@@ -126,8 +132,9 @@ export class BunAdmin {
         metadata.topics.every(
           (topicMeta) => !topicMeta.err && topicMeta.partitions.every((p) => p.leader >= 0),
         )
-      )
+      ) {
         break;
+      }
       await Bun.sleep(100);
     }
     return results;
@@ -138,7 +145,9 @@ export class BunAdmin {
     options: { timeoutMs?: number } = {},
   ): Promise<TopicResult[]> {
     this.#open();
-    if (!topics.length) return [];
+    if (!topics.length) {
+      return [];
+    }
     const response = await this.#cluster.controllerRequest(
       API_DELETE_TOPICS,
       3,
@@ -159,7 +168,9 @@ export class BunAdmin {
     options: { timeoutMs?: number; validateOnly?: boolean } = {},
   ): Promise<TopicResult[]> {
     this.#open();
-    if (!topics.length) return [];
+    if (!topics.length) {
+      return [];
+    }
     const body = new Writer()
       .array(topics, (writer, topic) => {
         writer
@@ -258,7 +269,9 @@ export class BunAdmin {
     options: { validateOnly?: boolean } = {},
   ): Promise<TopicResult[]> {
     this.#open();
-    if (!resources.length) return [];
+    if (!resources.length) {
+      return [];
+    }
     const operations = { set: 0, delete: 1, append: 2, subtract: 3 } as const;
     const body = new Writer()
       .compactArray(resources, (writer, resource) =>
@@ -305,7 +318,9 @@ export class BunAdmin {
     );
     this.#cluster.throttle(API_LIST_GROUPS, response.i32());
     const error = response.i16();
-    if (error) throw kafkaError(error, "ListGroups");
+    if (error) {
+      throw kafkaError(error, "ListGroups");
+    }
     return response.array((reader) => ({
       groupId: reader.string() ?? "",
       protocolType: reader.string() ?? "",
@@ -316,7 +331,9 @@ export class BunAdmin {
   /** Describe consumer groups: state and member details. */
   async describeGroups(groupIds: readonly string[]): Promise<GroupDescription[]> {
     this.#open();
-    if (!groupIds.length) return [];
+    if (!groupIds.length) {
+      return [];
+    }
     const body = new Writer().array(groupIds, (writer, group) => writer.string(group));
     const response = await this.#cluster.anyRequest(API_DESCRIBE_GROUPS, 1, body);
     this.#cluster.throttle(API_DESCRIBE_GROUPS, response.i32());
@@ -344,7 +361,9 @@ export class BunAdmin {
           }));
           return { error, message, groupId, state, protocolType, protocol, members };
         });
-        if (reader.remaining === 0) return parsed;
+        if (reader.remaining === 0) {
+          return parsed;
+        }
       } catch {
         // Try the next shape.
       }
@@ -355,7 +374,9 @@ export class BunAdmin {
   /** Delete consumer groups that no longer have active members. */
   async deleteGroups(groupIds: readonly string[]): Promise<TopicResult[]> {
     this.#open();
-    if (!groupIds.length) return [];
+    if (!groupIds.length) {
+      return [];
+    }
     const body = new Writer().array(groupIds, (writer, group) => writer.string(group));
     const response = await this.#cluster.anyRequest(API_DELETE_GROUPS, 1, body);
     this.#cluster.throttle(API_DELETE_GROUPS, response.i32());
@@ -375,7 +396,9 @@ export class BunAdmin {
     options: { timeoutMs?: number } = {},
   ): Promise<DeleteRecordsResult[]> {
     this.#open();
-    if (!topics.length) return [];
+    if (!topics.length) {
+      return [];
+    }
     const body = new Writer()
       .array(topics, (writer, topic) =>
         writer
@@ -430,7 +453,9 @@ export class BunAdmin {
     const error = response.i16();
     // The nullable error_message field must be consumed regardless of outcome.
     const errorMessage = response.compactString();
-    if (error) throw kafkaError(error, "Describe client quotas", errorMessage);
+    if (error) {
+      throw kafkaError(error, "Describe client quotas", errorMessage);
+    }
     return response.compactArray((entryReader) => {
       const entry = {
         entities: entryReader.compactArray((entityReader) => {
@@ -467,7 +492,9 @@ export class BunAdmin {
     }>
   > {
     this.#open();
-    if (!entries.length) return [];
+    if (!entries.length) {
+      return [];
+    }
     // Flexible versions close every struct (array elements included) with a
     // tagged-field section.
     const body = new Writer()
@@ -537,7 +564,9 @@ export class BunAdmin {
     this.#cluster.throttle(API_CREATE_DELEGATION_TOKEN, response.i32());
     const error = response.i16();
     const message = response.compactString();
-    if (error) throw kafkaError(error, "Create delegation token", message);
+    if (error) {
+      throw kafkaError(error, "Create delegation token", message);
+    }
     return {
       error,
       principalType: response.compactString() ?? "",
@@ -576,7 +605,9 @@ export class BunAdmin {
     this.#cluster.throttle(API_DESCRIBE_DELEGATION_TOKEN, response.i32());
     const error = response.i16();
     const message = response.compactString();
-    if (error) throw kafkaError(error, "Describe delegation tokens", message);
+    if (error) {
+      throw kafkaError(error, "Describe delegation tokens", message);
+    }
     return response.compactArray((tokenReader) => {
       const token = {
         ownerPrincipalType: tokenReader.compactString() ?? "",
@@ -604,7 +635,9 @@ export class BunAdmin {
     this.#cluster.throttle(API_RENEW_DELEGATION_TOKEN, response.i32());
     const error = response.i16();
     const message = response.compactString();
-    if (error) throw kafkaError(error, "Renew delegation token", message);
+    if (error) {
+      throw kafkaError(error, "Renew delegation token", message);
+    }
     return { error, expiryTimestampMs: response.i64() };
   }
 
@@ -619,7 +652,9 @@ export class BunAdmin {
     this.#cluster.throttle(API_EXPIRE_DELEGATION_TOKEN, response.i32());
     const error = response.i16();
     const message = response.compactString();
-    if (error) throw kafkaError(error, "Expire delegation token", message);
+    if (error) {
+      throw kafkaError(error, "Expire delegation token", message);
+    }
     return { error, expiryTimestampMs: response.i64() };
   }
 
@@ -629,7 +664,9 @@ export class BunAdmin {
     options: { timeoutMs?: number } = {},
   ): Promise<Array<{ error: number; message: string | null }>> {
     this.#open();
-    if (!bindings.length) return [];
+    if (!bindings.length) {
+      return [];
+    }
     const body = new Writer()
       .array(bindings, (writer, acl) =>
         writer
@@ -730,7 +767,9 @@ export class BunAdmin {
     }>
   > {
     this.#open();
-    if (!groupId) throw new Error("groupId is required");
+    if (!groupId) {
+      throw new Error("groupId is required");
+    }
     const names =
       topics ??
       (await this.metadata(null)).topics
@@ -743,7 +782,9 @@ export class BunAdmin {
     }> = [];
     for (const topic of names) {
       const meta = await this.#cluster.topic(topic);
-      if (meta.err || !meta.partitions.length) continue;
+      if (meta.err || !meta.partitions.length) {
+        continue;
+      }
       const partitions = meta.partitions.map((p) => p.id);
       const body = new Writer()
         .string(groupId)
@@ -785,7 +826,9 @@ export class BunAdmin {
     }>,
   ): Promise<void> {
     this.#open();
-    if (!topics.length) return;
+    if (!topics.length) {
+      return;
+    }
     const coordinator = await this.#findGroupCoordinator(groupId);
     const body = new Writer()
       .string(groupId)
@@ -806,8 +849,9 @@ export class BunAdmin {
       partitions: reader.array((p) => ({ partition: p.i32(), error: p.i16() })),
     }))) {
       for (const partition of topicResult.partitions) {
-        if (partition.error)
+        if (partition.error) {
           throw kafkaError(partition.error, `${topicResult.topic}[${partition.partition}]`);
+        }
       }
     }
   }
@@ -830,7 +874,9 @@ export class BunAdmin {
   ): Promise<Array<{ partition: number; low: bigint; high: bigint }>> {
     this.#open();
     const meta = await this.#cluster.topic(topic);
-    if (meta.err) throw kafkaError(meta.err, topic);
+    if (meta.err) {
+      throw kafkaError(meta.err, topic);
+    }
     return Promise.all(
       meta.partitions.map(async (partition) => {
         const [low, high] = await Promise.all([
@@ -847,8 +893,9 @@ export class BunAdmin {
     this.#open();
     const meta = await this.#cluster.topic(topic);
     const leader = meta.partitions.find((p) => p.id === partition)?.leader;
-    if (leader === undefined)
+    if (leader === undefined) {
       throw new RangeError(`Partition ${partition} does not exist on ${topic}`);
+    }
     const body = new Writer().i32(-1).array([topic], (writer, name) =>
       writer.string(name).array([partition], (partitionWriter, index) => {
         partitionWriter.i32(index).i64(BigInt(timestamp));
@@ -862,7 +909,9 @@ export class BunAdmin {
         const error = partitionReader.i16();
         partitionReader.i64();
         const offset = partitionReader.i64();
-        if (error) throw kafkaError(error, `${topic}[${partition}]`);
+        if (error) {
+          throw kafkaError(error, `${topic}[${partition}]`);
+        }
         return offset;
       });
     });
@@ -877,14 +926,20 @@ export class BunAdmin {
     );
     const error = response.i16();
     const coordinator = response.i32();
-    if (error) throw kafkaError(error, `Kafka group ${groupId}`);
+    if (error) {
+      throw kafkaError(error, `Kafka group ${groupId}`);
+    }
     return coordinator;
   }
 
   async close(): Promise<void> {
-    if (this.#closed) return;
+    if (this.#closed) {
+      return;
+    }
     this.#closed = true;
-    if (this.#ownsCluster) this.#cluster.close();
+    if (this.#ownsCluster) {
+      this.#cluster.close();
+    }
     this.#onClose();
   }
 
@@ -892,7 +947,9 @@ export class BunAdmin {
     return this.close();
   }
   #open(): void {
-    if (this.#closed) throw new Error("Admin is closed");
+    if (this.#closed) {
+      throw new Error("Admin is closed");
+    }
   }
 }
 

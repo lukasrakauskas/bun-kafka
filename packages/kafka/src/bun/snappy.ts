@@ -12,10 +12,14 @@ function readVarint(input: Uint8Array, offset: number) {
   let value = 0;
   let shift = 0;
   while (true) {
-    if (offset >= input.byteLength || shift > 35) throw new RangeError("Invalid snappy varint");
+    if (offset >= input.byteLength || shift > 35) {
+      throw new RangeError("Invalid snappy varint");
+    }
     const byte = input[offset++]!;
     value |= (byte & 0x7f) << shift;
-    if (!(byte & 0x80)) return { value, offset };
+    if (!(byte & 0x80)) {
+      return { value, offset };
+    }
     shift += 7;
   }
 }
@@ -28,7 +32,9 @@ function readLiteral(input: Uint8Array, offset: number, tag: number): SnappyLite
   if (length >= 60) {
     const extra = length - 59;
     length = 0;
-    for (let i = 0; i < extra; i++) length |= input[offset++]! << (8 * i);
+    for (let i = 0; i < extra; i++) {
+      length |= input[offset++]! << (8 * i);
+    }
   }
   return { offset, length: length + 1 };
 }
@@ -61,7 +67,9 @@ function readCopy(input: Uint8Array, offset: number, tag: number): SnappyCopy {
 
 function copyBytes(output: Uint8Array, pos: number, back: number, length: number): void {
   let from = pos - back;
-  for (let i = 0; i < length; i++) output[pos + i] = output[from++]!;
+  for (let i = 0; i < length; i++) {
+    output[pos + i] = output[from++]!;
+  }
 }
 
 function findSnappyMatch(
@@ -83,10 +91,13 @@ function findSnappyMatch(
     input[candidate + 1] !== input[pos + 1] ||
     input[candidate + 2] !== input[pos + 2] ||
     input[candidate + 3] !== input[pos + 3]
-  )
+  ) {
     return;
+  }
   let length = 4;
-  while (pos + length < input.length && input[candidate + length] === input[pos + length]) length++;
+  while (pos + length < input.length && input[candidate + length] === input[pos + length]) {
+    length++;
+  }
   return { candidate, length };
 }
 
@@ -102,21 +113,25 @@ function decodeSnappyTag(
 ): SnappyDecodeState {
   if ((tag & 3) === 0) {
     const literal = readLiteral(input, offset, tag);
-    if (literal.offset + literal.length > input.byteLength || pos + literal.length > length)
+    if (literal.offset + literal.length > input.byteLength || pos + literal.length > length) {
       throw new RangeError("Invalid snappy literal");
+    }
     output.set(input.subarray(literal.offset, literal.offset + literal.length), pos);
     return { offset: literal.offset + literal.length, pos: pos + literal.length };
   }
   const copy = readCopy(input, offset, tag);
-  if (copy.back <= 0 || copy.back > pos || pos + copy.length > length)
+  if (copy.back <= 0 || copy.back > pos || pos + copy.length > length) {
     throw new RangeError("Invalid snappy copy");
+  }
   copyBytes(output, pos, copy.back, copy.length);
   return { offset: copy.offset, pos: pos + copy.length };
 }
 
 export function snappyDecompressBlock(input: Uint8Array): Uint8Array {
   const { value: length, offset: start } = readVarint(input, 0);
-  if (length < 0 || length > 0xffffffff) throw new RangeError("Invalid snappy uncompressed size");
+  if (length < 0 || length > 0xffffffff) {
+    throw new RangeError("Invalid snappy uncompressed size");
+  }
   const output = new Uint8Array(length);
   let pos = 0;
   let offset = start;
@@ -124,7 +139,9 @@ export function snappyDecompressBlock(input: Uint8Array): Uint8Array {
     const tag = input[offset++]!;
     ({ offset, pos } = decodeSnappyTag(input, output, tag, offset, pos, length));
   }
-  if (pos !== length) throw new RangeError("Snappy payload does not match its declared size");
+  if (pos !== length) {
+    throw new RangeError("Snappy payload does not match its declared size");
+  }
   return output;
 }
 
@@ -145,7 +162,9 @@ function emitLiteral(
   from: number,
   count: number,
 ): number {
-  if (!count) return at;
+  if (!count) {
+    return at;
+  }
   if (count <= 60) {
     output[at++] = (count - 1) << 2;
   } else if (count <= 0x100) {
@@ -196,7 +215,9 @@ export function snappyCompressBlock(input: Uint8Array): Uint8Array {
   const output = new Uint8Array(n + Math.ceil(n / 6) + 64);
   let at = writeVarint(output, 0, n);
   if (n < 4 || n > 0xffffffff) {
-    if (n) at = emitLiteral(output, at, input, 0, n);
+    if (n) {
+      at = emitLiteral(output, at, input, 0, n);
+    }
     return output.subarray(0, at).slice();
   }
 
@@ -217,7 +238,9 @@ export function snappyCompressBlock(input: Uint8Array): Uint8Array {
     pos += match.length;
     literalsFrom = pos;
   }
-  if (literalsFrom < n) at = emitLiteral(output, at, input, literalsFrom, n - literalsFrom);
+  if (literalsFrom < n) {
+    at = emitLiteral(output, at, input, literalsFrom, n - literalsFrom);
+  }
   return output.subarray(0, at).slice();
 }
 
@@ -236,10 +259,13 @@ export function snappyCompress(input: Uint8Array): Uint8Array {
 
 /** Decompress Kafka's xerial-framed Snappy format (also accepts bare blocks). */
 export function snappyDecompress(input: Uint8Array): Uint8Array {
-  if (input.byteLength < XERIAL_HEADER.byteLength + 8)
+  if (input.byteLength < XERIAL_HEADER.byteLength + 8) {
     throw new RangeError("Snappy payload is truncated");
+  }
   for (let i = 0; i < XERIAL_HEADER.byteLength; i++) {
-    if (input[i] !== XERIAL_HEADER[i]) return snappyDecompressBlock(input);
+    if (input[i] !== XERIAL_HEADER[i]) {
+      return snappyDecompressBlock(input);
+    }
   }
   const view = new DataView(input.buffer, input.byteOffset, input.byteLength);
   const chunks: Uint8Array[] = [];
@@ -248,12 +274,15 @@ export function snappyDecompress(input: Uint8Array): Uint8Array {
   while (offset + 4 <= input.byteLength) {
     const chunkLength = view.getUint32(offset);
     offset += 4;
-    if (chunkLength > input.byteLength - offset)
+    if (chunkLength > input.byteLength - offset) {
       throw new RangeError("Invalid xerial chunk length");
+    }
     chunks.push(snappyDecompressBlock(input.subarray(offset, offset + chunkLength)));
     offset += chunkLength;
   }
-  for (const chunk of chunks) total += chunk.byteLength;
+  for (const chunk of chunks) {
+    total += chunk.byteLength;
+  }
   const result = new Uint8Array(total);
   let at = 0;
   for (const chunk of chunks) {

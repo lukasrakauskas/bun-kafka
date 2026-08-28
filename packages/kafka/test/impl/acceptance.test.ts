@@ -54,9 +54,10 @@ describe("acceptance", () => {
       await consumer.assign([{ topic: name, partition: 0, offset: "earliest" }]);
       let received = 0;
       const start = performance.now();
-      while (received < count)
+      while (received < count) {
         received += (await consumer.fetch({ maxWaitMs: 100, maxMessages: count - received }))
           .length;
+      }
       expect(received).toBe(count);
       expect(performance.now() - start).toBeLessThan(60_000);
     } finally {

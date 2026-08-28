@@ -20,7 +20,11 @@ async function consumeMessages(name: string, count: number) {
   await c.subscribe(name);
   const start = performance.now();
   let received = 0;
-  for await (const _ of c) if (++received >= count) break;
+  for await (const _ of c) {
+    if (++received >= count) {
+      break;
+    }
+  }
   await c.close();
   return performance.now() - start;
 }
@@ -38,7 +42,9 @@ async function consumeBatches(name: string, count: number) {
   await c.subscribe(name);
   const start = performance.now();
   let received = 0;
-  while (received < count) received += (await c.fetch({ maxWaitMs: 10, maxMessages: 512 })).length;
+  while (received < count) {
+    received += (await c.fetch({ maxWaitMs: 10, maxMessages: 512 })).length;
+  }
   await c.close();
   return performance.now() - start;
 }
@@ -51,7 +57,9 @@ describe("Bun consumer batch performance", () => {
     const batchMs = await bestOfTwo(consumeBatches, name, N);
     const messageMs = await bestOfTwo(consumeMessages, name, N);
     // Shared CI runners jitter too much for relative timing; enforce it only locally.
-    if (!process.env.CI) expect(batchMs).toBeLessThan(messageMs * 1.2);
+    if (!process.env.CI) {
+      expect(batchMs).toBeLessThan(messageMs * 1.2);
+    }
     expect(batchMs).toBeLessThan(30_000);
   }, 120_000);
 });

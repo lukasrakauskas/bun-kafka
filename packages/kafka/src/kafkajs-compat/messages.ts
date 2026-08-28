@@ -46,15 +46,22 @@ type KafkaJsPartitioner =
 export function toBunPartitioner(
   partitioner: KafkaJsPartitioner | null | undefined,
 ): Partitioner | undefined {
-  if (!partitioner) return undefined;
-  if (isFunction(partitioner))
+  if (!partitioner) {
+    return undefined;
+  }
+  if (isFunction(partitioner)) {
     return ({ topic, partitionCount, key }) => partitioner(topic, partitionCount, key);
-  if ("partition" in partitioner) return (context) => partitioner.partition(context);
+  }
+  if ("partition" in partitioner) {
+    return (context) => partitioner.partition(context);
+  }
   return undefined;
 }
 
 export function toWireMessage(message: KafkaJsMessage): ProducerMessage {
-  if (message.value === undefined) throw new KafkaJSNonRetriableError("Invalid message value");
+  if (message.value === undefined) {
+    throw new KafkaJSNonRetriableError("Invalid message value");
+  }
   const wire: ProducerMessage = {
     value: message.value,
     key: message.key ?? null,
@@ -65,8 +72,12 @@ export function toWireMessage(message: KafkaJsMessage): ProducerMessage {
       ]),
     ),
   };
-  if (message.partition !== undefined) wire.partition = message.partition;
-  if (message.timestamp !== undefined) wire.timestamp = Number(message.timestamp);
+  if (message.partition !== undefined) {
+    wire.partition = message.partition;
+  }
+  if (message.timestamp !== undefined) {
+    wire.timestamp = Number(message.timestamp);
+  }
   return wire;
 }
 
@@ -80,8 +91,9 @@ export function toKafkajsMessage(raw: ConsumedMessage): KafkaJsConsumedMessage {
     (raw.value?.byteLength ?? 0) +
     Object.values(raw.headers ?? {}).reduce((sum, header) => sum + (header?.byteLength ?? 0), 0);
   const headers: Record<string, Buffer | undefined> = {};
-  for (const [name, value] of Object.entries(raw.headers ?? {}))
+  for (const [name, value] of Object.entries(raw.headers ?? {})) {
     headers[name] = value == null ? undefined : Buffer.from(value);
+  }
   return {
     key: toBuffer(raw.key),
     value: toBuffer(raw.value),

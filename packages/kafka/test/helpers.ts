@@ -29,7 +29,9 @@ export async function waitFor<T>(
   while (Date.now() - start < timeoutMs) {
     try {
       const value = await fn();
-      if (value !== undefined) return value;
+      if (value !== undefined) {
+        return value;
+      }
     } catch (error) {
       lastErr = error;
     }

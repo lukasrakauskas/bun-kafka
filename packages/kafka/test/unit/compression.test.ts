@@ -32,7 +32,9 @@ describe("snappy codec", () => {
       0, 1, 3, 4, 12, 13, 59, 60, 61, 64, 100, 256, 257, 65536, 65537, 500, 5000,
     ]) {
       const data = pattern(length);
-      if (length >= 40) data.set(pattern(20), length - 20);
+      if (length >= 40) {
+        data.set(pattern(20), length - 20);
+      }
       expect(same(snappyDecompressBlock(snappyCompressBlock(data)), data)).toBe(true);
     }
   });
@@ -122,7 +124,9 @@ describe("lz4 codec", () => {
     const frame = new Uint8Array(total);
     let at = 0;
     for (const part of parts) {
-      if (part === parts[1]) new DataView(part.buffer).setUint32(0, compressed.byteLength, true);
+      if (part === parts[1]) {
+        new DataView(part.buffer).setUint32(0, compressed.byteLength, true);
+      }
       frame.set(part, at);
       at += part.byteLength;
     }

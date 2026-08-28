@@ -72,15 +72,20 @@ function metadataBody(brokers: MockBroker[], leader = 1, error = 0): Writer {
 }
 
 function defaultBody(apiKey: number, broker: MockBroker, fetchOffset = 0n): Writer {
-  if (apiKey === 18) return apiVersions();
-  if (apiKey === 3) return metadataBody([broker]);
-  if (apiKey === 2)
+  if (apiKey === 18) {
+    return apiVersions();
+  }
+  if (apiKey === 3) {
+    return metadataBody([broker]);
+  }
+  if (apiKey === 2) {
     return new Writer().array([topic], (writer, name) =>
       writer
         .string(name)
         .array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(0).i64(0)),
     );
-  if (apiKey === 0)
+  }
+  if (apiKey === 0) {
     return new Writer()
       .array([topic], (writer, name) =>
         writer
@@ -88,7 +93,8 @@ function defaultBody(apiKey: number, broker: MockBroker, fetchOffset = 0n): Writ
           .array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(fetchOffset).i64(-1)),
       )
       .i32(0);
-  if (apiKey === 1)
+  }
+  if (apiKey === 1) {
     return new Writer()
       .i32(0)
       .i16(0)
@@ -105,7 +111,10 @@ function defaultBody(apiKey: number, broker: MockBroker, fetchOffset = 0n): Writ
             .bytes(recordBatch(`value-${fetchOffset}`, fetchOffset));
         }),
       );
-  if (apiKey === 22) return new Writer().i32(0).i16(0).i64(1).i16(0);
+  }
+  if (apiKey === 22) {
+    return new Writer().i32(0).i16(0).i64(1).i16(0);
+  }
   return new Writer();
 }
 
@@ -132,7 +141,9 @@ function mockBroker(handler: Handler = () => false): MockBroker {
         let at = 0;
         while (input.byteLength - at >= 4) {
           const size = new DataView(input.buffer, input.byteOffset + at, 4).getInt32(0);
-          if (size < 0 || input.byteLength - at < size + 4) break;
+          if (size < 0 || input.byteLength - at < size + 4) {
+            break;
+          }
           const frame = input.subarray(at, at + size + 4);
           const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
           const apiKey = view.getInt16(4);
@@ -141,8 +152,9 @@ function mockBroker(handler: Handler = () => false): MockBroker {
           counts.set(apiKey, count);
           const reply = (body: Writer | Uint8Array, responseCorrelation = correlation) =>
             socket.write(response(responseCorrelation, body));
-          if (handler({ apiKey, correlation, count, socket }, reply) === false)
+          if (handler({ apiKey, correlation, count, socket }, reply) === false) {
             reply(defaultBody(apiKey, broker, BigInt(Math.max(0, count - 1))));
+          }
           at += size + 4;
         }
         buffers.set(socket, input.slice(at));
@@ -176,7 +188,9 @@ async function rejectsQuickly(promise: Promise<unknown>, limitMs = 500): Promise
 }
 
 function close(...brokers: MockBroker[]) {
-  for (const broker of brokers) broker.close();
+  for (const broker of brokers) {
+    broker.close();
+  }
 }
 
 describe("deterministic Kafka chaos", () => {
@@ -256,17 +270,21 @@ describe("deterministic Kafka chaos", () => {
       const broker = mockBroker((request) => request.apiKey === apiKey || false);
       const client = kafka([broker]);
       try {
-        if (apiKey === 3) await rejectsQuickly(client.admin().metadata([topic]));
-        if (apiKey === 2)
+        if (apiKey === 3) {
+          await rejectsQuickly(client.admin().metadata([topic]));
+        }
+        if (apiKey === 2) {
           await rejectsQuickly(
             client.consumer().assign([{ topic, partition: 0, offset: "earliest" }]),
           );
-        if (apiKey === 0)
+        }
+        if (apiKey === 0) {
           await rejectsQuickly(
             client
               .producer({ lingerMs: 0 })
               .send({ topic, timeoutMs: 40, messages: [{ value: "x", partition: 0 }] }),
           );
+        }
         if (apiKey === 1) {
           const consumer = client.consumer();
           await consumer.assign([{ topic, partition: 0, offset: 0n }]);
@@ -282,7 +300,9 @@ describe("deterministic Kafka chaos", () => {
   test("retries a reset request with backoff and succeeds on a slow response", async () => {
     const events: unknown[] = [];
     const broker = mockBroker(({ apiKey, count, socket }, reply) => {
-      if (apiKey !== 2) return false;
+      if (apiKey !== 2) {
+        return false;
+      }
       if (count === 1) {
         socket.terminate();
         return true;
@@ -358,11 +378,17 @@ describe("deterministic Kafka chaos", () => {
   test("handles broker pause, timeout, resume, and a late response", async () => {
     let metadataRequests = 0;
     const broker = mockBroker(({ apiKey }, reply) => {
-      if (apiKey !== 3) return false;
+      if (apiKey !== 3) {
+        return false;
+      }
       metadataRequests++;
-      if (metadataRequests === 1) setTimeout(() => reply(metadataBody([broker])), 20);
-      else if (metadataRequests === 2) setTimeout(() => reply(metadataBody([broker])), 80);
-      else reply(metadataBody([broker]));
+      if (metadataRequests === 1) {
+        setTimeout(() => reply(metadataBody([broker])), 20);
+      } else if (metadataRequests === 2) {
+        setTimeout(() => reply(metadataBody([broker])), 80);
+      } else {
+        reply(metadataBody([broker]));
+      }
       return true;
     });
     const client = kafka([broker]);
@@ -472,7 +498,9 @@ describe("deterministic Kafka chaos", () => {
   test("does not leak sockets through repeated fault cycles", async () => {
     const cycles = Number(process.env.CHAOS_FAULT_CYCLES ?? 1_000);
     const broker = mockBroker(({ apiKey, socket }, reply) => {
-      if (apiKey !== 3) return false;
+      if (apiKey !== 3) {
+        return false;
+      }
       reply(metadataBody([broker]));
       queueMicrotask(() => socket.terminate());
       return true;

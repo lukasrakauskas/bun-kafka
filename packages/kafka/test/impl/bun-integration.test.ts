@@ -43,25 +43,27 @@ integration("Bun native Kafka integration", () => {
       const consumer = kafka.consumer({ fromBeginning: true });
       await consumer.assign([{ topic, partition: 0, offset: "earliest" }]);
       const received = [];
-      while (received.length < 20)
+      while (received.length < 20) {
         received.push(
           ...(await consumer.fetch({
             maxWaitMs: 100,
             maxMessages: Math.min(7, 20 - received.length),
           })),
         );
+      }
 
       expect(received).toHaveLength(20);
       expect(decode(received[0]!.value)).toBe("value-0");
       expect(decode(received[19]!.headers.index)).toBe("19");
       const batched = [];
-      while (batched.length < 25)
+      while (batched.length < 25) {
         batched.push(
           ...(await consumer.fetch({
             maxWaitMs: 100,
             maxMessages: Math.min(6, 25 - batched.length),
           })),
         );
+      }
       expect(decode(batched[0]!.value)).toBe("batched-0");
       expect(decode(batched[24]!.value)).toBe("batched-24");
 

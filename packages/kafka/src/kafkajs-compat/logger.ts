@@ -26,7 +26,9 @@ export class Logger {
     this.#creator = creator;
   }
   #write(level: number, message: string, extra: LogFields): void {
-    if (level > this.#level) return;
+    if (level > this.#level) {
+      return;
+    }
     const entry: LoggerEntry = {
       namespace: this.#namespace,
       level,

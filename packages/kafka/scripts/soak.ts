@@ -36,9 +36,13 @@ import type { ConsumedMessage } from "../src/types.ts";
 
 const env = (name: string, fallback: number): number => {
   const raw = process.env[name];
-  if (raw === undefined || raw === "") return fallback;
+  if (raw === undefined || raw === "") {
+    return fallback;
+  }
   const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) throw new Error(`Invalid ${name}: ${raw}`);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`Invalid ${name}: ${raw}`);
+  }
   return value;
 };
 
@@ -80,19 +84,27 @@ class Histogram {
 
   add(ms: number): void {
     this.count++;
-    if (ms > this.max) this.max = ms;
+    if (ms > this.max) {
+      this.max = ms;
+    }
     let i = 0;
-    while (i < this.#bounds.length && ms > this.#bounds[i]!) i++;
+    while (i < this.#bounds.length && ms > this.#bounds[i]!) {
+      i++;
+    }
     this.#counts[i]++;
   }
 
   /** Percentile in milliseconds. Bucket upper bounds make results conservative. */
   percentile(p: number): number {
-    if (!this.count) return 0;
+    if (!this.count) {
+      return 0;
+    }
     let target = this.count * p;
     for (let i = 0; i < this.#counts.length; i++) {
       target -= this.#counts[i]!;
-      if (target <= 0) return i < this.#bounds.length ? this.#bounds[i]! : this.max;
+      if (target <= 0) {
+        return i < this.#bounds.length ? this.#bounds[i]! : this.max;
+      }
     }
     return this.max;
   }
@@ -143,8 +155,11 @@ const kafka = new Kafka({
   brokers: BROKERS,
   clientId: "bun-kafka-soak",
   onEvent: (event) => {
-    if (event.type === "retry") retries++;
-    else if (event.type === "throttle") throttles++;
+    if (event.type === "retry") {
+      retries++;
+    } else if (event.type === "throttle") {
+      throttles++;
+    }
   },
 });
 
@@ -176,8 +191,9 @@ process.on("unhandledRejection", (error) => unhandled.push(error));
 
 function lag(): number {
   let total = 0;
-  for (let p = 0; p < PARTITIONS; p++)
+  for (let p = 0; p < PARTITIONS; p++) {
     total += Math.max(0, producedPerPartition[p]! - consumedPerPartition[p]!);
+  }
   return total;
 }
 
@@ -211,8 +227,9 @@ async function setup(): Promise<void> {
         !found.err &&
         found.partitions.length === PARTITIONS &&
         found.partitions.every((p) => p.leader >= 0)
-      )
+      ) {
         return;
+      }
       await Bun.sleep(150);
     }
     throw new Error(`Topic ${topic} did not become ready`);
@@ -280,7 +297,9 @@ async function producerLoop(): Promise<void> {
       // Pace to the tick boundary so the offered rate stays constant even when
       // acknowledgements are faster than a tick.
       const spent = performance.now() - t0;
-      if (spent < TICK_MS) await Bun.sleep(TICK_MS - spent);
+      if (spent < TICK_MS) {
+        await Bun.sleep(TICK_MS - spent);
+      }
     }
   } finally {
     try {
@@ -317,7 +336,9 @@ async function consumerLoop(): Promise<void> {
       const messages = await consumer.fetch({ maxMessages: MAX_MESSAGES, maxWaitMs: 250 });
       fetchLatency(performance.now() - t0);
       processConsumedMessages(messages, decoder);
-      if (!messages.length && Date.now() >= endAt && lag() === 0) break;
+      if (!messages.length && Date.now() >= endAt && lag() === 0) {
+        break;
+      }
     }
   } finally {
     await consumer.close();
@@ -328,7 +349,9 @@ async function consumerLoop(): Promise<void> {
 function processConsumedMessages(messages: ConsumedMessage[], decoder: TextDecoder): void {
   for (const message of messages) {
     const sequence = Number(decoder.decode(message.key!));
-    if (sequence < 0) continue;
+    if (sequence < 0) {
+      continue;
+    }
     consumedPerPartition[message.partition]++;
     updateSequence(message.partition, sequence);
     counters.consumed++;
@@ -337,9 +360,13 @@ function processConsumedMessages(messages: ConsumedMessage[], decoder: TextDecod
 
 function updateSequence(partition: number, sequence: number): void {
   const previous = lastSeqPerPartition[partition]!;
-  if (sequence > previous) lastSeqPerPartition[partition] = sequence;
-  else if (sequence === previous) counters.duplicates++;
-  else counters.orderViolations++;
+  if (sequence > previous) {
+    lastSeqPerPartition[partition] = sequence;
+  } else if (sequence === previous) {
+    counters.duplicates++;
+  } else {
+    counters.orderViolations++;
+  }
 }
 
 function fetchLatency(ms: number): void {
@@ -452,7 +479,9 @@ function basicGates(): GateResult[] {
 
 function memoryGates(): GateResult[] {
   const postWarmup = samples.filter((sample) => sample.t_s >= DURATION_S * WARMUP_FRACTION);
-  if (postWarmup.length < 2) return [];
+  if (postWarmup.length < 2) {
+    return [];
+  }
   const rss = postWarmup.map((sample) => sample.rss_bytes);
   const growthMiB = (Math.max(...rss) - Math.min(...rss)) / 1048576;
   return [
@@ -465,7 +494,9 @@ function memoryGates(): GateResult[] {
 }
 
 function throughputGates(durationS: number): GateResult[] {
-  if (samples.length < 4) return [];
+  if (samples.length < 4) {
+    return [];
+  }
   const quarter = Math.max(1, Math.floor(samples.length / 4));
   const first = avg(samples.slice(0, quarter), (sample) => sample.produce_mps);
   const last = avg(samples.slice(-quarter), (sample) => sample.produce_mps);
@@ -481,7 +512,9 @@ function throughputGates(durationS: number): GateResult[] {
 }
 
 function latencyGates(): GateResult[] {
-  if (samples.length < 2) return [];
+  if (samples.length < 2) {
+    return [];
+  }
   const half = Math.max(1, Math.floor(samples.length / 2));
   const first = samples.slice(0, half);
   const last = samples.slice(-half);
@@ -506,7 +539,9 @@ function latencyGates(): GateResult[] {
 }
 
 function burstGates(durationS: number): GateResult[] {
-  if (BURST_INTERVAL_S <= 0) return [];
+  if (BURST_INTERVAL_S <= 0) {
+    return [];
+  }
   const recoverBoundS = Math.min(600, SAMPLE_INTERVAL_S * 3);
   let recovered = true;
   let worstOvershoot = 0;
@@ -518,10 +553,14 @@ function burstGates(durationS: number): GateResult[] {
     const peak = postWindow.length
       ? Math.max(...postWindow.map((sample) => sample.lag_total))
       : lag();
-    if (preLag === null) continue;
+    if (preLag === null) {
+      continue;
+    }
     const overshoot = peak - preLag;
     worstOvershoot = Math.max(worstOvershoot, overshoot);
-    if (peak > preLag + BASE_RATE * BURST_FACTOR * 0.05) recovered = false;
+    if (peak > preLag + BASE_RATE * BURST_FACTOR * 0.05) {
+      recovered = false;
+    }
   }
   return [
     gate(
@@ -538,19 +577,27 @@ function gate(name: string, passed: boolean, detail: string): GateResult {
 
 function burstTimes(): number[] {
   const times: number[] = [];
-  if (BURST_INTERVAL_S <= 0) return times;
-  for (let t = BURST_INTERVAL_S / 2; t < DURATION_S; t += BURST_INTERVAL_S) times.push(t);
+  if (BURST_INTERVAL_S <= 0) {
+    return times;
+  }
+  for (let t = BURST_INTERVAL_S / 2; t < DURATION_S; t += BURST_INTERVAL_S) {
+    times.push(t);
+  }
   return times;
 }
 
 function minLagBetween(fromS: number, toS: number): number | null {
   const window = samples.filter((s) => s.t_s >= fromS && s.t_s <= toS);
-  if (!window.length) return null;
+  if (!window.length) {
+    return null;
+  }
   return Math.min(...window.map((s) => s.lag_total));
 }
 
 function avg(items: Sample[], pick: (item: Sample) => number): number {
-  if (!items.length) return 0;
+  if (!items.length) {
+    return 0;
+  }
   return items.reduce((sum, item) => sum + pick(item), 0) / items.length;
 }
 
@@ -735,8 +782,9 @@ async function main(): Promise<number> {
   await Bun.write(`${directory}${stamp}.md`, renderReport(artifact));
 
   console.log(`\nsoak: ${allPassed ? "PASS" : "FAIL"}`);
-  for (const gate of gates)
+  for (const gate of gates) {
     console.log(`  ${gate.passed ? "ok  " : "FAIL"} ${gate.name}: ${gate.detail}`);
+  }
   console.log(`artifacts: out/soak/${stamp}.{json,md}`);
   return allPassed ? 0 : 1;
 }

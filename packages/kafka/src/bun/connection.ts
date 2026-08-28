@@ -35,14 +35,18 @@ function bytes(value: string): Uint8Array {
 
 function base64(value: Uint8Array): string {
   let text = "";
-  for (const byte of value) text += String.fromCharCode(byte);
+  for (const byte of value) {
+    text += String.fromCharCode(byte);
+  }
   return btoa(text);
 }
 
 function fromBase64(value: string): Uint8Array {
   const text = atob(value);
   const result = new Uint8Array(text.length);
-  for (let i = 0; i < text.length; i++) result[i] = text.charCodeAt(i);
+  for (let i = 0; i < text.length; i++) {
+    result[i] = text.charCodeAt(i);
+  }
   return result;
 }
 
@@ -95,7 +99,9 @@ async function pbkdf2(
 
 function xor(left: Uint8Array, right: Uint8Array): Uint8Array {
   const result = new Uint8Array(left.length);
-  for (let i = 0; i < left.length; i++) result[i] = left[i]! ^ right[i]!;
+  for (let i = 0; i < left.length; i++) {
+    result[i] = left[i]! ^ right[i]!;
+  }
   return result;
 }
 
@@ -154,7 +160,9 @@ export class Connection {
     timeoutMs = this.#options.requestTimeoutMs,
     flexible = false,
   ): Promise<Reader> {
-    if (this.#closed) throw new Error(CLOSED_MESSAGE);
+    if (this.#closed) {
+      throw new Error(CLOSED_MESSAGE);
+    }
     const socket = await this.#connect();
     await this.#prepare(socket, apiKey, apiVersion, timeoutMs);
     return this.#send(socket, apiKey, apiVersion, body, timeoutMs, flexible);
@@ -167,7 +175,9 @@ export class Connection {
     body: Writer,
     timeoutMs = this.#options.requestTimeoutMs,
   ): Promise<void> {
-    if (this.#closed) throw new Error(CLOSED_MESSAGE);
+    if (this.#closed) {
+      throw new Error(CLOSED_MESSAGE);
+    }
     const socket = await this.#connect();
     await this.#prepare(socket, apiKey, apiVersion, timeoutMs);
     const correlation = (this.#correlation = (this.#correlation + 1) & 0x7fffffff);
@@ -204,9 +214,12 @@ export class Connection {
     apiVersion: number,
     timeoutMs: number,
   ): Promise<void> {
-    if (apiKey !== 18) await this.#negotiate(socket, timeoutMs);
-    if (this.#options.sasl && apiKey !== 17 && apiKey !== 36)
+    if (apiKey !== 18) {
+      await this.#negotiate(socket, timeoutMs);
+    }
+    if (this.#options.sasl && apiKey !== 17 && apiKey !== 36) {
       await this.#authenticate(socket, timeoutMs);
+    }
     const supported = this.#versions?.get(apiKey);
     if (supported && (apiVersion < supported.min || apiVersion > supported.max)) {
       throw new KafkaError(
@@ -217,12 +230,18 @@ export class Connection {
   }
 
   async #negotiate(socket: Bun.Socket, timeoutMs: number): Promise<void> {
-    if (this.#versions) return;
-    if (this.#negotiating) return this.#negotiating;
+    if (this.#versions) {
+      return;
+    }
+    if (this.#negotiating) {
+      return this.#negotiating;
+    }
     this.#negotiating = (async () => {
       const response = await this.#send(socket, 18, 0, new Writer(), timeoutMs);
       const error = response.i16();
-      if (error) throw new KafkaError(error, `ApiVersions negotiation failed on ${this.address}`);
+      if (error) {
+        throw new KafkaError(error, `ApiVersions negotiation failed on ${this.address}`);
+      }
       this.#versions = new Map(
         response.array(
           (reader) => [reader.i16(), { min: reader.i16(), max: reader.i16() }] as const,
@@ -235,8 +254,12 @@ export class Connection {
   }
 
   async #authenticate(socket: Bun.Socket, timeoutMs: number): Promise<void> {
-    if (this.#authenticated) return;
-    if (this.#authenticating) return this.#authenticating;
+    if (this.#authenticated) {
+      return;
+    }
+    if (this.#authenticating) {
+      return this.#authenticating;
+    }
     const sasl = this.#options.sasl!;
     this.#authenticating = (async () => {
       const handshake = await this.#send(
@@ -247,7 +270,9 @@ export class Connection {
         timeoutMs,
       );
       const error = handshake.i16();
-      if (error) throw new KafkaError(error, `SASL handshake failed on ${this.address}`);
+      if (error) {
+        throw new KafkaError(error, `SASL handshake failed on ${this.address}`);
+      }
       handshake.array((reader) => reader.string());
       await this.#authenticateMechanism(socket, sasl, timeoutMs);
       this.#authenticated = true;
@@ -262,8 +287,12 @@ export class Connection {
     sasl: BunKafkaSasl,
     timeoutMs: number,
   ): Promise<void> {
-    if (sasl.mechanism === "plain") return this.#authenticatePlain(socket, sasl, timeoutMs);
-    if (sasl.mechanism === "oauthbearer") return this.#authenticateOauth(socket, sasl, timeoutMs);
+    if (sasl.mechanism === "plain") {
+      return this.#authenticatePlain(socket, sasl, timeoutMs);
+    }
+    if (sasl.mechanism === "oauthbearer") {
+      return this.#authenticateOauth(socket, sasl, timeoutMs);
+    }
     await this.#scram(socket, sasl, timeoutMs);
   }
 
@@ -277,8 +306,9 @@ export class Connection {
       bytes(`\0${sasl.username}\0${sasl.password}`),
       timeoutMs,
     );
-    if (authentication.byteLength)
+    if (authentication.byteLength) {
       throw new KafkaError(-1, `Unexpected SASL/PLAIN challenge from ${this.address}`);
+    }
   }
 
   async #authenticateOauth(
@@ -287,15 +317,20 @@ export class Connection {
     timeoutMs: number,
   ): Promise<void> {
     const token = isFunction(sasl.token) ? await sasl.token() : sasl.token;
-    if (!token) throw new KafkaError(-1, `SASL/OAUTHBEARER token is empty for ${this.address}`);
+    if (!token) {
+      throw new KafkaError(-1, `SASL/OAUTHBEARER token is empty for ${this.address}`);
+    }
     const authentication = await this.#sasl(
       socket,
       bytes(`n,,\u0001auth=Bearer ${token}\u0001\u0001`),
       timeoutMs,
     );
-    if (authentication.byteLength)
+    if (authentication.byteLength) {
       throw new KafkaError(-1, `Unexpected SASL/OAUTHBEARER challenge from ${this.address}`);
-    if (this.#sessionLifetimeMs > 0) this.scheduleReauthentication(socket);
+    }
+    if (this.#sessionLifetimeMs > 0) {
+      this.scheduleReauthentication(socket);
+    }
   }
 
   async #sasl(socket: Bun.Socket, payload: Uint8Array, timeoutMs: number): Promise<Uint8Array> {
@@ -304,14 +339,17 @@ export class Connection {
     const message = response.string();
     const authBytes = response.bytes() ?? new Uint8Array();
     this.#sessionLifetimeMs = Number(response.i64());
-    if (error)
+    if (error) {
       throw new KafkaError(error, message ?? `SASL authentication failed on ${this.address}`);
+    }
     return authBytes;
   }
 
   /** Re-run SASL on a live connection before the advertised session expires (KIP-368). */
   scheduleReauthentication(socket: Bun.Socket): void {
-    if (this.#reauthTimer) clearTimeout(this.#reauthTimer);
+    if (this.#reauthTimer) {
+      clearTimeout(this.#reauthTimer);
+    }
     const delay = Math.max(0, Math.floor(this.#sessionLifetimeMs * 0.8));
     this.#reauthTimer = setTimeout(() => {
       void this.reauthenticate(socket).catch(() => {});
@@ -322,19 +360,24 @@ export class Connection {
   private async reauthenticate(socket: Bun.Socket): Promise<void> {
     try {
       const sasl = this.#options.sasl;
-      if (sasl?.mechanism !== "oauthbearer") return; // Other mechanisms cannot re-authenticate mid-session.
+      if (sasl?.mechanism !== "oauthbearer") {
+        return;
+      } // Other mechanisms cannot re-authenticate mid-session.
       const token = isFunction(sasl.token) ? await sasl.token() : sasl.token;
-      if (!token)
+      if (!token) {
         throw new KafkaError(
           -1,
           `SASL/OAUTHBEARER reauthentication token is empty for ${this.address}`,
         );
+      }
       await this.#sasl(
         socket,
         bytes(`n,,\u0001auth=Bearer ${token}\u0001\u0001`),
         this.#options.requestTimeoutMs,
       );
-      if (this.#sessionLifetimeMs > 0) this.scheduleReauthentication(socket);
+      if (this.#sessionLifetimeMs > 0) {
+        this.scheduleReauthentication(socket);
+      }
     } catch (error) {
       this.#fail(
         new KafkaError(58, `SASL reauthentication failed on ${this.address}: ${String(error)}`, {
@@ -386,8 +429,9 @@ export class Connection {
       timeoutMs,
     );
     const serverFinal = parseFields(textDecoder.decode(serverFinalBytes));
-    if (serverFinal.get("v") !== serverSignature)
+    if (serverFinal.get("v") !== serverSignature) {
       throw new KafkaError(-1, `SCRAM server signature mismatch from ${this.address}`);
+    }
   }
 
   #send(
@@ -403,13 +447,17 @@ export class Connection {
     frame.i32(0).i16(apiKey).i16(apiVersion).i32(correlation).string(this.#options.clientId);
     // Flexible requests append a tagged-field section to the header itself
     // (KIP-482 keeps the non-compact client_id there).
-    if (flexible) frame.uvarint(0);
+    if (flexible) {
+      frame.uvarint(0);
+    }
     frame.raw(body.result());
     frame.patchI32(0, frame.length - 4);
     this.#requests++;
     this.#bytesSent += frame.length;
-    if (process.env.DEBUG_TXKEYS) console.error("TX", apiKey, "v" + apiVersion);
-    if (process.env.DEBUG_FRAME)
+    if (process.env.DEBUG_TXKEYS) {
+      console.error("TX", apiKey, "v" + apiVersion);
+    }
+    if (process.env.DEBUG_FRAME) {
       console.error(
         "FRAME",
         apiKey,
@@ -419,6 +467,7 @@ export class Connection {
           .map((b) => b.toString(16).padStart(2, "0"))
           .join(" "),
       );
+    }
 
     return new Promise<Reader>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -444,8 +493,12 @@ export class Connection {
   }
 
   async #connect(): Promise<Bun.Socket> {
-    if (this.#socket) return this.#socket;
-    if (this.#connecting) return this.#connecting;
+    if (this.#socket) {
+      return this.#socket;
+    }
+    if (this.#connecting) {
+      return this.#connecting;
+    }
     const { hostname, port } = parseAddress(this.address);
     let timedOut = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -496,8 +549,12 @@ export class Connection {
         }, this.#options.connectTimeoutMs);
       }),
     ]).finally(() => {
-      if (timer) clearTimeout(timer);
-      if (this.#connecting === connecting) this.#connecting = undefined;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      if (this.#connecting === connecting) {
+        this.#connecting = undefined;
+      }
     });
     this.#connecting = connecting;
     return connecting;
@@ -508,7 +565,9 @@ export class Connection {
     while (offset < chunk.byteLength) {
       if (!this.#frame) {
         const nextOffset = this.#readFrameHeader(chunk, offset);
-        if (nextOffset === undefined) return;
+        if (nextOffset === undefined) {
+          return;
+        }
         offset = nextOffset;
       }
       const count = Math.min(
@@ -518,7 +577,9 @@ export class Connection {
       this.#frame!.set(chunk.subarray(offset, offset + count), this.#frameOffset);
       this.#frameOffset += count;
       offset += count;
-      if (this.#frameOffset === this.#frame!.byteLength) this.#completeFrame();
+      if (this.#frameOffset === this.#frame!.byteLength) {
+        this.#completeFrame();
+      }
     }
   }
 
@@ -527,7 +588,9 @@ export class Connection {
     this.#header.set(chunk.subarray(offset, offset + count), this.#headerOffset);
     this.#headerOffset += count;
     offset += count;
-    if (this.#headerOffset < 4) return;
+    if (this.#headerOffset < 4) {
+      return;
+    }
     const size = new DataView(this.#header.buffer).getInt32(0);
     this.#headerOffset = 0;
     if (size < 4 || size > this.#options.maxResponseBytes) {
@@ -546,7 +609,9 @@ export class Connection {
     this.#bytesReceived += frame.byteLength;
     const correlation = new DataView(frame.buffer, frame.byteOffset, 4).getInt32(0);
     const pending = this.#pending.get(correlation);
-    if (!pending) return;
+    if (!pending) {
+      return;
+    }
     clearTimeout(pending.timer);
     this.#pending.delete(correlation);
     const reader = new Reader(frame.subarray(4));
@@ -562,9 +627,12 @@ export class Connection {
   }
 
   #fail(error: Error, socket?: Bun.Socket): void {
-    if (socket && (this.#ignoredSockets.has(socket) || (this.#socket && socket !== this.#socket)))
+    if (socket && (this.#ignoredSockets.has(socket) || (this.#socket && socket !== this.#socket))) {
       return;
-    if (this.#reauthTimer) clearTimeout(this.#reauthTimer);
+    }
+    if (this.#reauthTimer) {
+      clearTimeout(this.#reauthTimer);
+    }
     this.#reauthTimer = undefined;
     this.#socket = undefined;
     this.#connecting = undefined;
@@ -583,9 +651,13 @@ export class Connection {
   }
 
   close(): void {
-    if (this.#closed) return;
+    if (this.#closed) {
+      return;
+    }
     this.#closed = true;
-    if (this.#reauthTimer) clearTimeout(this.#reauthTimer);
+    if (this.#reauthTimer) {
+      clearTimeout(this.#reauthTimer);
+    }
     this.#reauthTimer = undefined;
     this.#socket?.end();
     this.#fail(new Error(CLOSED_MESSAGE));

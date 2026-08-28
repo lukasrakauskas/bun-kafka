@@ -76,7 +76,9 @@ describe("Producer delivery options", () => {
       expect(results).toHaveLength(1);
       expect(results[0]!.baseOffset).toBe(-1n);
       expect(results[0]!.logAppendTime).toBe(-1n);
-      for (let i = 0; i < 50 && produceRequests === 0; i++) await Bun.sleep(10);
+      for (let i = 0; i < 50 && produceRequests === 0; i++) {
+        await Bun.sleep(10);
+      }
       expect(produceRequests).toBeGreaterThan(0);
       expect(answered).toBe(true); // Metadata was still answered; no hang on Produce.
       await producer.close();

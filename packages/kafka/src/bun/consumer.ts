@@ -120,7 +120,7 @@ function assignGroupPartitions(
     members.map((member) => [member.memberId, []]),
   );
   for (const topic of metadata.topics) {
-    if (!topic.err && topic.partitions.length)
+    if (!topic.err && topic.partitions.length) {
       assignTopicPartitions(
         assignments,
         members,
@@ -128,6 +128,7 @@ function assignGroupPartitions(
         topic.partitions.map(({ id }) => id),
         cooperative,
       );
+    }
   }
   return assignments;
 }
@@ -142,9 +143,14 @@ function assignTopicPartitions(
   const eligible = members
     .filter((member) => member.topics.includes(topic))
     .sort((a, b) => a.memberId.localeCompare(b.memberId));
-  if (!eligible.length) return;
-  if (cooperative) assignCooperatively(assignments, eligible, topic, partitions);
-  else assignByRange(assignments, eligible, topic, partitions);
+  if (!eligible.length) {
+    return;
+  }
+  if (cooperative) {
+    assignCooperatively(assignments, eligible, topic, partitions);
+  } else {
+    assignByRange(assignments, eligible, topic, partitions);
+  }
 }
 
 function assignByRange(
@@ -179,7 +185,9 @@ function assignCooperatively(
   const ownedBy = new Map<number, string>();
   retainOwnedPartitions(members, topic, partitions, targetSize, finals, ownedBy);
   for (const partition of partitions) {
-    if (ownedBy.has(partition)) continue;
+    if (ownedBy.has(partition)) {
+      continue;
+    }
     const chosen =
       members
         .filter((member) => finals.get(member.memberId)!.length < targetSize.get(member.memberId)!)
@@ -191,9 +199,11 @@ function assignCooperatively(
     ownedBy.set(partition, chosen.memberId);
     finals.get(chosen.memberId)!.push(partition);
   }
-  for (const [memberId, owned] of finals)
-    if (owned.length)
+  for (const [memberId, owned] of finals) {
+    if (owned.length) {
       assignments.get(memberId)!.push({ topic, partitions: owned.sort((a, b) => a - b) });
+    }
+  }
 }
 
 function retainOwnedPartitions(
@@ -204,19 +214,23 @@ function retainOwnedPartitions(
   finals: Map<string, number[]>,
   ownedBy: Map<number, string>,
 ): void {
-  for (const member of members)
+  for (const member of members) {
     for (const owned of member.owned) {
       if (
         owned.topic !== topic ||
         !partitions.includes(owned.partition) ||
         ownedBy.has(owned.partition)
-      )
+      ) {
         continue;
+      }
       const mine = finals.get(member.memberId)!;
-      if (mine.length >= targetSize.get(member.memberId)!) continue;
+      if (mine.length >= targetSize.get(member.memberId)!) {
+        continue;
+      }
       ownedBy.set(owned.partition, member.memberId);
       mine.push(owned.partition);
     }
+  }
 }
 
 // Per-broker incremental fetch session state (KIP-227). The broker remembers
@@ -294,7 +308,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   }
 
   async #findCoordinator(): Promise<number> {
-    if (this.#coordinator !== undefined) return this.#coordinator;
+    if (this.#coordinator !== undefined) {
+      return this.#coordinator;
+    }
     const response = await this.#cluster.anyRequest(
       API_FIND_COORDINATOR,
       0,
@@ -304,7 +320,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const coordinator = response.i32();
     response.string();
     response.i32();
-    if (error) throw kafkaError(error, `Kafka group ${this.#groupId}`);
+    if (error) {
+      throw kafkaError(error, `Kafka group ${this.#groupId}`);
+    }
     this.#coordinator = coordinator;
     return coordinator;
   }
@@ -360,7 +378,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       .i32(this.#options.sessionTimeoutMs ?? 45_000)
       .i32(this.#options.rebalanceTimeoutMs ?? 60_000)
       .string(this.#memberId);
-    if (instanceId !== undefined) join.string(instanceId);
+    if (instanceId !== undefined) {
+      join.string(instanceId);
+    }
     join
       .string("consumer")
       .array([[protocolName, memberMetadata] as const], (writer, [name, metadata]) =>
@@ -374,7 +394,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const leader = response.string() ?? "";
     this.#memberId = response.string() ?? "";
     const members = response.array(readGroupMember);
-    if (error) throw kafkaError(error, `Kafka group ${this.#groupId}`);
+    if (error) {
+      throw kafkaError(error, `Kafka group ${this.#groupId}`);
+    }
     return { coordinator, leader, members, cooperative };
   }
 
@@ -383,7 +405,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     members: GroupMember[],
     cooperative: boolean,
   ): Promise<Map<string, GroupAssignment[]>> {
-    if (this.#memberId !== leader) return new Map();
+    if (this.#memberId !== leader) {
+      return new Map();
+    }
     const metadata = await this.#cluster.metadata([
       ...new Set(members.flatMap((member) => member.topics)),
     ]);
@@ -397,7 +421,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const instanceId = this.#options.groupInstanceId;
     const version = instanceId === undefined ? 0 : 3;
     const sync = new Writer().string(this.#groupId!).i32(this.#generationId).string(this.#memberId);
-    if (instanceId !== undefined) sync.string(instanceId);
+    if (instanceId !== undefined) {
+      sync.string(instanceId);
+    }
     sync.array([...assignments], (writer, [memberId, memberAssignments]) => {
       const assignment = new Writer()
         .i16(0)
@@ -410,9 +436,13 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       writer.string(memberId).bytes(assignment.result());
     });
     const response = await this.#cluster.request(coordinator, API_SYNC_GROUP, version, sync);
-    if (version === 3) response.i32();
+    if (version === 3) {
+      response.i32();
+    }
     const error = response.i16();
-    if (error) throw kafkaError(error, `Kafka group ${this.#groupId} sync`);
+    if (error) {
+      throw kafkaError(error, `Kafka group ${this.#groupId} sync`);
+    }
     const reader = new Reader(response.bytes() ?? new Uint8Array());
     reader.i16();
     return reader
@@ -443,13 +473,17 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     for (const item of assigned) {
       const key = partitionKey(item.topic, item.partition);
       const position = this.#positions.get(key);
-      if (position !== undefined) retained.set(key, position);
+      if (position !== undefined) {
+        retained.set(key, position);
+      }
     }
     return retained;
   }
 
   #startHeartbeat(coordinator: number): void {
-    if (this.#heartbeat) clearInterval(this.#heartbeat);
+    if (this.#heartbeat) {
+      clearInterval(this.#heartbeat);
+    }
     this.#heartbeat = setInterval(
       () => void this.#heartbeatOnce(coordinator),
       this.#options.heartbeatIntervalMs ?? 3_000,
@@ -457,7 +491,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   }
 
   async #heartbeatOnce(coordinator: number): Promise<void> {
-    if (!this.#groupId || this.#generationId < 0 || this.#rejoining) return;
+    if (!this.#groupId || this.#generationId < 0 || this.#rejoining) {
+      return;
+    }
     try {
       await this.#sendHeartbeat(coordinator);
     } catch {
@@ -470,18 +506,29 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const instanceId = this.#options.groupInstanceId;
     const version = instanceId === undefined ? 0 : 3;
     const body = new Writer().string(this.#groupId!).i32(this.#generationId).string(this.#memberId);
-    if (instanceId !== undefined) body.string(instanceId);
+    if (instanceId !== undefined) {
+      body.string(instanceId);
+    }
     const response = await this.#cluster.request(coordinator, API_HEARTBEAT, version, body);
-    if (version === 3) response.i32();
+    if (version === 3) {
+      response.i32();
+    }
     const error = response.i16();
-    if (!error) return;
-    if (error === 25) this.#memberId = "";
-    if (error !== 22 && error !== 25 && error !== 27)
+    if (!error) {
+      return;
+    }
+    if (error === 25) {
+      this.#memberId = "";
+    }
+    if (error !== 22 && error !== 25 && error !== 27) {
       throw kafkaError(error, `Kafka group ${this.#groupId} heartbeat`);
+    }
   }
 
   async #restartGroup(): Promise<void> {
-    if (this.#heartbeat) clearInterval(this.#heartbeat);
+    if (this.#heartbeat) {
+      clearInterval(this.#heartbeat);
+    }
     this.#assigned.clear();
     this.#positions.clear();
     this.#decoders = [];
@@ -508,7 +555,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     ),
   ): Promise<void> {
     this.#open();
-    if (!this.#groupId) throw new Error("Consumer groupId is required for offset commits");
+    if (!this.#groupId) {
+      throw new Error("Consumer groupId is required for offset commits");
+    }
     const coordinator = await this.#findCoordinator();
     const topics = Map.groupBy(assignments, (assignment) => assignment.topic);
     const body = new Writer()
@@ -533,15 +582,19 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       topic: reader.string() ?? "",
       partitions: reader.array((reader) => ({ partition: reader.i32(), error: reader.i16() })),
     }))) {
-      for (const partition of result.partitions)
-        if (partition.error)
+      for (const partition of result.partitions) {
+        if (partition.error) {
           throw kafkaError(partition.error, `${result.topic}[${partition.partition}]`);
+        }
+      }
     }
   }
 
   async committed(assignments: readonly ConsumerAssignment[]): Promise<CommittedOffset[]> {
     this.#open();
-    if (!this.#groupId) throw new Error("Consumer groupId is required for offset fetch");
+    if (!this.#groupId) {
+      throw new Error("Consumer groupId is required for offset fetch");
+    }
     const coordinator = await this.#findCoordinator();
     const topics = Map.groupBy(assignments, (assignment) => assignment.topic);
     const body = new Writer()
@@ -563,8 +616,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       })),
     }))) {
       for (const partition of topic.partitions) {
-        if (partition.error)
+        if (partition.error) {
           throw kafkaError(partition.error, `${topic.topic}[${partition.partition}]`);
+        }
         result.push({
           topic: topic.topic,
           partition: partition.partition,
@@ -573,7 +627,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       }
     }
     const error = response.i16();
-    if (error) throw kafkaError(error, `Kafka group ${this.#groupId}`);
+    if (error) {
+      throw kafkaError(error, `Kafka group ${this.#groupId}`);
+    }
     return result;
   }
 
@@ -581,7 +637,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     this.#open();
     const request = isConsumerSubscribe(input) ? input : { topics: input };
     const requested = request.topics ?? request.topic;
-    if (requested === undefined) throw new TypeError("subscribe requires a topic");
+    if (requested === undefined) {
+      throw new TypeError("subscribe requires a topic");
+    }
     const topics = await this.#resolveTopicPatterns(
       isString(requested) || requested instanceof RegExp ? [requested] : requested,
     );
@@ -602,7 +660,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const metadata = await this.#cluster.metadata(topics);
     const assignments = topics.flatMap((topic) => {
       const found = metadata.topics.find((item) => item.name === topic);
-      if (!found || found.err) throw kafkaError(found?.err ?? 3, topic);
+      if (!found || found.err) {
+        throw kafkaError(found?.err ?? 3, topic);
+      }
       return found.partitions.map((partition) => ({
         topic,
         partition: partition.id,
@@ -621,10 +681,14 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const metadata = await this.#cluster.metadata(null);
     const resolved = new Set<string>();
     for (const entry of metadata.topics) {
-      if (entry.err || !entry.name) continue;
+      if (entry.err || !entry.name) {
+        continue;
+      }
       const matchesPattern = patterns.some((pattern) => pattern.test(entry.name));
       const listedLiteral = topics.some((topic) => isString(topic) && topic === entry.name);
-      if (matchesPattern || listedLiteral) resolved.add(entry.name);
+      if (matchesPattern || listedLiteral) {
+        resolved.add(entry.name);
+      }
     }
     return [...resolved];
   }
@@ -640,10 +704,11 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     for (const assignment of assignments) {
       const metadata = await this.#cluster.topic(assignment.topic);
       const partition = metadata.partitions.find((item) => item.id === assignment.partition);
-      if (!partition)
+      if (!partition) {
         throw new RangeError(
           `Partition ${assignment.partition} does not exist on ${assignment.topic}`,
         );
+      }
       const key = partitionKey(assignment.topic, assignment.partition);
       const assigned = {
         topic: assignment.topic,
@@ -651,12 +716,14 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
         leader: partition.leader,
       };
       this.#assigned.set(key, assigned);
-      if (isBigInt(assignment.offset)) this.#positions.set(key, assignment.offset);
-      else
+      if (isBigInt(assignment.offset)) {
+        this.#positions.set(key, assignment.offset);
+      } else {
         unresolved.push({
           ...assigned,
           which: assignment.offset ?? (this.#options.fromBeginning ? "earliest" : "latest"),
         });
+      }
     }
     await this.#resolveOffsets(unresolved);
   }
@@ -686,7 +753,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
             });
           })
           .flat()) {
-          if (result.error) throw kafkaError(result.error, `${result.topic}[${result.partition}]`);
+          if (result.error) {
+            throw kafkaError(result.error, `${result.topic}[${result.partition}]`);
+          }
           this.#positions.set(partitionKey(result.topic, result.partition), result.offset);
         }
       }),
@@ -703,12 +772,15 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     for (let attempt = 0; attempt <= this.#cluster.retryOptions.maxRetries; attempt++) {
       try {
         const messages = await this.#fetchOnce(options);
-        if (messages.length && this.#groupId && this.#options.autoCommit)
+        if (messages.length && this.#groupId && this.#options.autoCommit) {
           await this.commitOffsets();
+        }
         return messages;
       } catch (error) {
         lastError = error;
-        if (!(error instanceof KafkaError)) throw error;
+        if (!(error instanceof KafkaError)) {
+          throw error;
+        }
         await this.#handleFetchError(error, attempt);
       }
     }
@@ -717,7 +789,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
 
   async #handleFetchError(error: KafkaError, attempt: number): Promise<void> {
     const maxRetries = this.#cluster.retryOptions.maxRetries;
-    if (!error.retriable || attempt === maxRetries) throw error;
+    if (!error.retriable || attempt === maxRetries) {
+      throw error;
+    }
     await this.#retryFetch(attempt, error);
   }
 
@@ -736,23 +810,30 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       delayMs: delay,
       error,
     });
-    if (delay) await Bun.sleep(delay);
+    if (delay) {
+      await Bun.sleep(delay);
+    }
   }
 
   async #refreshFetchLeaders(): Promise<void> {
     for (const assigned of this.#assigned.values()) {
       const metadata = await this.#cluster.topic(assigned.topic, true);
       const partition = metadata.partitions.find((item) => item.id === assigned.partition);
-      if (partition) assigned.leader = partition.leader;
+      if (partition) {
+        assigned.leader = partition.leader;
+      }
     }
   }
 
   async #fetchOnce(options: FetchOptions = {}): Promise<Array<ConsumedMessage<K, V>>> {
     this.#open();
     const maxMessages = options.maxMessages ?? 500;
-    if (!Number.isSafeInteger(maxMessages) || maxMessages < 1)
+    if (!Number.isSafeInteger(maxMessages) || maxMessages < 1) {
       throw new RangeError("maxMessages must be a positive integer");
-    if (this.#decoders.length) return this.#drain(maxMessages);
+    }
+    if (this.#decoders.length) {
+      return this.#drain(maxMessages);
+    }
     const active = [...this.#assigned].filter(([key]) => !this.#paused.has(key));
     if (!active.length) {
       // Bounded idle nap so pause()/resume()/seek() take effect promptly.
@@ -842,9 +923,13 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   #forgottenPartitions(session: FetchSessionState): Map<string, number[]> {
     const forgotten = new Map<string, number[]>();
     for (const key of [...session.sent.keys(), ...session.streaming.keys()]) {
-      if (this.#assigned.has(key) && !this.#paused.has(key)) continue;
+      if (this.#assigned.has(key) && !this.#paused.has(key)) {
+        continue;
+      }
       const [topic, partition] = key.split("\0");
-      if (topic === undefined || partition === undefined) continue;
+      if (topic === undefined || partition === undefined) {
+        continue;
+      }
       forgotten.set(topic, [...(forgotten.get(topic) ?? []), Number(partition)]);
       session.sent.delete(key);
       session.streaming.delete(key);
@@ -860,20 +945,22 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     session: FetchSessionState,
     response: Reader,
   ): Promise<RecordSetDecoder[]> {
-    if (process.env.DEBUG_FETCH)
+    if (process.env.DEBUG_FETCH) {
       console.error(
         "fetch resp:",
         Array.from(response.data.slice(0, 80))
           .map((b) => b.toString(16).padStart(2, "0"))
           .join(" "),
       );
+    }
     this.#cluster.throttle(API_FETCH, response.i32());
     const topError = response.i16();
     const sessionId = response.i32();
     if (topError) {
       this.#fetchSessions.delete(leader);
-      if (topError === 70 || topError === 71)
+      if (topError === 70 || topError === 71) {
         return this.#fetchBatchesFor(leader, entries, options, isolationLevel);
+      }
       throw kafkaError(topError, `Fetch from broker ${leader}`);
     }
     session.id = session.id === 0 ? sessionId : session.id;
@@ -931,7 +1018,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const key = partitionKey(topic, partition);
     session.sent.set(key, this.#positions.get(key) ?? 0n);
     session.streaming.set(key, Boolean(records));
-    if (error) throw kafkaError(error, `${topic}[${partition}]`);
+    if (error) {
+      throw kafkaError(error, `${topic}[${partition}]`);
+    }
     return records
       ? new RecordSetDecoder(records, topic, partition, leader, {
           minOffset: this.#positions.get(key) ?? 0n,
@@ -945,17 +1034,21 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const messages: Array<ConsumedMessage<K, V>> = [];
     while (this.#decoders.length && messages.length < max) {
       const decoder = this.#decoders[0]!;
-      for (const message of decoder.read(max - messages.length))
+      for (const message of decoder.read(max - messages.length)) {
         messages.push(this.#convertMessage(message));
-      if (decoder.done) this.#decoders.shift();
+      }
+      if (decoder.done) {
+        this.#decoders.shift();
+      }
     }
     return messages;
   }
 
   #convertMessage(message: ConsumedMessage): ConsumedMessage<K, V> {
     this.#positions.set(partitionKey(message.topic, message.partition), message.offset + 1n);
-    if (!this.#options.keyDeserializer && !this.#options.valueDeserializer)
+    if (!this.#options.keyDeserializer && !this.#options.valueDeserializer) {
       return message as ConsumedMessage<K, V>;
+    }
     const context = {
       topic: message.topic,
       partition: message.partition,
@@ -974,7 +1067,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   ): AsyncGenerator<ConsumedMessage<K, V>, void, unknown> {
     while (!this.#closed) {
       const messages = await this.fetch(options);
-      for (const message of messages) yield message;
+      for (const message of messages) {
+        yield message;
+      }
     }
   }
 
@@ -984,10 +1079,13 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
 
   seek(assignment: TopicPartition): void {
     this.#open();
-    if (assignment.offset === undefined) throw new TypeError("seek requires an offset");
+    if (assignment.offset === undefined) {
+      throw new TypeError("seek requires an offset");
+    }
     const key = partitionKey(assignment.topic, assignment.partition);
-    if (!this.#assigned.has(key))
+    if (!this.#assigned.has(key)) {
       throw new Error(`${assignment.topic}[${assignment.partition}] is not assigned`);
+    }
     this.#positions.set(key, BigInt(assignment.offset));
     this.#decoders = this.#decoders.filter(
       (decoder) => partitionKey(decoder.topic, decoder.partition) !== key,
@@ -1005,8 +1103,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
    */
   pause(partitions: TopicPartition[]): void {
     this.#open();
-    for (const target of this.#expandPartitions(partitions))
+    for (const target of this.#expandPartitions(partitions)) {
       this.#paused.add(partitionKey(target.topic, target.partition));
+    }
   }
 
   resume(partitions: TopicPartition[]): void {
@@ -1024,7 +1123,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
 
   #expandPartitions(partitions: TopicPartition[]): Array<{ topic: string; partition: number }> {
     return partitions.flatMap(({ topic, partition }) => {
-      if (partition !== undefined) return [{ topic, partition }];
+      if (partition !== undefined) {
+        return [{ topic, partition }];
+      }
       return [...this.#assigned.values()]
         .filter((assigned) => assigned.topic === topic)
         .map(({ partition }) => ({ topic, partition }));
@@ -1048,8 +1149,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   async watermarks(topic: string, partition: number): Promise<Watermarks> {
     const metadata = await this.#cluster.topic(topic);
     const leader = metadata.partitions.find((item) => item.id === partition)?.leader;
-    if (leader === undefined)
+    if (leader === undefined) {
       throw new RangeError(`Partition ${partition} does not exist on ${topic}`);
+    }
     const query = async (timestamp: number) => {
       const body = new Writer().i32(-1).array([topic], (writer) =>
         writer.string(topic).array([partition], (partitionWriter) => {
@@ -1064,7 +1166,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
           const error = partitionReader.i16();
           partitionReader.i64();
           const offset = partitionReader.i64();
-          if (error) throw kafkaError(error, `${topic}[${partition}]`);
+          if (error) {
+            throw kafkaError(error, `${topic}[${partition}]`);
+          }
           return offset;
         });
       });
@@ -1075,8 +1179,12 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
   }
 
   async close(): Promise<void> {
-    if (this.#closed) return;
-    if (this.#heartbeat) clearInterval(this.#heartbeat);
+    if (this.#closed) {
+      return;
+    }
+    if (this.#heartbeat) {
+      clearInterval(this.#heartbeat);
+    }
     if (this.#groupId && this.#coordinator !== undefined && this.#generationId >= 0) {
       try {
         const instanceId = this.#options.groupInstanceId;
@@ -1105,7 +1213,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       }
     }
     this.#closed = true;
-    if (this.#ownsCluster) this.#cluster.close();
+    if (this.#ownsCluster) {
+      this.#cluster.close();
+    }
     this.#onClose();
   }
 
@@ -1113,6 +1223,8 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     return this.close();
   }
   #open(): void {
-    if (this.#closed) throw new Error("Consumer is closed");
+    if (this.#closed) {
+      throw new Error("Consumer is closed");
+    }
   }
 }

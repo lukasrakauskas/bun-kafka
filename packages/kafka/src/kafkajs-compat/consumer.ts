@@ -160,8 +160,9 @@ export class CompatConsumer {
       // kafkajs accumulates subscriptions across calls into one group subscription.
       const merged = [...this.#subscribedTopics];
       for (const entry of incoming) {
-        if (!merged.some((existing) => existing.toString() === entry.toString()))
+        if (!merged.some((existing) => existing.toString() === entry.toString())) {
           merged.push(entry);
+        }
       }
       this.#subscribedTopics = new Set(merged);
       await this.#underlying().subscribe({ topics: merged, fromBeginning });
@@ -172,7 +173,9 @@ export class CompatConsumer {
   }
 
   async run(options: RunOptions): Promise<void> {
-    if (this.#running) throw new KafkaJSNonRetriableError("Consumer run() was already called");
+    if (this.#running) {
+      throw new KafkaJSNonRetriableError("Consumer run() was already called");
+    }
     if (options.eachMessage && options.eachBatch) {
       throw new KafkaJSNonRetriableError("Not allowed to configure both eachMessage and eachBatch");
     }
@@ -203,10 +206,13 @@ export class CompatConsumer {
       : undefined;
     commitTimer?.unref?.();
     try {
-      while (this.#running)
+      while (this.#running) {
         await this.#loopIteration(consumer, options, autoCommitEnabled, concurrent);
+      }
     } finally {
-      if (commitTimer) clearInterval(commitTimer);
+      if (commitTimer) {
+        clearInterval(commitTimer);
+      }
     }
   }
 
@@ -224,12 +230,16 @@ export class CompatConsumer {
       maxBytes: numberOption(this.#options.maxBytes),
       maxPartitionBytes: numberOption(this.#options.maxBytesPerPartition),
     });
-    if (!this.#running) return;
+    if (!this.#running) {
+      return;
+    }
     this.#emitter.emit(CONSUMER_EVENTS.FETCH, { numberOfMessages: messages.length });
-    if (messages.length)
+    if (messages.length) {
       await this.#processGroups(messages, consumer, options, autoCommitEnabled, concurrent);
-    if (autoCommitEnabled && !options.autoCommitInterval && !options.autoCommitThreshold)
+    }
+    if (autoCommitEnabled && !options.autoCommitInterval && !options.autoCommitThreshold) {
       await this.#flushCommits(consumer, options);
+    }
   }
 
   async #processGroups(
@@ -248,7 +258,9 @@ export class CompatConsumer {
             this.#processGroup(key, items, consumer, options, autoCommitEnabled),
           ),
       );
-      if (!this.#running) break;
+      if (!this.#running) {
+        break;
+      }
     }
   }
 
@@ -258,8 +270,9 @@ export class CompatConsumer {
     for (const message of messages) {
       const key = `${message.topic}\u0000${message.partition}`;
       const bucket = index.get(key);
-      if (bucket) bucket.push(message);
-      else {
+      if (bucket) {
+        bucket.push(message);
+      } else {
         const fresh = [message];
         index.set(key, fresh);
         ordered.push([key, fresh]);
@@ -286,9 +299,9 @@ export class CompatConsumer {
     const heartbeat = async () => this.#emitter.emit(CONSUMER_EVENTS.HEARTBEAT);
     const pause = () => this.pause([{ topic, partitions: [partition] }]);
     try {
-      if (options.eachMessage)
+      if (options.eachMessage) {
         await this.#processMessages(topic, partition, items, consumer, options, heartbeat, pause);
-      else if (options.eachBatch)
+      } else if (options.eachBatch) {
         await this.#runBatch(
           topic,
           partition,
@@ -299,6 +312,7 @@ export class CompatConsumer {
           heartbeat,
           pause,
         );
+      }
     } finally {
       this.#emitter.emit(CONSUMER_EVENTS.END_BATCH_PROCESS, { topic, partition });
     }
@@ -314,7 +328,9 @@ export class CompatConsumer {
     pause: () => void,
   ): Promise<void> {
     for (const raw of items) {
-      if (!this.#running) return;
+      if (!this.#running) {
+        return;
+      }
       this.#track(topic, partition, raw.offset + 1n);
       await options.eachMessage!({
         topic,
@@ -324,8 +340,9 @@ export class CompatConsumer {
         pause,
       });
       this.#uncommittedCount++;
-      if (options.autoCommitThreshold && this.#uncommittedCount >= options.autoCommitThreshold)
+      if (options.autoCommitThreshold && this.#uncommittedCount >= options.autoCommitThreshold) {
         await this.#flushCommits(consumer, options);
+      }
     }
   }
 
@@ -408,7 +425,9 @@ export class CompatConsumer {
       isStale: () => !this.#running,
       resolveOffset: (offset) => resolved.add(BigInt(offset).toString()),
       commitOffsetsIfNecessary: async () => {
-        if (autoCommitEnabled) await this.#flushCommits(consumer, options);
+        if (autoCommitEnabled) {
+          await this.#flushCommits(consumer, options);
+        }
       },
       heartbeat,
     };
@@ -423,8 +442,11 @@ export class CompatConsumer {
     options: RunOptions,
     autoCommitEnabled: boolean,
   ): Promise<void> {
-    if (options.eachBatchAutoResolve !== false)
-      for (const raw of items) resolved.add(raw.offset.toString());
+    if (options.eachBatchAutoResolve !== false) {
+      for (const raw of items) {
+        resolved.add(raw.offset.toString());
+      }
+    }
     const first = items[0]!;
     const last = items[items.length - 1]!;
     const nextOffset = resolved.size ? highestOffset(resolved) + 1n : first.offset;
@@ -438,8 +460,9 @@ export class CompatConsumer {
       autoCommitEnabled &&
       options.autoCommitThreshold &&
       this.#uncommittedCount >= options.autoCommitThreshold
-    )
+    ) {
       await this.#flushCommits(consumer, options);
+    }
   }
 
   #track(topic: string, partition: number, offset: bigint): void {
@@ -447,7 +470,9 @@ export class CompatConsumer {
   }
 
   async #flushCommits(consumer: BunConsumer, options: RunOptions): Promise<void> {
-    if (!this.#pendingOffsets.size) return;
+    if (!this.#pendingOffsets.size) {
+      return;
+    }
     const entries = [...this.#pendingOffsets.values()];
     const serializable = entries.map((entry) => ({
       topic: entry.topic,
@@ -469,7 +494,9 @@ export class CompatConsumer {
   }
 
   async stop(): Promise<void> {
-    if (!this.#running) return;
+    if (!this.#running) {
+      return;
+    }
     this.#running = false;
     this.#emitter.emit(CONSUMER_EVENTS.STOP);
     await this.#stopping;
@@ -493,9 +520,13 @@ export class CompatConsumer {
             ? BigInt(offset)
             : (this.#pendingOffsets.get(key)?.offset ?? consumer.position(topic, partition) ?? -1n);
         this.#pendingOffsets.delete(key);
-        if (resolved >= 0n) entries.push({ topic, partition, offset: resolved });
+        if (resolved >= 0n) {
+          entries.push({ topic, partition, offset: resolved });
+        }
       }
-      if (!entries.length) return;
+      if (!entries.length) {
+        return;
+      }
       await consumer.commitOffsets(entries);
       this.#emitter.emit(CONSUMER_EVENTS.COMMIT_OFFSETS, {
         groupId: this.#options.groupId,
@@ -522,8 +553,9 @@ export class CompatConsumer {
   pause(
     topicPartitions: Array<{ topic: string; partitions?: number[] }>,
   ): Array<{ topic: string; partitions: number[] }> {
-    for (const target of this.#resolvePartitions(topicPartitions))
+    for (const target of this.#resolvePartitions(topicPartitions)) {
       this.#paused.add(`${target.topic}\u0000${target.partition}`);
+    }
     this.#underlying().pause(topicPartitions);
     return this.paused();
   }
@@ -531,8 +563,9 @@ export class CompatConsumer {
   resume(
     topicPartitions: Array<{ topic: string; partitions?: number[] }>,
   ): Array<{ topic: string; partitions: number[] }> {
-    for (const target of this.#resolvePartitions(topicPartitions))
+    for (const target of this.#resolvePartitions(topicPartitions)) {
       this.#paused.delete(`${target.topic}\u0000${target.partition}`);
+    }
     this.#underlying().resume(topicPartitions);
     return this.paused();
   }

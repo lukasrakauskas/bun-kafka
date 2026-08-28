@@ -80,7 +80,11 @@ export function wrapError(error: ErrorCause): Error {
     wrapped.retriable = error.retriable;
     return wrapped;
   }
-  if (error instanceof Error && error.name.startsWith("KafkaJS")) return error;
-  if (error instanceof Error) return new KafkaJSError(error);
+  if (error instanceof Error && error.name.startsWith("KafkaJS")) {
+    return error;
+  }
+  if (error instanceof Error) {
+    return new KafkaJSError(error);
+  }
   return new KafkaJSError(String(error));
 }

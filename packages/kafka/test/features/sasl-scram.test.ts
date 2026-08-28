@@ -53,7 +53,9 @@ async function sha256(value: Uint8Array): Promise<Uint8Array> {
 
 function xor(left: Uint8Array, right: Uint8Array): Uint8Array {
   const result = new Uint8Array(left.length);
-  for (let i = 0; i < left.length; i++) result[i] = left[i]! ^ right[i]!;
+  for (let i = 0; i < left.length; i++) {
+    result[i] = left[i]! ^ right[i]!;
+  }
   return result;
 }
 
@@ -93,18 +95,23 @@ async function createScramResponse(
   options: ScramListenerOptions,
   salt: Uint8Array,
 ): Promise<Writer> {
-  if (frame.key === 18) return apiVersions();
-  if (frame.key === 17)
+  if (frame.key === 18) {
+    return apiVersions();
+  }
+  if (frame.key === 17) {
     return new Writer()
       .i16(0)
       .array(["SCRAM-SHA-256"], (writer, mechanism) => writer.string(mechanism));
+  }
   if (frame.key === 36 && state.round++ === 0) {
     state.clientFirstBare = frame.auth.replace(/^n,,/, "");
     const clientNonce = /r=([^,\s]+)/.exec(state.clientFirstBare)?.[1] ?? "";
     state.serverFirst = `r=${clientNonce}serverpart,s=${b64(salt)},i=4096`;
     return new Writer().i16(0).string(null).bytes(encoder.encode(state.serverFirst)).i64(0);
   }
-  if (frame.key === 36) return createFinalScramResponse(frame.auth, state, options, salt);
+  if (frame.key === 36) {
+    return createFinalScramResponse(frame.auth, state, options, salt);
+  }
   return metadataBody(options.port());
 }
 
@@ -135,8 +142,9 @@ async function createFinalScramResponse(
     proof !== null &&
     (await sha256(xor(proof, clientSignature))).every((byte, index) => byte === storedKey[index]);
   options.onProofVerified?.(verified);
-  if (!verified)
+  if (!verified) {
     return new Writer().i16(49).string("SCRAM proof mismatch").bytes(new Uint8Array()).i64(0);
+  }
   const serverKey = await hmac(saltedPassword, "Server Key");
   const verifier = b64(await hmac(serverKey, authMessage));
   return new Writer()

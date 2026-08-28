@@ -24,7 +24,9 @@ async function closeClient(
   onError?: (error: Error) => void,
 ): Promise<void> {
   try {
-    if (client.flush) await client.flush(timeoutMs);
+    if (client.flush) {
+      await client.flush(timeoutMs);
+    }
   } catch (error) {
     onError?.(error instanceof Error ? error : new Error(String(error)));
   }
@@ -45,20 +47,30 @@ export function installShutdown(
   let ran = false;
 
   const run = async () => {
-    if (ran) return;
+    if (ran) {
+      return;
+    }
     ran = true;
-    for (const client of list) await closeClient(client, timeoutMs, opts.onError);
-    if (exit) process.exit(0);
+    for (const client of list) {
+      await closeClient(client, timeoutMs, opts.onError);
+    }
+    if (exit) {
+      process.exit(0);
+    }
   };
 
   const handler = () => {
     void run();
   };
   process.on("SIGTERM", handler);
-  if (opts.sigint !== false) process.on("SIGINT", handler);
+  if (opts.sigint !== false) {
+    process.on("SIGINT", handler);
+  }
 
   return () => {
     process.off("SIGTERM", handler);
-    if (opts.sigint !== false) process.off("SIGINT", handler);
+    if (opts.sigint !== false) {
+      process.off("SIGINT", handler);
+    }
   };
 }

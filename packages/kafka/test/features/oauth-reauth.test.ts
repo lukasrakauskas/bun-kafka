@@ -19,14 +19,20 @@ describe("SASL OAUTHBEARER reauthentication", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          if (key === 36) authEvents.push(Date.now());
+          if (key === 36) {
+            authEvents.push(Date.now());
+          }
           let body: Writer;
-          if (key === 18) body = apiVersions();
-          else if (key === 17)
+          if (key === 18) {
+            body = apiVersions();
+          } else if (key === 17) {
             body = new Writer().i16(0).array(["OAUTHBEARER"], (writer, m) => writer.string(m));
-          else if (key === 36)
-            body = new Writer().i16(0).string(null).bytes(new Uint8Array()).i64(500); // lifetime 500ms
-          else body = metadataBody(listener.port);
+          } else if (key === 36) {
+            body = new Writer().i16(0).string(null).bytes(new Uint8Array()).i64(500);
+          } // lifetime 500ms
+          else {
+            body = metadataBody(listener.port);
+          }
           const response = new Writer().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());

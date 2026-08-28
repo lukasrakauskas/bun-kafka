@@ -43,9 +43,13 @@ function consumerFeatureBody(key: number, port: number, version: number): Writer
     )
     .bytes(null)
     .result();
-  if (key === 18) return apiVersions();
-  if (key === 10) return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
-  if (key === 3)
+  if (key === 18) {
+    return apiVersions();
+  }
+  if (key === 10) {
+    return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
+  }
+  if (key === 3) {
     return new Writer()
       .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
         writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
@@ -66,7 +70,8 @@ function consumerFeatureBody(key: number, port: number, version: number): Writer
               .array([1], (w) => w.i32(1)),
           ),
       );
-  if (key === 11)
+  }
+  if (key === 11) {
     return new Writer()
       .i32(0)
       .i16(0)
@@ -75,11 +80,13 @@ function consumerFeatureBody(key: number, port: number, version: number): Writer
       .string("member-1")
       .string("member-1")
       .array(["member-1"], (writer, member) => writer.string(member).bytes(memberMetadata));
-  if (key === 14)
+  }
+  if (key === 14) {
     return version === 3
       ? new Writer().i32(0).i16(0).bytes(assignment)
       : new Writer().i16(0).bytes(assignment);
-  if (key === 9)
+  }
+  if (key === 9) {
     return new Writer()
       .array(["events"], (writer, topic) =>
         writer
@@ -87,10 +94,12 @@ function consumerFeatureBody(key: number, port: number, version: number): Writer
           .array([0], (item, partition) => item.i32(partition).i64(7).string(null).i16(0)),
       )
       .i16(0);
-  if (key === 8)
+  }
+  if (key === 8) {
     return new Writer().array(["events"], (writer, topic) =>
       writer.string(topic).array([0], (item, partition) => item.i32(partition).i16(0)),
     );
+  }
   return new Writer().i16(0);
 }
 
@@ -101,9 +110,15 @@ const apiVersions = () =>
   );
 
 function decode(value: Uint8Array | null | unknown): string | null {
-  if (value == null) return null;
-  if (isString(value)) return value;
-  if (!isUint8Array(value)) throw new TypeError("Expected bytes");
+  if (value == null) {
+    return null;
+  }
+  if (isString(value)) {
+    return value;
+  }
+  if (!isUint8Array(value)) {
+    throw new TypeError("Expected bytes");
+  }
   return new TextDecoder().decode(value);
 }
 
@@ -122,8 +137,12 @@ describe("Static group membership", () => {
             listener.port,
             consumerFeatureBody,
             (key, version) => {
-              if (key !== 18) versions.set(key, [version]);
-              if (key === 12) heartbeats++;
+              if (key !== 18) {
+                versions.set(key, [version]);
+              }
+              if (key === 12) {
+                heartbeats++;
+              }
             },
           );
         },
@@ -168,7 +187,9 @@ describe("Static group membership", () => {
             listener.port,
             consumerFeatureBody,
             (key, version) => {
-              if (key !== 18 && key !== 3) versions.set(key, [version]);
+              if (key !== 18 && key !== 3) {
+                versions.set(key, [version]);
+              }
             },
           );
         },

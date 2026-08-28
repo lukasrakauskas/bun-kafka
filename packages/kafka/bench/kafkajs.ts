@@ -24,7 +24,9 @@ for (let i = 0; i < count; i++) {
     await producer.send({ topic, messages: batch.splice(0) });
   }
 }
-if (batch.length) await producer.send({ topic, messages: batch });
+if (batch.length) {
+  await producer.send({ topic, messages: batch });
+}
 const produceMs = performance.now() - t0;
 await producer.disconnect();
 

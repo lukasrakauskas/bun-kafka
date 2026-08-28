@@ -5,10 +5,15 @@ import { Writer } from "../../src/bun/protocol.ts";
 const UNREACHABLE_BROKER = "127.0.0.1:1";
 
 function plainAuthBody(key: number, port: number): Writer {
-  if (key === 18) return apiVersions();
-  if (key === 17)
+  if (key === 18) {
+    return apiVersions();
+  }
+  if (key === 17) {
     return new Writer().i16(0).array(["PLAIN"], (writer, mechanism) => writer.string(mechanism));
-  if (key === 36) return new Writer().i16(0).string(null).bytes(new Uint8Array()).i64(0);
+  }
+  if (key === 36) {
+    return new Writer().i16(0).string(null).bytes(new Uint8Array()).i64(0);
+  }
   return new Writer()
     .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
       writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
@@ -51,9 +56,13 @@ function clientGroupBody(key: number, port: number): Writer {
     )
     .bytes(null)
     .result();
-  if (key === 18) return apiVersions();
-  if (key === 10) return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
-  if (key === 3)
+  if (key === 18) {
+    return apiVersions();
+  }
+  if (key === 10) {
+    return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
+  }
+  if (key === 3) {
     return new Writer()
       .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
         writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
@@ -74,7 +83,8 @@ function clientGroupBody(key: number, port: number): Writer {
               .array([1], (item) => item.i32(1)),
           ),
       );
-  if (key === 11)
+  }
+  if (key === 11) {
     return new Writer()
       .i32(0)
       .i16(0)
@@ -83,8 +93,11 @@ function clientGroupBody(key: number, port: number): Writer {
       .string("member-1")
       .string("member-1")
       .array(["member-1"], (writer, member) => writer.string(member).bytes(memberMetadata));
-  if (key === 14) return new Writer().i16(0).bytes(assignment);
-  if (key === 9)
+  }
+  if (key === 14) {
+    return new Writer().i16(0).bytes(assignment);
+  }
+  if (key === 9) {
     return new Writer()
       .array(["events"], (writer, topic) =>
         writer
@@ -92,16 +105,20 @@ function clientGroupBody(key: number, port: number): Writer {
           .array([0], (item, partition) => item.i32(partition).i64(12).string(null).i16(0)),
       )
       .i16(0);
-  if (key === 8)
+  }
+  if (key === 8) {
     return new Writer().array(["events"], (writer, topic) =>
       writer.string(topic).array([0], (item, partition) => item.i32(partition).i16(0)),
     );
+  }
   return new Writer().i16(0);
 }
 
 function clientAdminBody(key: number, port: number): Writer {
-  if (key === 18) return apiVersions();
-  if (key === 3)
+  if (key === 18) {
+    return apiVersions();
+  }
+  if (key === 3) {
     return new Writer()
       .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
         writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
@@ -109,7 +126,8 @@ function clientAdminBody(key: number, port: number): Writer {
       .string(null)
       .i32(1)
       .array([], () => {});
-  if (key === 32)
+  }
+  if (key === 32) {
     return new Writer().i32(0).array([{ resourceType: 2, name: "events" }], (writer, resource) =>
       writer
         .i16(0)
@@ -120,15 +138,19 @@ function clientAdminBody(key: number, port: number): Writer {
           configWriter.string(config.name).string(config.value).bool(false).bool(false).bool(false),
         ),
     );
-  if (key === 33)
+  }
+  if (key === 33) {
     return new Writer()
       .i32(0)
       .array(["events"], (writer, name) => writer.i16(0).string(null).i8(2).string(name));
+  }
   return new Writer()
     .i32(key === 19 ? 7 : 0)
     .array([{ name: "events", error: 0, message: null }], (writer, result) => {
       writer.string(result.name).i16(result.error);
-      if (key !== 20) writer.string(result.message);
+      if (key !== 20) {
+        writer.string(result.message);
+      }
     });
 }
 
@@ -201,8 +223,9 @@ describe("Bun native Kafka client (mock brokers)", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           requestKeys.push(key);
-          if (key === 36)
+          if (key === 36) {
             authPayload = new TextDecoder().decode(request.subarray(request.length - 10));
+          }
           writeClientResponse(socket, request, plainAuthBody(key, listener.port));
         },
       },

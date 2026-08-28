@@ -31,8 +31,12 @@ describe("IncrementalAlterConfigs (mock broker)", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          if (key === 18) return reply(socket, correlation, apiVersionsBody);
-          if (key !== 44) return;
+          if (key === 18) {
+            return reply(socket, correlation, apiVersionsBody);
+          }
+          if (key !== 44) {
+            return;
+          }
           sawKey = true;
           const req = new Reader(
             requestBodyBytes(request.buffer, request.byteOffset, request.byteLength),

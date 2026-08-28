@@ -64,12 +64,15 @@ function saslListener(port: () => number, tokens: string[]) {
             );
           }
           let body: Writer;
-          if (key === 18) body = apiVersions();
-          else if (key === 17)
+          if (key === 18) {
+            body = apiVersions();
+          } else if (key === 17) {
             body = new Writer().i16(0).array(["OAUTHBEARER"], (writer, m) => writer.string(m));
-          else if (key === 36)
+          } else if (key === 36) {
             body = new Writer().i16(0).string(null).bytes(new Uint8Array()).i64(0);
-          else body = metadataBody(port());
+          } else {
+            body = metadataBody(port());
+          }
           const response = new Writer().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());

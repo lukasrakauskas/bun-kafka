@@ -27,8 +27,12 @@ function producerOptions(options: CompatOptions) {
 }
 
 function acksToWire(acks: number | undefined): 0 | 1 | "all" {
-  if (acks === 0) return 0;
-  if (acks === 1) return 1;
+  if (acks === 0) {
+    return 0;
+  }
+  if (acks === 1) {
+    return 1;
+  }
   return "all";
 }
 
@@ -96,7 +100,9 @@ export class CompatProducer {
     }>
   > {
     try {
-      if (!messages.length) return [];
+      if (!messages.length) {
+        return [];
+      }
       const results = await this.#underlying().send({
         topic,
         messages: messages.map(toWireMessage),

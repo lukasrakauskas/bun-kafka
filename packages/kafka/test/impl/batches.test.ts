@@ -33,10 +33,14 @@ describe("Bun consumer batches", () => {
     let batches = 0;
     while (got.length < 50) {
       const batch = await c.fetch({ maxWaitMs: 200, maxMessages: 16 });
-      if (!batch.length) continue;
+      if (!batch.length) {
+        continue;
+      }
       batches++;
       expect(batch.length).toBeLessThanOrEqual(16);
-      for (const message of batch) got.push(dec(message.value)!);
+      for (const message of batch) {
+        got.push(dec(message.value)!);
+      }
     }
     expect(got).toHaveLength(50);
     expect(got[0]).toBe("b-0");

@@ -253,7 +253,9 @@ describe("Delegation tokens (mock broker)", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          if (key !== 18) seenKeys.push(key);
+          if (key !== 18) {
+            seenKeys.push(key);
+          }
           const response = new Writer()
             .i32(correlation)
             .uvarint(0)

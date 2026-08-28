@@ -37,18 +37,23 @@ function validateSaslMechanism(mechanism: CompatOptions["mechanism"]): void {
     mechanism !== undefined &&
     (!isString(mechanism) ||
       !["plain", "scram-sha-256", "scram-sha-512", "oauthbearer"].includes(mechanism))
-  )
+  ) {
     throw new KafkaJSNonRetriableError(
       `SASL mechanism ${String(mechanism)} is not supported by bun-kafka`,
     );
+  }
 }
 
 function resolveSaslToken(
   saslConfig: CompatOptions | undefined,
 ): string | (() => Promise<string>) | undefined {
   const configured = saslConfig?.oauthBearerToken ?? saslConfig?.token;
-  if (isString(configured)) return configured;
-  if (!isFunction(saslConfig?.oauthBearerProvider)) return undefined;
+  if (isString(configured)) {
+    return configured;
+  }
+  if (!isFunction(saslConfig?.oauthBearerProvider)) {
+    return undefined;
+  }
   const provider = saslConfig.oauthBearerProvider;
   return async () => {
     const resolved = await provider();
@@ -62,8 +67,9 @@ function createBasicSasl(
 ): BunKafkaSasl {
   const username = isString(config.username) ? config.username : undefined;
   const password = isString(config.password) ? config.password : undefined;
-  if (username === undefined || password === undefined)
+  if (username === undefined || password === undefined) {
     throw new KafkaJSNonRetriableError(`${mechanism} SASL requires username and password`);
+  }
   return { mechanism, username, password };
 }
 
@@ -72,8 +78,9 @@ function createSaslCredentials(
   config: CompatOptions | undefined,
   token: string | (() => Promise<string>) | undefined,
 ): BunKafkaSasl | undefined {
-  if (mechanism === "plain" || mechanism === "scram-sha-256" || mechanism === "scram-sha-512")
+  if (mechanism === "plain" || mechanism === "scram-sha-256" || mechanism === "scram-sha-512") {
     return createBasicSasl(mechanism, config!);
+  }
   return mechanism === "oauthbearer" && token ? { mechanism, token } : undefined;
 }
 
@@ -104,7 +111,9 @@ export function mapConfig(
 
 /** @confluentinc/kafka-javascript nests real options under `kafkaJS`; accept both shapes. */
 export function unwrapKafkaJs<T>(options: (T & { kafkaJS?: T }) | undefined): T {
-  if (options === undefined) throw new TypeError("KafkaJS options are required");
+  if (options === undefined) {
+    throw new TypeError("KafkaJS options are required");
+  }
   return options.kafkaJS ?? options;
 }
 
@@ -147,10 +156,11 @@ export class ClusterHub {
       const mapped = isFunction(this.config.brokers)
         ? undefined
         : mapConfig(this.config, this.config.brokers);
-      if (!mapped)
+      if (!mapped) {
         throw new KafkaJSNonRetriableError(
           "Broker list is resolving asynchronously; await an async method first",
         );
+      }
       this.#cluster = new Cluster(mapped);
     }
     return this.#cluster;

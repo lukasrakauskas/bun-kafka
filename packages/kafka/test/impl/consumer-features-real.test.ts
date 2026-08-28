@@ -5,9 +5,15 @@ import { admin, topic } from "../helpers.ts";
 const BROKER = "127.0.0.1:9092";
 import { isString, isUint8Array } from "../../src/type-guards.ts";
 function decode(value: Uint8Array | null | unknown): string | null {
-  if (value == null) return null;
-  if (isString(value)) return value;
-  if (!isUint8Array(value)) throw new TypeError("Expected bytes");
+  if (value == null) {
+    return null;
+  }
+  if (isString(value)) {
+    return value;
+  }
+  if (!isUint8Array(value)) {
+    throw new TypeError("Expected bytes");
+  }
   return new TextDecoder().decode(value);
 }
 

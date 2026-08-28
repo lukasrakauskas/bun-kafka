@@ -54,14 +54,19 @@ function handleFrames(
 }
 
 function adminGroupBody(key: number, port: number): Writer {
-  if (key === 18) return apiVersions();
-  if (key === 3) return metadataBody(port);
-  if (key === 16)
+  if (key === 18) {
+    return apiVersions();
+  }
+  if (key === 3) {
+    return metadataBody(port);
+  }
+  if (key === 16) {
     return new Writer()
       .i32(0)
       .i16(0)
       .array(["workers"], (writer, group) => writer.string(group).string("consumer"));
-  if (key === 15)
+  }
+  if (key === 15) {
     return new Writer().i32(0).array(["workers"], (writer, group) =>
       writer
         .i16(0)
@@ -79,9 +84,11 @@ function adminGroupBody(key: number, port: number): Writer {
             .bytes(new Uint8Array([0, 1, 2])),
         ),
     );
-  if (key === 42)
+  }
+  if (key === 42) {
     return new Writer().i32(0).array(["workers"], (writer, group) => writer.string(group).i16(0));
-  if (key === 21)
+  }
+  if (key === 21) {
     return new Writer()
       .i32(0)
       .array(["events"], (writer, name) =>
@@ -91,14 +98,21 @@ function adminGroupBody(key: number, port: number): Writer {
             partitionWriter.i32(partition.index).i64(partition.low).i16(0),
           ),
       );
+  }
   return new Writer().i16(0);
 }
 
 function aclBody(key: number, port: number): Writer {
-  if (key === 18) return apiVersions();
-  if (key === 3) return metadataBody(port);
-  if (key === 30) return new Writer().i32(0).array(["acl"], (writer) => writer.i16(0).string(null));
-  if (key === 29)
+  if (key === 18) {
+    return apiVersions();
+  }
+  if (key === 3) {
+    return metadataBody(port);
+  }
+  if (key === 30) {
+    return new Writer().i32(0).array(["acl"], (writer) => writer.i16(0).string(null));
+  }
+  if (key === 29) {
     return new Writer()
       .i32(0)
       .i16(0)
@@ -111,7 +125,8 @@ function aclBody(key: number, port: number): Writer {
             aclWriter.string(acl.principal).string(acl.host).i8(3).i8(3),
           ),
       );
-  if (key === 31)
+  }
+  if (key === 31) {
     return new Writer().i32(0).array([true], (writer) =>
       writer
         .i16(0)
@@ -128,6 +143,7 @@ function aclBody(key: number, port: number): Writer {
             .i8(3),
         ),
     );
+  }
   return new Writer().i16(0);
 }
 
@@ -145,11 +161,19 @@ function listOffsetBody(state: OffsetState): Writer {
 }
 
 function offsetBody(key: number, port: number, state: OffsetState): Writer {
-  if (key === 18) return apiVersions();
-  if (key === 3) return metadataBody(port);
-  if (key === 10) return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
-  if (key === 2) return listOffsetBody(state);
-  if (key === 9)
+  if (key === 18) {
+    return apiVersions();
+  }
+  if (key === 3) {
+    return metadataBody(port);
+  }
+  if (key === 10) {
+    return new Writer().i16(0).i32(1).string("127.0.0.1").i32(port);
+  }
+  if (key === 2) {
+    return listOffsetBody(state);
+  }
+  if (key === 9) {
     return new Writer()
       .array(["events"], (writer, name) =>
         writer
@@ -159,13 +183,15 @@ function offsetBody(key: number, port: number, state: OffsetState): Writer {
           ),
       )
       .i16(0);
-  if (key === 8)
+  }
+  if (key === 8) {
     return new Writer().array(["events"], (writer, name) =>
       writer
         .string(name)
         .array([0], (partitionWriter, partition) => partitionWriter.i32(partition).i16(0)),
     );
-  if (key === 15)
+  }
+  if (key === 15) {
     return new Writer().i32(0).array(["g"], (writer, group) =>
       writer
         .i16(0)
@@ -175,6 +201,7 @@ function offsetBody(key: number, port: number, state: OffsetState): Writer {
         .string(null)
         .array([], (memberWriter) => memberWriter),
     );
+  }
   return new Writer().i16(0);
 }
 
@@ -221,10 +248,18 @@ describe("Admin: group and record management", () => {
             request,
             (key) => adminGroupBody(key, listener.port),
             (key) => {
-              if (key === 16) sawListGroups = true;
-              if (key === 15) sawDescribeGroups = true;
-              if (key === 42) sawDeleteGroups = true;
-              if (key === 21) sawDeleteRecords = true;
+              if (key === 16) {
+                sawListGroups = true;
+              }
+              if (key === 15) {
+                sawDescribeGroups = true;
+              }
+              if (key === 42) {
+                sawDeleteGroups = true;
+              }
+              if (key === 21) {
+                sawDeleteRecords = true;
+              }
             },
           );
         },
@@ -270,9 +305,15 @@ describe("Admin: group and record management", () => {
             request,
             (key) => aclBody(key, listener.port),
             (key) => {
-              if (key === 30) sawCreate = true;
-              if (key === 29) sawDescribe = true;
-              if (key === 31) sawDelete = true;
+              if (key === 30) {
+                sawCreate = true;
+              }
+              if (key === 29) {
+                sawDescribe = true;
+              }
+              if (key === 31) {
+                sawDelete = true;
+              }
             },
           );
         },
@@ -345,9 +386,15 @@ describe("Admin: group and record management", () => {
             request,
             (key) => offsetBody(key, listener.port, state),
             (key) => {
-              if (key === 10) sawFindCoordinator = true;
-              if (key === 8) sawOffsetCommit++;
-              if (key === 15) describedWithoutMessage = true;
+              if (key === 10) {
+                sawFindCoordinator = true;
+              }
+              if (key === 8) {
+                sawOffsetCommit++;
+              }
+              if (key === 15) {
+                describedWithoutMessage = true;
+              }
             },
           );
           listOffsets = state.listOffsets;
