@@ -1,4 +1,4 @@
-import { KafkaError } from "../errors.ts";
+import { KafkaError, KafkaErrorCode } from "../errors.ts";
 import { isBigInt, isString, requiredValue } from "../type-guards.ts";
 import type { ConsumedMessage, TopicPartition, Watermarks } from "../types.ts";
 import { Cluster } from "./cluster.ts";
@@ -13,6 +13,20 @@ import {
   API_OFFSET_COMMIT,
   API_OFFSET_FETCH,
   API_SYNC_GROUP,
+  DEFAULT_FETCH_IDLE_SLEEP_MS,
+  DEFAULT_FETCH_MAX_BYTES,
+  DEFAULT_FETCH_MAX_MESSAGES,
+  DEFAULT_FETCH_MAX_PARTITION_BYTES,
+  DEFAULT_FETCH_MAX_WAIT_MS,
+  DEFAULT_HEARTBEAT_INTERVAL_MS,
+  DEFAULT_REBALANCE_TIMEOUT_MS,
+  DEFAULT_SESSION_TIMEOUT_MS,
+  EARLIEST_OFFSET,
+  FETCH_API_VERSION,
+  GROUP_INSTANCE_API_VERSION,
+  HEX_DUMP_BYTES,
+  JOIN_GROUP_BASE_VERSION,
+  RADIX_HEX,
   kafkaError,
   partitionKey,
   retryDelay,
@@ -313,9 +327,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     this.#ownsCluster = !(options instanceof Cluster);
     this.#cluster = options instanceof Cluster ? options : new Cluster(options);
     this.#options = consumerOptions;
-    const session = consumerOptions.sessionTimeoutMs ?? 45_000;
-    const rebalance = consumerOptions.rebalanceTimeoutMs ?? 60_000;
-    const heartbeat = consumerOptions.heartbeatIntervalMs ?? 3_000;
+    const session = consumerOptions.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
+    const rebalance = consumerOptions.rebalanceTimeoutMs ?? DEFAULT_REBALANCE_TIMEOUT_MS;
+    const heartbeat = consumerOptions.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
     if (
       ![session, rebalance, heartbeat].every((value) => Number.isSafeInteger(value) && value > 0) ||
       heartbeat >= session
@@ -390,11 +404,12 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       topics,
       cooperative ? [...this.#assigned.values()] : undefined,
     );
-    const joinVersion = instanceId === undefined ? 2 : 3;
+    const joinVersion =
+      instanceId === undefined ? JOIN_GROUP_BASE_VERSION : GROUP_INSTANCE_API_VERSION;
     const join = new Writer()
       .string(this.#requiredGroupId())
-      .i32(this.#options.sessionTimeoutMs ?? 45_000)
-      .i32(this.#options.rebalanceTimeoutMs ?? 60_000)
+      .i32(this.#options.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS)
+      .i32(this.#options.rebalanceTimeoutMs ?? DEFAULT_REBALANCE_TIMEOUT_MS)
       .string(this.#memberId);
     if (instanceId !== undefined) {
       join.string(instanceId);
@@ -437,7 +452,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     assignments: Map<string, GroupAssignment[]>,
   ): Promise<ConsumerAssignment[]> {
     const instanceId = this.#options.groupInstanceId;
-    const version = instanceId === undefined ? 0 : 3;
+    const version = instanceId === undefined ? 0 : GROUP_INSTANCE_API_VERSION;
     const sync = new Writer()
       .string(this.#requiredGroupId())
       .i32(this.#generationId)
@@ -457,7 +472,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       writer.string(memberId).bytes(assignment.result());
     });
     const response = await this.#cluster.request(coordinator, API_SYNC_GROUP, version, sync);
-    if (version === 3) {
+    if (version === GROUP_INSTANCE_API_VERSION) {
       response.i32();
     }
     const error = response.i16();
@@ -507,7 +522,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     }
     this.#heartbeat = setInterval(
       () => void this.#heartbeatOnce(coordinator),
-      this.#options.heartbeatIntervalMs ?? 3_000,
+      this.#options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS,
     );
   }
 
@@ -525,7 +540,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
 
   async #sendHeartbeat(coordinator: number): Promise<void> {
     const instanceId = this.#options.groupInstanceId;
-    const version = instanceId === undefined ? 0 : 3;
+    const version = instanceId === undefined ? 0 : GROUP_INSTANCE_API_VERSION;
     const body = new Writer()
       .string(this.#requiredGroupId())
       .i32(this.#generationId)
@@ -534,17 +549,21 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       body.string(instanceId);
     }
     const response = await this.#cluster.request(coordinator, API_HEARTBEAT, version, body);
-    if (version === 3) {
+    if (version === GROUP_INSTANCE_API_VERSION) {
       response.i32();
     }
     const error = response.i16();
     if (!error) {
       return;
     }
-    if (error === 25) {
+    if (error === KafkaErrorCode.UNKNOWN_MEMBER_ID) {
       this.#memberId = "";
     }
-    if (error !== 22 && error !== 25 && error !== 27) {
+    if (
+      error !== KafkaErrorCode.ILLEGAL_GENERATION &&
+      error !== KafkaErrorCode.UNKNOWN_MEMBER_ID &&
+      error !== KafkaErrorCode.REBALANCE_IN_PROGRESS
+    ) {
       throw kafkaError(error, `Kafka group ${this.#groupId} heartbeat`);
     }
   }
@@ -688,7 +707,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const assignments = topics.flatMap((topic) => {
       const found = metadata.topics.find((item) => item.name === topic);
       if (!found || found.err) {
-        throw kafkaError(found?.err ?? 3, topic);
+        throw kafkaError(found?.err ?? KafkaErrorCode.UNKNOWN_TOPIC_OR_PARTITION, topic);
       }
       return found.partitions.map((partition) => ({
         topic,
@@ -764,7 +783,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
         const topics = Map.groupBy(values, (assignment) => assignment.topic);
         const body = new Writer().i32(-1).array([...topics], (writer, [topic, partitions]) => {
           writer.string(topic).array(partitions, (partitionWriter, value) => {
-            partitionWriter.i32(value.partition).i64(value.which === "earliest" ? -2 : -1);
+            partitionWriter
+              .i32(value.partition)
+              .i64(value.which === "earliest" ? EARLIEST_OFFSET : -1);
           });
         });
         const response = await this.#cluster.request(leader, API_LIST_OFFSETS, 1, body);
@@ -854,7 +875,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
 
   async #fetchOnce(options: FetchOptions = {}): Promise<Array<ConsumedMessage<K, V>>> {
     this.#open();
-    const maxMessages = options.maxMessages ?? 500;
+    const maxMessages = options.maxMessages ?? DEFAULT_FETCH_MAX_MESSAGES;
     if (!Number.isSafeInteger(maxMessages) || maxMessages < 1) {
       throw new RangeError("maxMessages must be a positive integer");
     }
@@ -864,7 +885,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const active = [...this.#assigned].filter(([key]) => !this.#paused.has(key));
     if (!active.length) {
       // Bounded idle nap so pause()/resume()/seek() take effect promptly.
-      await Bun.sleep(Math.min(options.maxWaitMs ?? 500, 250));
+      await Bun.sleep(
+        Math.min(options.maxWaitMs ?? DEFAULT_FETCH_MAX_WAIT_MS, DEFAULT_FETCH_IDLE_SLEEP_MS),
+      );
       return [];
     }
 
@@ -890,9 +913,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const response = await this.#cluster.request(
       leader,
       API_FETCH,
-      7,
+      FETCH_API_VERSION,
       body,
-      (options.maxWaitMs ?? 500) + this.#cluster.requestTimeoutMs,
+      (options.maxWaitMs ?? DEFAULT_FETCH_MAX_WAIT_MS) + this.#cluster.requestTimeoutMs,
       false,
     );
     return this.#decodeFetchResponse(leader, entries, options, isolationLevel, session, response);
@@ -913,9 +936,9 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const byTopic = Map.groupBy(requested, ([, assignment]) => assignment.topic);
     return new Writer()
       .i32(-1)
-      .i32(options.maxWaitMs ?? 500)
+      .i32(options.maxWaitMs ?? DEFAULT_FETCH_MAX_WAIT_MS)
       .i32(options.minBytes ?? 1)
-      .i32(options.maxBytes ?? this.#options.fetchMaxBytes ?? 50 * 1024 * 1024)
+      .i32(options.maxBytes ?? this.#options.fetchMaxBytes ?? DEFAULT_FETCH_MAX_BYTES)
       .i8(isolationLevel)
       .i32(session.id)
       .i32(session.epoch)
@@ -925,7 +948,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
             .i32(assignment.partition)
             .i64(this.#positions.get(key) ?? 0n)
             .i64(-1)
-            .i32(options.maxPartitionBytes ?? 1024 * 1024);
+            .i32(options.maxPartitionBytes ?? DEFAULT_FETCH_MAX_PARTITION_BYTES);
         });
       })
       .array([...forgotten], (writer, [topic, partitions]) =>
@@ -975,8 +998,8 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     if (process.env.DEBUG_FETCH) {
       console.error(
         "fetch resp:",
-        Array.from(response.data.slice(0, 80))
-          .map((b) => b.toString(16).padStart(2, "0"))
+        Array.from(response.data.slice(0, HEX_DUMP_BYTES))
+          .map((b) => b.toString(RADIX_HEX).padStart(2, "0"))
           .join(" "),
       );
     }
@@ -985,7 +1008,10 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const sessionId = response.i32();
     if (topError) {
       this.#fetchSessions.delete(leader);
-      if (topError === 70 || topError === 71) {
+      if (
+        topError === KafkaErrorCode.FETCH_SESSION_ID_NOT_FOUND ||
+        topError === KafkaErrorCode.INVALID_FETCH_SESSION_EPOCH
+      ) {
         return this.#fetchBatchesFor(leader, entries, options, isolationLevel);
       }
       throw kafkaError(topError, `Fetch from broker ${leader}`);
@@ -1207,7 +1233,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       });
       return result[0]?.[0] ?? -1n;
     };
-    const [low, high] = await Promise.all([query(-2), query(-1)]);
+    const [low, high] = await Promise.all([query(EARLIEST_OFFSET), query(-1)]);
     return { low, high };
   }
 
@@ -1233,7 +1259,7 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
           await this.#cluster.request(
             this.#coordinator,
             API_LEAVE_GROUP,
-            3,
+            GROUP_INSTANCE_API_VERSION,
             new Writer()
               .string(this.#groupId)
               .array([{ memberId: this.#memberId, instanceId }], (writer, member) => {

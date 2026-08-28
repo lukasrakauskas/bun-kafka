@@ -1,4 +1,4 @@
-import { KafkaError } from "../errors.ts";
+import { KafkaError, KafkaErrorCode } from "../errors.ts";
 import { isFunction, isString, requiredValue } from "../type-guards.ts";
 import { Cluster } from "./cluster.ts";
 import {
@@ -16,6 +16,15 @@ import {
   API_INIT_PRODUCER_ID,
   API_PRODUCE,
   API_TXN_OFFSET_COMMIT,
+  DEFAULT_PRODUCE_BATCH_MAX_MESSAGES,
+  METADATA_REFRESH_SLEEP_MS,
+  PRODUCE_API_VERSION,
+  DEFAULT_PRODUCE_LINGER_MS,
+  DEFAULT_PRODUCE_TIMEOUT_MS,
+  DEFAULT_TRANSACTION_TIMEOUT_MS,
+  INT32_MAX,
+  RETRY_JITTER_BASE,
+  SEQ_WRAP,
   kafkaError,
   partitionKey,
   retryDelay,
@@ -190,7 +199,7 @@ function chooseProducerPartition(
     return partition;
   }
   if (key) {
-    return (murmur2(key) & 0x7fffffff) % partitionCount;
+    return (murmur2(key) & INT32_MAX) % partitionCount;
   }
   const partition = roundRobin.get(topic) ?? 0;
   roundRobin.set(topic, (partition + 1) % partitionCount);
@@ -202,7 +211,10 @@ function topicMetadataReady(metadata: TopicMetadata): boolean {
 }
 
 function topicMetadataRetryable(metadata: TopicMetadata): boolean {
-  return metadata.err === 3 || metadata.err === 5;
+  return (
+    metadata.err === KafkaErrorCode.UNKNOWN_TOPIC_OR_PARTITION ||
+    metadata.err === KafkaErrorCode.LEADER_NOT_AVAILABLE
+  );
 }
 
 export class BunProducer {
@@ -235,8 +247,8 @@ export class BunProducer {
     this.#ownsCluster = !(options instanceof Cluster);
     this.#cluster = options instanceof Cluster ? options : new Cluster(options);
     this.#options = {
-      lingerMs: producerOptions.lingerMs ?? 5,
-      batchMaxMessages: producerOptions.batchMaxMessages ?? 1_000,
+      lingerMs: producerOptions.lingerMs ?? DEFAULT_PRODUCE_LINGER_MS,
+      batchMaxMessages: producerOptions.batchMaxMessages ?? DEFAULT_PRODUCE_BATCH_MAX_MESSAGES,
       compression: producerOptions.compression ?? "none",
       idempotent: producerOptions.idempotent ?? false,
     };
@@ -253,7 +265,8 @@ export class BunProducer {
     this.#onClose = onClose;
     this.#producerPartitioner = producerOptions.partitioner;
     this.#transactionalId = producerOptions.transactionalId;
-    this.#transactionTimeoutMs = producerOptions.transactionTimeoutMs ?? 60_000;
+    this.#transactionTimeoutMs =
+      producerOptions.transactionTimeoutMs ?? DEFAULT_TRANSACTION_TIMEOUT_MS;
   }
 
   send(input: ProducerSend): Promise<ProduceResult[]> {
@@ -506,7 +519,8 @@ export class BunProducer {
         break;
       }
       const delay = Math.round(
-        Math.min(maxBackoffMs, initialBackoffMs * 2 ** attempt) * (0.5 + Math.random()),
+        Math.min(maxBackoffMs, initialBackoffMs * 2 ** attempt) *
+          (RETRY_JITTER_BASE + Math.random()),
       );
       this.#cluster.log("warn", `retrying InitProducerId attempt ${attempt + 1} in ${delay}ms`);
       this.#cluster.event({
@@ -530,7 +544,7 @@ export class BunProducer {
       const groups = Map.groupBy(
         pending,
         ({ input }) =>
-          `${input.acks ?? 1}\0${input.timeoutMs ?? 30_000}\0${input.compression ?? this.#options.compression}`,
+          `${input.acks ?? 1}\0${input.timeoutMs ?? DEFAULT_PRODUCE_TIMEOUT_MS}\0${input.compression ?? this.#options.compression}`,
       );
       for (const group of groups.values()) {
         await this.#flushPendingGroup(group, notified);
@@ -597,11 +611,15 @@ export class BunProducer {
     await this.#addPartitionsToTxn(routedPartitions);
     const results =
       (first.acks ?? 1) === 0
-        ? await this.#fireAndForget(routedPartitions, first.timeoutMs ?? 30_000, compression)
+        ? await this.#fireAndForget(
+            routedPartitions,
+            first.timeoutMs ?? DEFAULT_PRODUCE_TIMEOUT_MS,
+            compression,
+          )
         : await this.#produce(
             routedPartitions,
             this.#options.idempotent || this.#transactionalId || first.acks === "all" ? -1 : 1,
-            first.timeoutMs ?? 30_000,
+            first.timeoutMs ?? DEFAULT_PRODUCE_TIMEOUT_MS,
             compression,
           );
     return { results, routedPartitions };
@@ -618,7 +636,7 @@ export class BunProducer {
           return this.#route(
             topic,
             sends.flatMap(({ input }) => input.messages),
-            firstSend.input.timeoutMs ?? 30_000,
+            firstSend.input.timeoutMs ?? DEFAULT_PRODUCE_TIMEOUT_MS,
             attempt > 0,
           );
         }),
@@ -637,7 +655,7 @@ export class BunProducer {
         this.#cluster.fireAndForget(
           leader,
           API_PRODUCE,
-          3,
+          PRODUCE_API_VERSION,
           this.#produceRequestBody(leaderPartitions, 0, timeoutMs, compression),
         ),
       ),
@@ -706,10 +724,10 @@ export class BunProducer {
       if (!topicMetadataRetryable(metadata)) {
         throw kafkaError(metadata.err, topic);
       }
-      await Bun.sleep(10);
+      await Bun.sleep(METADATA_REFRESH_SLEEP_MS);
     }
     if (!metadata || !topicMetadataReady(metadata)) {
-      throw kafkaError(metadata?.err ?? 3, topic);
+      throw kafkaError(metadata?.err ?? KafkaErrorCode.UNKNOWN_TOPIC_OR_PARTITION, topic);
     }
     return metadata;
   }
@@ -762,7 +780,7 @@ export class BunProducer {
         const response = await this.#cluster.request(
           leader,
           API_PRODUCE,
-          3,
+          PRODUCE_API_VERSION,
           body,
           timeoutMs,
           false,
@@ -792,7 +810,7 @@ export class BunProducer {
         const key = partitionKey(partition.topic, partition.partition);
         this.#sequences.set(
           key,
-          ((this.#sequences.get(key) ?? 0) + partition.records.length) % 0x80000000,
+          ((this.#sequences.get(key) ?? 0) + partition.records.length) % SEQ_WRAP,
         );
       }
     }

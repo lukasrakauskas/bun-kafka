@@ -3,8 +3,16 @@ import type { ClusterMetadata } from "../types.ts";
 import { Connection, type ConnectionOptions } from "./connection.ts";
 import { Reader, Writer, readMetadataResponse } from "./protocol.ts";
 import {
+  API_API_VERSIONS,
   API_FIND_COORDINATOR,
   API_METADATA,
+  DEFAULT_CONNECT_TIMEOUT_MS,
+  DEFAULT_INITIAL_BACKOFF_MS,
+  DEFAULT_MAX_BACKOFF_MS,
+  DEFAULT_MAX_RESPONSE_BYTES,
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  SIZE_I32,
   address,
   kafkaError,
   retryDelay,
@@ -29,7 +37,7 @@ function validateClusterTimeouts(
     !Number.isSafeInteger(connectTimeoutMs) ||
     connectTimeoutMs <= 0 ||
     !Number.isSafeInteger(maxResponseBytes) ||
-    maxResponseBytes < 4 ||
+    maxResponseBytes < SIZE_I32 ||
     !Number.isSafeInteger(retry.maxRetries) ||
     retry.maxRetries < 0 ||
     !Number.isFinite(retry.initialBackoffMs) ||
@@ -81,13 +89,13 @@ export class Cluster {
     if (!Array.isArray(options.brokers) || !options.brokers.length) {
       throw new TypeError("Kafka requires at least one broker");
     }
-    const requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
-    const connectTimeoutMs = options.connectTimeoutMs ?? 10_000;
-    const maxResponseBytes = options.maxResponseBytes ?? 100 * 1024 * 1024;
+    const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
+    const maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
     const retry = {
-      maxRetries: options.retry?.maxRetries ?? 3,
-      initialBackoffMs: options.retry?.initialBackoffMs ?? 50,
-      maxBackoffMs: options.retry?.maxBackoffMs ?? 2_000,
+      maxRetries: options.retry?.maxRetries ?? DEFAULT_MAX_RETRIES,
+      initialBackoffMs: options.retry?.initialBackoffMs ?? DEFAULT_INITIAL_BACKOFF_MS,
+      maxBackoffMs: options.retry?.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS,
     };
     validateClusterTimeouts(requestTimeoutMs, connectTimeoutMs, maxResponseBytes, retry);
     validateSaslOptions(options);
@@ -397,7 +405,7 @@ export class Cluster {
       [...targets].map(async ([addr, brokerId]) => {
         const startedAt = performance.now();
         try {
-          await this.#connection(addr).request(18, 0, new Writer(), timeoutMs);
+          await this.#connection(addr).request(API_API_VERSIONS, 0, new Writer(), timeoutMs);
           return {
             address: addr,
             brokerId,

@@ -1,3 +1,4 @@
+import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from "./bun/shared.ts";
 type Closer = {
   close: (timeoutMs?: number) => Promise<void> | void;
   flush?: (timeoutMs?: number) => Promise<void> | void;
@@ -42,7 +43,7 @@ export function installShutdown(
   opts: ShutdownOptions = {},
 ): () => void {
   const list = Array.isArray(clients) ? clients : [clients];
-  const timeoutMs = opts.timeoutMs ?? 10_000;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
   const exit = opts.exit !== false;
   let ran = false;
 

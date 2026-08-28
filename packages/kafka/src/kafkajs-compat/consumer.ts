@@ -1,5 +1,6 @@
 import { BunAdmin } from "../bun/admin.ts";
 import { BunConsumer } from "../bun/consumer.ts";
+import { DEFAULT_FETCH_MAX_WAIT_MS, DEFAULT_KAFKAJS_MAX_WAIT_MS_CAP } from "../bun/shared.ts";
 import { hasStringName, isBoolean, isNumber, isString } from "../type-guards.ts";
 import type { ConsumedMessage } from "../types.ts";
 import { CONSUMER_EVENTS } from "./constants.ts";
@@ -227,7 +228,10 @@ export class CompatConsumer {
     this.#emitter.emit(CONSUMER_EVENTS.FETCH_START);
     const messages = await consumer.fetch({
       maxMessages: 200,
-      maxWaitMs: Math.min(numberOption(this.#options.maxWaitTimeInMs) ?? 500, 1_000),
+      maxWaitMs: Math.min(
+        numberOption(this.#options.maxWaitTimeInMs) ?? DEFAULT_FETCH_MAX_WAIT_MS,
+        DEFAULT_KAFKAJS_MAX_WAIT_MS_CAP,
+      ),
       minBytes: numberOption(this.#options.minBytes),
       maxBytes: numberOption(this.#options.maxBytes),
       maxPartitionBytes: numberOption(this.#options.maxBytesPerPartition),

@@ -2,7 +2,12 @@ import { Cluster } from "./cluster.ts";
 import { BunAdmin } from "./admin.ts";
 import { BunConsumer, type ConsumerOptions } from "./consumer.ts";
 import { BunProducer, type ProducerOptions } from "./producer.ts";
-import type { ClusterStats, HealthReport, KafkaOptions } from "./shared.ts";
+import {
+  DEFAULT_HEALTH_CHECK_TIMEOUT_MS,
+  type ClusterStats,
+  type HealthReport,
+  type KafkaOptions,
+} from "./shared.ts";
 
 export class Kafka {
   #cluster: Cluster;
@@ -22,7 +27,9 @@ export class Kafka {
 
   /** Ping all known brokers and report per-broker latency. */
   healthCheck(timeoutMs?: number): Promise<HealthReport> {
-    return this.#cluster.healthCheck(timeoutMs ?? Math.min(this.#cluster.requestTimeoutMs, 5_000));
+    return this.#cluster.healthCheck(
+      timeoutMs ?? Math.min(this.#cluster.requestTimeoutMs, DEFAULT_HEALTH_CHECK_TIMEOUT_MS),
+    );
   }
 
   producer(options: ProducerOptions = {}): BunProducer {

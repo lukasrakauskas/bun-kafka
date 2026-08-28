@@ -39,7 +39,7 @@ export type {
   ConfigResource,
 } from "./admin.ts";
 export type { BunKafkaSasl, BunKafkaTls } from "./connection.ts";
-export { KafkaError, kafkaErrorName, kafkaErrorNames } from "../errors.ts";
+export { KafkaError, KafkaErrorCode, kafkaErrorName, kafkaErrorNames } from "../errors.ts";
 export type {
   AbortedTransaction,
   Bytes,

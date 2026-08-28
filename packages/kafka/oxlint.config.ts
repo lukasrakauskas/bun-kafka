@@ -1,6 +1,8 @@
 import sonarjs from "eslint-plugin-sonarjs";
 import { defineConfig } from "oxlint";
 
+const COGNITIVE_COMPLEXITY_MAX = 10;
+
 export default defineConfig({
   ignorePatterns: [
     ".agent/**",
@@ -15,6 +17,9 @@ export default defineConfig({
     ".roo/**",
     ".windsurf/**",
     "tools/oxlint/anti-slop/**",
+    "scripts/**",
+    "bench/**",
+    "test/**",
   ],
   jsPlugins: [
     { name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" },
@@ -26,7 +31,7 @@ export default defineConfig({
   },
   rules: {
     ...sonarjs.configs.recommended.rules,
-    "sonarjs/cognitive-complexity": ["error", 10],
+    "sonarjs/cognitive-complexity": ["error", COGNITIVE_COMPLEXITY_MAX],
     curly: ["error", "all"],
     eqeqeq: ["error", "always"],
     "no-lonely-if": "error",
@@ -48,6 +53,18 @@ export default defineConfig({
     "typescript/no-non-null-assertion": "error",
     "typescript/no-non-null-asserted-optional-chain": "error",
     "prefer-const": "error",
+    "no-magic-numbers": [
+      "error",
+      {
+        ignore: [-1, 0, 1, 2],
+        ignoreArrayIndexes: true,
+        ignoreDefaultValues: true,
+        ignoreClassFieldInitialValues: true,
+        detectObjects: false,
+      },
+    ],
+    "no-loss-of-precision": "error",
+    "prefer-numeric-literals": "error",
     "anti-slop/no-chained-type-assertions": "error",
     "anti-slop/no-conditional-empty-object-spread": "error",
     "anti-slop/no-known-value-widening": "error",

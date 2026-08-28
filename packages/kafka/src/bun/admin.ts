@@ -26,6 +26,14 @@ import {
   API_OFFSET_COMMIT,
   API_OFFSET_FETCH,
   API_RENEW_DELEGATION_TOKEN,
+  CONFIG_SOURCE_DEFAULT,
+  CREATE_TOPICS_API_VERSION,
+  DELETE_TOPICS_API_VERSION,
+  DESCRIBE_ACLS_API_KEY,
+  DEFAULT_ADMIN_POLL_MIN_MS,
+  DEFAULT_ADMIN_POLL_SLEEP_MS,
+  DEFAULT_ADMIN_TIMEOUT_MS,
+  EARLIEST_OFFSET,
   kafkaError,
   type KafkaOptions,
 } from "./shared.ts";
@@ -111,9 +119,13 @@ export class BunAdmin {
             (configWriter, [name, value]) => configWriter.string(name).string(value),
           );
       })
-      .i32(options.timeoutMs ?? 30_000)
+      .i32(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS)
       .bool(options.validateOnly ?? false);
-    const response = await this.#cluster.controllerRequest(API_CREATE_TOPICS, 4, body);
+    const response = await this.#cluster.controllerRequest(
+      API_CREATE_TOPICS,
+      CREATE_TOPICS_API_VERSION,
+      body,
+    );
     this.#cluster.throttle(API_CREATE_TOPICS, response.i32());
     const results = response.array((reader) => ({
       name: reader.string() ?? "",
@@ -126,7 +138,9 @@ export class BunAdmin {
     // Wait until every created partition reports a leader so immediate
     // produce/fetch does not race leader election.
     const created = results.filter((result) => result.error === 0).map((result) => result.name);
-    const deadline = Date.now() + Math.max(options.timeoutMs ?? 30_000, 5_000);
+    const deadline =
+      Date.now() +
+      Math.max(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS, DEFAULT_ADMIN_POLL_MIN_MS);
     while (Date.now() < deadline) {
       const metadata = await this.metadata(created);
       if (
@@ -136,7 +150,7 @@ export class BunAdmin {
       ) {
         break;
       }
-      await Bun.sleep(100);
+      await Bun.sleep(DEFAULT_ADMIN_POLL_SLEEP_MS);
     }
     return results;
   }
@@ -151,10 +165,10 @@ export class BunAdmin {
     }
     const response = await this.#cluster.controllerRequest(
       API_DELETE_TOPICS,
-      3,
+      DELETE_TOPICS_API_VERSION,
       new Writer()
         .array(topics, (writer, topic) => writer.string(topic))
-        .i32(options.timeoutMs ?? 30_000),
+        .i32(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS),
     );
     this.#cluster.throttle(API_DELETE_TOPICS, response.i32());
     return response.array((reader) => ({
@@ -181,7 +195,7 @@ export class BunAdmin {
             assignmentWriter.array(assignment, (brokerWriter, broker) => brokerWriter.i32(broker)),
           );
       })
-      .i32(options.timeoutMs ?? 30_000)
+      .i32(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS)
       .bool(options.validateOnly ?? false);
     const response = await this.#cluster.controllerRequest(API_CREATE_PARTITIONS, 2, body);
     this.#cluster.throttle(API_CREATE_PARTITIONS, response.i32());
@@ -219,7 +233,7 @@ export class BunAdmin {
         const readOnly = configReader.bool();
         const isDefault = configReader.bool();
         const sensitive = configReader.bool();
-        return { name, value, source: isDefault ? 5 : 0, sensitive, readOnly };
+        return { name, value, source: isDefault ? CONFIG_SOURCE_DEFAULT : 0, sensitive, readOnly };
       });
       return { resourceType, resourceName, error, message, configs };
     });
@@ -408,7 +422,7 @@ export class BunAdmin {
             partitionWriter.i32(partition.index).i64(partition.offset),
           ),
       )
-      .i32(options.timeoutMs ?? 30_000);
+      .i32(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS);
     const response = await this.#cluster.anyRequest(API_DELETE_RECORDS, 1, body);
     this.#cluster.throttle(API_DELETE_RECORDS, response.i32());
     return response
@@ -678,7 +692,7 @@ export class BunAdmin {
           .i8(acl.operation)
           .i8(acl.permissionType),
       )
-      .i32(options.timeoutMs ?? 30_000);
+      .i32(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS);
     const response = await this.#cluster.anyRequest(API_CREATE_ACLS, 0, body);
     this.#cluster.throttle(API_CREATE_ACLS, response.i32());
     return response.array((reader) => ({ error: reader.i16(), message: reader.string() }));
@@ -697,7 +711,7 @@ export class BunAdmin {
       .i8(filter.operation)
       .i8(filter.permissionType);
     const response = await this.#cluster.anyRequest(API_DESCRIBE_ACLS, 0, body);
-    this.#cluster.throttle(29, response.i32());
+    this.#cluster.throttle(DESCRIBE_ACLS_API_KEY, response.i32());
     const error = response.i16();
     const message = response.string();
     const acls = response
@@ -733,7 +747,7 @@ export class BunAdmin {
           .i8(filter.operation)
           .i8(filter.permissionType),
       )
-      .i32(options.timeoutMs ?? 30_000);
+      .i32(options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS);
     const response = await this.#cluster.anyRequest(API_DELETE_ACLS, 0, body);
     this.#cluster.throttle(API_DELETE_ACLS, response.i32());
     return response.array((reader) => {
@@ -881,7 +895,7 @@ export class BunAdmin {
     return Promise.all(
       meta.partitions.map(async (partition) => {
         const [low, high] = await Promise.all([
-          this.offsetByTimestamp(topic, partition.id, -2),
+          this.offsetByTimestamp(topic, partition.id, EARLIEST_OFFSET),
           this.offsetByTimestamp(topic, partition.id, -1),
         ]);
         return { partition: partition.id, low, high };

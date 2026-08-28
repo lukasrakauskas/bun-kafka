@@ -1,4 +1,11 @@
 import { Cluster } from "../bun/cluster.ts";
+import {
+  DEFAULT_KAFKAJS_CONNECT_TIMEOUT_MS,
+  DEFAULT_KAFKAJS_INITIAL_BACKOFF_MS,
+  DEFAULT_KAFKAJS_MAX_BACKOFF_MS,
+  DEFAULT_KAFKAJS_MAX_RETRIES,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+} from "../bun/shared.ts";
 import type { BunKafkaSasl } from "../bun/connection.ts";
 import { KafkaJSNonRetriableError } from "./errors.ts";
 import { hasStringValue, isFunction, isString } from "../type-guards.ts";
@@ -102,12 +109,15 @@ export function mapConfig(
     clientId: config.clientId ?? "kafkajs",
     tls: config.ssl === true ? {} : config.ssl || undefined,
     sasl: mapSaslConfig(config.sasl),
-    requestTimeoutMs: config.requestTimeout ?? 30_000,
-    connectTimeoutMs: Math.max(config.connectionTimeout ?? 1_000, 1_000),
+    requestTimeoutMs: config.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT_MS,
+    connectTimeoutMs: Math.max(
+      config.connectionTimeout ?? DEFAULT_KAFKAJS_CONNECT_TIMEOUT_MS,
+      DEFAULT_KAFKAJS_CONNECT_TIMEOUT_MS,
+    ),
     retry: {
-      maxRetries: config.retry?.retries ?? 5,
-      initialBackoffMs: config.retry?.initialRetryTime ?? 300,
-      maxBackoffMs: config.retry?.maxRetryTime ?? 30_000,
+      maxRetries: config.retry?.retries ?? DEFAULT_KAFKAJS_MAX_RETRIES,
+      initialBackoffMs: config.retry?.initialRetryTime ?? DEFAULT_KAFKAJS_INITIAL_BACKOFF_MS,
+      maxBackoffMs: config.retry?.maxRetryTime ?? DEFAULT_KAFKAJS_MAX_BACKOFF_MS,
     },
   };
 }

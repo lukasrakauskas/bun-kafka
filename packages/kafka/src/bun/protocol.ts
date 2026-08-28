@@ -9,8 +9,48 @@ import type {
 } from "../types.ts";
 import { snappyCompress, snappyDecompress } from "./snappy.ts";
 import { lz4Compress, lz4Decompress } from "./lz4.ts";
+import {
+  COMPRESSION_MASK,
+  INT16_MAX,
+  INT32_MAX,
+  INT32_MIN,
+  MAX_COMPRESSION_TYPE,
+  RECORD_ATTR_CONTROL,
+  RECORD_ATTR_TIMESTAMP_TYPE,
+  RECORD_ATTR_TRANSACTIONAL,
+  RECORD_BATCH_HEADER_SIZE,
+  RECORD_BATCH_LENGTH_MIN,
+  SIZE_I32,
+  SIZE_I64,
+  UINT32_MAX,
+} from "./shared.ts";
 
 const MALFORMED_RESPONSE = "Malformed Kafka response";
+const VARINT_DATA_MASK = 0x7f;
+const VARINT_CONTINUE_BIT = 0x80;
+const VARINT_SHIFT = 7;
+const VARINT_MAX_SHIFT = 35;
+const ZIGZAG_SHIFT32 = 31;
+const CRC32C_POLY = 0x82f6_3b78;
+const CRC32C_INIT = 0xffff_ffff;
+const MURMUR_SEED = 0x9747_b28c;
+const BYTE_MASK = 0xff;
+const BITS_PER_BYTE = 8;
+const CRC_TABLE_SIZE = 256;
+const RECORD_BATCH_LENGTH_OFFSET = 8;
+const RECORD_BATCH_LENGTH_ADJUST = 12;
+const RECORD_BATCH_CRC_OFFSET = 17;
+const RECORD_BATCH_CRC_START = 21;
+const RECORD_BATCH_PREAMBLE = 12;
+const SHIFT_16 = 16;
+const SHIFT_24 = 24;
+const MURMUR_SHIFT_MIX = 13;
+const MURMUR_SHIFT_FINAL = 15;
+const COMPRESSION_LZ4 = 3;
+const MURMUR_TAIL_THREE = 3;
+const BYTE_1 = 1;
+const BYTE_2 = 2;
+const BYTE_3 = 3;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -64,22 +104,22 @@ export class Writer {
     return this;
   }
   i32(value: number): this {
-    const at = this.#reserve(4);
+    const at = this.#reserve(SIZE_I32);
     this.#view.setInt32(at, value);
     return this;
   }
   u32(value: number): this {
-    const at = this.#reserve(4);
+    const at = this.#reserve(SIZE_I32);
     this.#view.setUint32(at, value);
     return this;
   }
   i64(value: number | bigint): this {
-    const at = this.#reserve(8);
+    const at = this.#reserve(SIZE_I64);
     this.#view.setBigInt64(at, BigInt(value));
     return this;
   }
   f64(value: number): this {
-    const at = this.#reserve(8);
+    const at = this.#reserve(SIZE_I64);
     this.#view.setFloat64(at, value);
     return this;
   }
@@ -92,7 +132,7 @@ export class Writer {
       return this.i16(-1);
     }
     const bytes = textEncoder.encode(value);
-    if (bytes.byteLength > 0x7fff) {
+    if (bytes.byteLength > INT16_MAX) {
       throw new RangeError("Kafka string is too long");
     }
     return this.i16(bytes.byteLength).raw(bytes);
@@ -120,13 +160,13 @@ export class Writer {
   }
 
   varInt(value: number): this {
-    if (!Number.isInteger(value) || value < -0x80000000 || value > 0x7fffffff) {
+    if (!Number.isInteger(value) || value < INT32_MIN || value > INT32_MAX) {
       throw new RangeError("Kafka varint is out of range");
     }
-    let encoded = ((value << 1) ^ (value >> 31)) >>> 0;
-    while (encoded > 0x7f) {
-      this.i8((encoded & 0x7f) | 0x80);
-      encoded >>>= 7;
+    let encoded = ((value << 1) ^ (value >> ZIGZAG_SHIFT32)) >>> 0;
+    while (encoded > VARINT_DATA_MASK) {
+      this.i8((encoded & VARINT_DATA_MASK) | VARINT_CONTINUE_BIT);
+      encoded >>>= VARINT_SHIFT;
     }
     return this.i8(encoded);
   }
@@ -134,7 +174,7 @@ export class Writer {
   varLong(value: number | bigint): this {
     let encoded = (BigInt(value) << 1n) ^ (BigInt(value) >> 63n);
     while (encoded > 0x7fn) {
-      this.i8(Number(encoded & 0x7fn) | 0x80);
+      this.i8(Number(encoded & 0x7fn) | VARINT_CONTINUE_BIT);
       encoded >>= 7n;
     }
     return this.i8(Number(encoded));
@@ -142,13 +182,13 @@ export class Writer {
 
   /** Unsigned varint used by compact strings, compact arrays, and tagged fields. */
   uvarint(value: number): this {
-    if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+    if (!Number.isInteger(value) || value < 0 || value > UINT32_MAX) {
       throw new RangeError("Kafka unsigned varint is out of range");
     }
     let encoded = value;
-    while (encoded > 0x7f) {
-      this.i8((encoded & 0x7f) | 0x80);
-      encoded >>>= 7;
+    while (encoded > VARINT_DATA_MASK) {
+      this.i8((encoded & VARINT_DATA_MASK) | VARINT_CONTINUE_BIT);
+      encoded >>>= VARINT_SHIFT;
     }
     return this.i8(encoded);
   }
@@ -230,16 +270,16 @@ export class Reader {
     return this.#view.getInt16(this.#take(2));
   }
   i32(): number {
-    return this.#view.getInt32(this.#take(4));
+    return this.#view.getInt32(this.#take(SIZE_I32));
   }
   u32(): number {
-    return this.#view.getUint32(this.#take(4));
+    return this.#view.getUint32(this.#take(SIZE_I32));
   }
   i64(): bigint {
-    return this.#view.getBigInt64(this.#take(8));
+    return this.#view.getBigInt64(this.#take(SIZE_I64));
   }
   f64(): number {
-    return this.#view.getFloat64(this.#take(8));
+    return this.#view.getFloat64(this.#take(SIZE_I64));
   }
   bool(): boolean {
     return this.i8() !== 0;
@@ -277,13 +317,13 @@ export class Reader {
 
   varInt(): number {
     let value = 0;
-    for (let shift = 0; shift < 35; shift += 7) {
+    for (let shift = 0; shift < VARINT_MAX_SHIFT; shift += VARINT_SHIFT) {
       if (this.offset >= this.data.byteLength) {
         throw new KafkaError(-1, MALFORMED_RESPONSE);
       }
       const byte = requiredValue(this.data[this.offset++], MALFORMED_RESPONSE);
-      value += (byte & 0x7f) * 2 ** shift;
-      if (!(byte & 0x80)) {
+      value += (byte & VARINT_DATA_MASK) * 2 ** shift;
+      if (!(byte & VARINT_CONTINUE_BIT)) {
         return (value >>> 1) ^ -(value & 1);
       }
     }
@@ -297,8 +337,8 @@ export class Reader {
         throw new KafkaError(-1, MALFORMED_RESPONSE);
       }
       const byte = requiredValue(this.data[this.offset++], MALFORMED_RESPONSE);
-      value |= BigInt(byte & 0x7f) << shift;
-      if (!(byte & 0x80)) {
+      value |= BigInt(byte & VARINT_DATA_MASK) << shift;
+      if (!(byte & VARINT_CONTINUE_BIT)) {
         return (value >> 1n) ^ -(value & 1n);
       }
     }
@@ -307,13 +347,13 @@ export class Reader {
 
   uvarint(): number {
     let value = 0;
-    for (let shift = 0; shift < 35; shift += 7) {
+    for (let shift = 0; shift < VARINT_MAX_SHIFT; shift += VARINT_SHIFT) {
       if (this.offset >= this.data.byteLength) {
         throw new KafkaError(-1, MALFORMED_RESPONSE);
       }
       const byte = requiredValue(this.data[this.offset++], MALFORMED_RESPONSE);
-      value += (byte & 0x7f) * 2 ** shift;
-      if (!(byte & 0x80)) {
+      value += (byte & VARINT_DATA_MASK) * 2 ** shift;
+      if (!(byte & VARINT_CONTINUE_BIT)) {
         return value;
       }
     }
@@ -361,11 +401,11 @@ export class Reader {
 }
 
 function createCrcTable(): Uint32Array {
-  const table = new Uint32Array(256);
+  const table = new Uint32Array(CRC_TABLE_SIZE);
   for (let i = 0; i < table.length; i++) {
     let value = i;
-    for (let bit = 0; bit < 8; bit++) {
-      value = value & 1 ? 0x82f63b78 ^ (value >>> 1) : value >>> 1;
+    for (let bit = 0; bit < BITS_PER_BYTE; bit++) {
+      value = value & 1 ? CRC32C_POLY ^ (value >>> 1) : value >>> 1;
     }
     table[i] = value >>> 0;
   }
@@ -381,39 +421,40 @@ export function crc32c(bytes: Uint8Array): number {
   const table = requiredValue(crcTable);
   let crc = 0xffffffff;
   for (let i = 0; i < bytes.byteLength; i++) {
-    crc = requiredValue(table[(crc ^ requiredValue(bytes[i])) & 0xff]) ^ (crc >>> 8);
+    crc =
+      requiredValue(table[(crc ^ requiredValue(bytes[i])) & BYTE_MASK]) ^ (crc >>> BITS_PER_BYTE);
   }
-  return (crc ^ 0xffffffff) >>> 0;
+  return (crc ^ CRC32C_INIT) >>> 0;
 }
 
 export function murmur2(bytes: Uint8Array): number {
   const m = 0x5bd1e995;
-  let hash = (0x9747b28c ^ bytes.byteLength) | 0;
+  let hash = (MURMUR_SEED ^ bytes.byteLength) | 0;
   let offset = 0;
-  for (; offset + 4 <= bytes.byteLength; offset += 4) {
+  for (; offset + SIZE_I32 <= bytes.byteLength; offset += SIZE_I32) {
     let k =
       requiredValue(bytes[offset]) |
-      (requiredValue(bytes[offset + 1]) << 8) |
-      (requiredValue(bytes[offset + 2]) << 16) |
-      (requiredValue(bytes[offset + 3]) << 24);
+      (requiredValue(bytes[offset + BYTE_1]) << BITS_PER_BYTE) |
+      (requiredValue(bytes[offset + BYTE_2]) << SHIFT_16) |
+      (requiredValue(bytes[offset + BYTE_3]) << SHIFT_24);
     k = Math.imul(k, m);
-    k ^= k >>> 24;
+    k ^= k >>> SHIFT_24;
     hash = Math.imul(hash, m) ^ Math.imul(k, m);
   }
   const tail = bytes.byteLength - offset;
-  if (tail >= 3) {
-    hash ^= requiredValue(bytes[offset + 2]) << 16;
+  if (tail >= MURMUR_TAIL_THREE) {
+    hash ^= requiredValue(bytes[offset + BYTE_2]) << SHIFT_16;
   }
   if (tail >= 2) {
-    hash ^= requiredValue(bytes[offset + 1]) << 8;
+    hash ^= requiredValue(bytes[offset + BYTE_1]) << BITS_PER_BYTE;
   }
   if (tail >= 1) {
     hash ^= requiredValue(bytes[offset]);
     hash = Math.imul(hash, m);
   }
-  hash ^= hash >>> 13;
+  hash ^= hash >>> MURMUR_SHIFT_MIX;
   hash = Math.imul(hash, m);
-  return (hash ^ (hash >>> 15)) >>> 0;
+  return (hash ^ (hash >>> MURMUR_SHIFT_FINAL)) >>> 0;
 }
 
 export type WireRecord = {
@@ -454,7 +495,7 @@ type BatchHeader = {
 function readBatchHeader(reader: Reader): BatchHeader {
   const baseOffset = reader.i64();
   const batchLength = reader.i32();
-  if (batchLength < 9 || batchLength > reader.remaining) {
+  if (batchLength < RECORD_BATCH_LENGTH_MIN || batchLength > reader.remaining) {
     throw new KafkaError(-1, "Invalid Kafka record batch size");
   }
   const batchEnd = reader.offset + batchLength;
@@ -466,8 +507,8 @@ function readBatchHeader(reader: Reader): BatchHeader {
   const expectedCrc = reader.u32();
   const crcStart = reader.offset;
   const attributes = reader.i16();
-  const compression = attributes & 7;
-  if (compression > 4) {
+  const compression = attributes & COMPRESSION_MASK;
+  if (compression > MAX_COMPRESSION_TYPE) {
     throw new KafkaError(-1, `Unsupported Kafka compression codec ${compression}`);
   }
   reader.i32();
@@ -543,7 +584,7 @@ function decompressBatchRecords(compression: number, records: Uint8Array): Uint8
         return ownedBytes(Bun.gunzipSync(ownedBytes(records)));
       case 2:
         return ownedBytes(snappyDecompress(records));
-      case 3:
+      case COMPRESSION_LZ4:
         return ownedBytes(lz4Decompress(records));
       default:
         return ownedBytes(Bun.zstdDecompressSync(ownedBytes(records)));
@@ -554,10 +595,10 @@ function decompressBatchRecords(compression: number, records: Uint8Array): Uint8
 }
 
 function varIntSize(value: number): number {
-  let encoded = ((value << 1) ^ (value >> 31)) >>> 0;
+  let encoded = ((value << 1) ^ (value >> ZIGZAG_SHIFT32)) >>> 0;
   let size = 1;
-  while (encoded > 0x7f) {
-    encoded >>>= 7;
+  while (encoded > VARINT_DATA_MASK) {
+    encoded >>>= VARINT_SHIFT;
     size++;
   }
   return size;
@@ -680,9 +721,10 @@ export function encodeRecordBatch(
   if (!(compression in compressionAttributes)) {
     throw new RangeError(`Unsupported Kafka compression: ${compression}`);
   }
-  const recordAttributes = producer.control ? 0x20 : 0;
+  const recordAttributes = producer.control ? RECORD_ATTR_CONTROL : 0;
   const batchAttributes =
-    compressionAttributes[compression] | (producer.transactional && !producer.control ? 0x10 : 0);
+    compressionAttributes[compression] |
+    (producer.transactional && !producer.control ? RECORD_ATTR_TRANSACTIONAL : 0);
   const baseTimestamp = BigInt(requiredValue(records[0]).timestamp ?? now);
   const prepared = records.map((record, offset) =>
     prepareRecord(record, offset, baseTimestamp, now),
@@ -692,12 +734,12 @@ export function encodeRecordBatch(
     baseTimestamp,
   );
   const size =
-    61 +
+    RECORD_BATCH_HEADER_SIZE +
     prepared.reduce(
       (total, record) => total + varIntSize(record.bodyLength) + record.bodyLength,
       0,
     );
-  const recordsWriter = new Writer(size - 61);
+  const recordsWriter = new Writer(size - RECORD_BATCH_HEADER_SIZE);
   prepared.forEach((record, offset) =>
     writeRecord(recordsWriter, record, offset, baseTimestamp, recordAttributes),
   );
@@ -705,7 +747,7 @@ export function encodeRecordBatch(
     new Uint8Array(arrayBufferBytes(recordsWriter.result())),
     compression,
   );
-  const writer = new Writer(61 + recordBytes.byteLength);
+  const writer = new Writer(RECORD_BATCH_HEADER_SIZE + recordBytes.byteLength);
   writer
     .i64(baseOffset)
     .i32(0)
@@ -721,8 +763,8 @@ export function encodeRecordBatch(
     .i32(producer.sequence)
     .i32(records.length)
     .raw(recordBytes);
-  writer.patchI32(8, writer.length - 12);
-  writer.patchU32(17, crc32c(writer.view().subarray(21)));
+  writer.patchI32(RECORD_BATCH_LENGTH_OFFSET, writer.length - RECORD_BATCH_LENGTH_ADJUST);
+  writer.patchU32(RECORD_BATCH_CRC_OFFSET, crc32c(writer.view().subarray(RECORD_BATCH_CRC_START)));
   return writer.result();
 }
 
@@ -768,7 +810,11 @@ export class RecordSetDecoder {
   }
 
   get done(): boolean {
-    return this.#recordsRemaining === 0 && this.#reader.remaining < 12 && !this.#outerReader;
+    return (
+      this.#recordsRemaining === 0 &&
+      this.#reader.remaining < RECORD_BATCH_PREAMBLE &&
+      !this.#outerReader
+    );
   }
 
   read(maxMessages = Number.POSITIVE_INFINITY): KafkaMessage[] {
@@ -792,7 +838,7 @@ export class RecordSetDecoder {
         key: record.key,
         value: record.value,
         timestamp: this.#baseTimestamp + record.timestampDelta,
-        timestampType: this.#attributes & 8 ? 2 : 1,
+        timestampType: this.#attributes & RECORD_ATTR_TIMESTAMP_TYPE ? 2 : 1,
         headers: record.headers,
         brokerId: this.#brokerId,
         done: noop,
@@ -809,7 +855,7 @@ export class RecordSetDecoder {
     } else if (this.#batchEnd) {
       this.#reader.offset = this.#batchEnd;
     }
-    if (this.#reader.remaining < 12) {
+    if (this.#reader.remaining < RECORD_BATCH_PREAMBLE) {
       return false;
     }
     this.#openBatch();
@@ -817,7 +863,7 @@ export class RecordSetDecoder {
   }
 
   #isControlRecord(record: DecodedRecord): boolean {
-    if (!(record.attributes & 0x20 || this.#attributes & 0x20)) {
+    if (!(record.attributes & RECORD_ATTR_CONTROL || this.#attributes & RECORD_ATTR_CONTROL)) {
       return false;
     }
     const firstControlByte = record.value?.[0];

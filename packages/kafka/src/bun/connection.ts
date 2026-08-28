@@ -1,6 +1,17 @@
-import { KafkaError } from "../errors.ts";
+import { KafkaError, KafkaErrorCode } from "../errors.ts";
 import { arrayBufferBytes, isFunction, isString, requiredValue } from "../type-guards.ts";
 import { Reader, Writer } from "./protocol.ts";
+import {
+  API_API_VERSIONS,
+  API_SASL_AUTHENTICATE,
+  API_SASL_HANDSHAKE,
+  DEFAULT_BROKER_PORT,
+  HEX_DUMP_BYTES,
+  RADIX_HEX,
+  INT32_MAX,
+  MAX_TCP_PORT,
+  SIZE_I32,
+} from "./shared.ts";
 
 export type BunKafkaTls = boolean | Bun.TLSOptions;
 export type BunKafkaSasl =
@@ -25,6 +36,10 @@ type Pending = {
 };
 
 const CLOSED_MESSAGE = "Kafka connection is closed";
+const SASL_REAUTH_FRACTION = 0.8;
+const SCRAM_NONCE_BYTES = 18;
+const SHA256_BITS = 256;
+const SHA512_BITS = 512;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -92,7 +107,7 @@ async function pbkdf2(
     await crypto.subtle.deriveBits(
       { name: "PBKDF2", salt: arrayBufferBytes(salt), iterations, hash: algorithm },
       key,
-      algorithm === "SHA-256" ? 256 : 512,
+      algorithm === "SHA-256" ? SHA256_BITS : SHA512_BITS,
     ),
   );
 }
@@ -116,9 +131,9 @@ function parseFields(value: string): Map<string, string> {
 
 function parseAddress(address: string) {
   const url = new URL(address.includes("://") ? address : `kafka://${address}`);
-  const port = Number(url.port || 9092);
+  const port = Number(url.port || DEFAULT_BROKER_PORT);
   const hostname = url.hostname.replace(/^\[|\]$/g, "");
-  if (!hostname || !Number.isInteger(port) || port < 1 || port > 65535) {
+  if (!hostname || !Number.isInteger(port) || port < 1 || port > MAX_TCP_PORT) {
     throw new TypeError(`Invalid Kafka broker: ${address}`);
   }
   return { hostname, port };
@@ -132,7 +147,7 @@ export class Connection {
   #ignoredSockets = new WeakSet<Bun.Socket>();
   #pending = new Map<number, Pending>();
   #correlation = 0;
-  #header = new Uint8Array(4);
+  #header = new Uint8Array(SIZE_I32);
   #headerOffset = 0;
   #frame?: Uint8Array;
   #frameOffset = 0;
@@ -180,7 +195,7 @@ export class Connection {
     }
     const socket = await this.#connect();
     await this.#prepare(socket, apiKey, apiVersion, timeoutMs);
-    this.#correlation = (this.#correlation + 1) & 0x7fffffff;
+    this.#correlation = (this.#correlation + 1) & INT32_MAX;
     const correlation = this.#correlation;
     const frame = new Writer();
     frame
@@ -190,7 +205,7 @@ export class Connection {
       .i32(correlation)
       .string(this.#options.clientId)
       .raw(body.result());
-    frame.patchI32(0, frame.length - 4);
+    frame.patchI32(0, frame.length - SIZE_I32);
     this.#requests++;
     this.#bytesSent += frame.length;
     if (socket.write(frame.result()) < 0) {
@@ -215,16 +230,16 @@ export class Connection {
     apiVersion: number,
     timeoutMs: number,
   ): Promise<void> {
-    if (apiKey !== 18) {
+    if (apiKey !== API_API_VERSIONS) {
       await this.#negotiate(socket, timeoutMs);
     }
-    if (this.#options.sasl && apiKey !== 17 && apiKey !== 36) {
+    if (this.#options.sasl && apiKey !== API_SASL_HANDSHAKE && apiKey !== API_SASL_AUTHENTICATE) {
       await this.#authenticate(socket, timeoutMs);
     }
     const supported = this.#versions?.get(apiKey);
     if (supported && (apiVersion < supported.min || apiVersion > supported.max)) {
       throw new KafkaError(
-        35,
+        KafkaErrorCode.UNSUPPORTED_VERSION,
         `Kafka broker ${this.address} does not support API ${apiKey} version ${apiVersion} (${supported.min}-${supported.max})`,
       );
     }
@@ -238,7 +253,7 @@ export class Connection {
       return this.#negotiating;
     }
     this.#negotiating = (async () => {
-      const response = await this.#send(socket, 18, 0, new Writer(), timeoutMs);
+      const response = await this.#send(socket, API_API_VERSIONS, 0, new Writer(), timeoutMs);
       const error = response.i16();
       if (error) {
         throw new KafkaError(error, `ApiVersions negotiation failed on ${this.address}`);
@@ -268,7 +283,7 @@ export class Connection {
     this.#authenticating = (async () => {
       const handshake = await this.#send(
         socket,
-        17,
+        API_SASL_HANDSHAKE,
         1,
         new Writer().string(sasl.mechanism.toUpperCase()),
         timeoutMs,
@@ -338,7 +353,13 @@ export class Connection {
   }
 
   async #sasl(socket: Bun.Socket, payload: Uint8Array, timeoutMs: number): Promise<Uint8Array> {
-    const response = await this.#send(socket, 36, 1, new Writer().bytes(payload), timeoutMs);
+    const response = await this.#send(
+      socket,
+      API_SASL_AUTHENTICATE,
+      1,
+      new Writer().bytes(payload),
+      timeoutMs,
+    );
     const error = response.i16();
     const message = response.string();
     const authBytes = response.bytes() ?? new Uint8Array();
@@ -354,7 +375,7 @@ export class Connection {
     if (this.#reauthTimer) {
       clearTimeout(this.#reauthTimer);
     }
-    const delay = Math.max(0, Math.floor(this.#sessionLifetimeMs * 0.8));
+    const delay = Math.max(0, Math.floor(this.#sessionLifetimeMs * SASL_REAUTH_FRACTION));
     this.#reauthTimer = setTimeout(() => {
       void this.reauthenticate(socket).catch(() => {});
     }, delay);
@@ -384,9 +405,13 @@ export class Connection {
       }
     } catch (error) {
       this.#fail(
-        new KafkaError(58, `SASL reauthentication failed on ${this.address}: ${String(error)}`, {
-          fatal: true,
-        }),
+        new KafkaError(
+          KafkaErrorCode.SASL_AUTHENTICATION_FAILED,
+          `SASL reauthentication failed on ${this.address}: ${String(error)}`,
+          {
+            fatal: true,
+          },
+        ),
         socket,
       );
     }
@@ -398,7 +423,7 @@ export class Connection {
     timeoutMs: number,
   ): Promise<void> {
     const algorithm = sasl.mechanism === "scram-sha-256" ? "SHA-256" : "SHA-512";
-    const nonceBytes = new Uint8Array(18);
+    const nonceBytes = new Uint8Array(SCRAM_NONCE_BYTES);
     crypto.getRandomValues(nonceBytes);
     const nonce = base64(nonceBytes);
     const escapedUser = sasl.username.replaceAll("=", "=3D").replaceAll(",", "=2C");
@@ -446,7 +471,7 @@ export class Connection {
     timeoutMs: number,
     flexible = false,
   ): Promise<Reader> {
-    this.#correlation = (this.#correlation + 1) & 0x7fffffff;
+    this.#correlation = (this.#correlation + 1) & INT32_MAX;
     const correlation = this.#correlation;
     const frame = new Writer();
     frame.i32(0).i16(apiKey).i16(apiVersion).i32(correlation).string(this.#options.clientId);
@@ -456,7 +481,7 @@ export class Connection {
       frame.uvarint(0);
     }
     frame.raw(body.result());
-    frame.patchI32(0, frame.length - 4);
+    frame.patchI32(0, frame.length - SIZE_I32);
     this.#requests++;
     this.#bytesSent += frame.length;
     if (process.env.DEBUG_TXKEYS) {
@@ -468,8 +493,8 @@ export class Connection {
         apiKey,
         `v${apiVersion}`,
         Array.from(frame.result())
-          .slice(0, 80)
-          .map((b) => b.toString(16).padStart(2, "0"))
+          .slice(0, HEX_DUMP_BYTES)
+          .map((b) => b.toString(RADIX_HEX).padStart(2, "0"))
           .join(" "),
       );
     }
@@ -590,16 +615,16 @@ export class Connection {
   }
 
   #readFrameHeader(chunk: Uint8Array, offset: number): number | undefined {
-    const count = Math.min(4 - this.#headerOffset, chunk.byteLength - offset);
+    const count = Math.min(SIZE_I32 - this.#headerOffset, chunk.byteLength - offset);
     this.#header.set(chunk.subarray(offset, offset + count), this.#headerOffset);
     this.#headerOffset += count;
     offset += count;
-    if (this.#headerOffset < 4) {
+    if (this.#headerOffset < SIZE_I32) {
       return;
     }
     const size = new DataView(this.#header.buffer).getInt32(0);
     this.#headerOffset = 0;
-    if (size < 4 || size > this.#options.maxResponseBytes) {
+    if (size < SIZE_I32 || size > this.#options.maxResponseBytes) {
       this.#fail(new KafkaError(-1, `Invalid Kafka response size ${size}`));
       return;
     }
@@ -616,14 +641,14 @@ export class Connection {
     this.#frame = undefined;
     this.#frameOffset = 0;
     this.#bytesReceived += frame.byteLength;
-    const correlation = new DataView(frame.buffer, frame.byteOffset, 4).getInt32(0);
+    const correlation = new DataView(frame.buffer, frame.byteOffset, SIZE_I32).getInt32(0);
     const pending = this.#pending.get(correlation);
     if (!pending) {
       return;
     }
     clearTimeout(pending.timer);
     this.#pending.delete(correlation);
-    const reader = new Reader(frame.subarray(4));
+    const reader = new Reader(frame.subarray(SIZE_I32));
     if (pending.flexible) {
       try {
         reader.skipTags();

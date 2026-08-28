@@ -1,3 +1,4 @@
+/* oxlint-disable no-magic-numbers -- codec bit math */
 import { requiredValue } from "../type-guards.ts";
 
 /**

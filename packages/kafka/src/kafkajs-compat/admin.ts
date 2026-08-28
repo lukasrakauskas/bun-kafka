@@ -3,6 +3,7 @@ import { ADMIN_EVENTS } from "./constants.ts";
 import type { ClusterGetter } from "./config.ts";
 import { Emitter, Logger } from "./logger.ts";
 import { BunAdmin, type AclBinding, type AclFilter } from "../bun/admin.ts";
+import { CONFIG_SOURCE_DEFAULT, EARLIEST_OFFSET } from "../bun/shared.ts";
 import { isString } from "../type-guards.ts";
 import type { CompatOptions, LogFields } from "./types.ts";
 
@@ -197,7 +198,7 @@ export class CompatAdmin {
           partitions.map(async ({ partition, offset, metadata }) => ({
             partition,
             offset: (resolveOffsets && offset < 0n
-              ? await this.#underlying().offsetByTimestamp(topic, partition, -2)
+              ? await this.#underlying().offsetByTimestamp(topic, partition, EARLIEST_OFFSET)
               : offset
             ).toString(),
             metadata: metadata ?? undefined,
@@ -407,7 +408,7 @@ export class CompatAdmin {
           for (const config of resource.configs) {
             configEntries[config.name] = {
               value: config.value,
-              isDefault: config.source === 5,
+              isDefault: config.source === CONFIG_SOURCE_DEFAULT,
               isSensitive: config.sensitive,
               readOnly: config.readOnly,
               configSource: config.source,
