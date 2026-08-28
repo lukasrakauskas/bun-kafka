@@ -1,4 +1,3 @@
-import { KafkaErrorCode } from "../errors.ts";
 import { isBigInt, isString } from "../type-guards.ts";
 import type { ConsumedMessage, TopicPartition, Watermarks } from "../types.ts";
 import { Cluster } from "../bun/cluster.ts";
@@ -7,6 +6,12 @@ import { OffsetStore } from "./offsets.ts";
 import { Heartbeat } from "./heartbeat.ts";
 import { Fetcher } from "./fetch.ts";
 import { MessageDecoder } from "./message-decoder.ts";
+import {
+  expandPartitions,
+  fetchWatermarks,
+  resolveTopicPatterns,
+  topicAssignments,
+} from "./subscription.ts";
 import type {
   Assigned,
   ConsumerAssignment,
@@ -17,21 +22,14 @@ import type {
 } from "./types.ts";
 import {
   API_LEAVE_GROUP,
-  API_LIST_OFFSETS,
-  EARLIEST_OFFSET,
   GROUP_INSTANCE_API_VERSION,
   DEFAULT_HEARTBEAT_INTERVAL_MS,
   DEFAULT_REBALANCE_TIMEOUT_MS,
   DEFAULT_SESSION_TIMEOUT_MS,
-  kafkaError,
   partitionKey,
   type KafkaOptions,
 } from "../bun/shared.ts";
-import {
-  readListOffsetsResponse,
-  writeLeaveGroupRequest,
-  writeListOffsetsRequest,
-} from "../protocol/index.ts";
+import { writeLeaveGroupRequest } from "../protocol/index.ts";
 
 export type {
   ConsumerOptions,
@@ -160,7 +158,8 @@ export class Consumer<K = Uint8Array | null, V = Uint8Array | null> implements A
     if (requested === undefined) {
       throw new TypeError("subscribe requires a topic");
     }
-    const topics = await this.#resolveTopicPatterns(
+    const topics = await resolveTopicPatterns(
+      this.#cluster,
       isString(requested) || requested instanceof RegExp ? [requested] : requested,
     );
     const groupId = request.groupId ?? this.#options.groupId;
@@ -170,50 +169,13 @@ export class Consumer<K = Uint8Array | null, V = Uint8Array | null> implements A
       await this.#joinGroup(topics, request.fromBeginning ?? this.#options.fromBeginning ?? false);
       return;
     }
-    await this.#subscribeWithoutGroup(topics, request.fromBeginning ?? this.#options.fromBeginning);
-  }
-
-  async #subscribeWithoutGroup(
-    topics: string[],
-    fromBeginning: boolean | undefined,
-  ): Promise<void> {
-    const metadata = await this.#cluster.metadata(topics);
-    const assignments = topics.flatMap((topic) => {
-      const found = metadata.topics.find((item) => item.name === topic);
-      if (!found || found.err) {
-        throw kafkaError(found?.err ?? KafkaErrorCode.UNKNOWN_TOPIC_OR_PARTITION, topic);
-      }
-      return found.partitions.map((partition) => ({
-        topic,
-        partition: partition.id,
-        offset: fromBeginning ? ("earliest" as const) : ("latest" as const),
-      }));
-    });
-    await this.assign(assignments);
-  }
-
-  async #resolveTopicPatterns(topics: Array<string | RegExp>): Promise<string[]> {
-    const patterns = topics.filter((topic): topic is RegExp => topic instanceof RegExp);
-    if (!patterns.length) {
-      return [...new Set(topics.filter(isString))];
-    }
-    const metadata = await this.#cluster.metadata(null);
-    const resolved = new Set<string>();
-    for (const entry of metadata.topics) {
-      if (entry.err || !entry.name) {
-        continue;
-      }
-      if (
-        patterns.some((pattern) => {
-          pattern.lastIndex = 0;
-          return pattern.test(entry.name);
-        }) ||
-        topics.some((topic) => isString(topic) && topic === entry.name)
-      ) {
-        resolved.add(entry.name);
-      }
-    }
-    return [...resolved];
+    await this.assign(
+      await topicAssignments(
+        this.#cluster,
+        topics,
+        request.fromBeginning ?? this.#options.fromBeginning,
+      ),
+    );
   }
 
   async assign(assignments: ConsumerAssignment[]): Promise<void> {
@@ -286,28 +248,18 @@ export class Consumer<K = Uint8Array | null, V = Uint8Array | null> implements A
 
   pause(partitions: TopicPartition[]): void {
     this.#open();
-    for (const target of this.#expandPartitions(partitions)) {
+    for (const target of expandPartitions(partitions, this.#assigned)) {
       this.#paused.add(partitionKey(target.topic, target.partition));
     }
   }
 
   resume(partitions: TopicPartition[]): void {
     this.#open();
-    for (const target of this.#expandPartitions(partitions)) {
+    for (const target of expandPartitions(partitions, this.#assigned)) {
       const key = partitionKey(target.topic, target.partition);
       this.#paused.delete(key);
       this.#fetcher.resetPartition(key);
     }
-  }
-
-  #expandPartitions(partitions: TopicPartition[]): Array<{ topic: string; partition: number }> {
-    return partitions.flatMap(({ topic, partition }) =>
-      partition !== undefined
-        ? [{ topic, partition }]
-        : [...this.#assigned.values()]
-            .filter((assigned) => assigned.topic === topic)
-            .map(({ partition: assignedPartition }) => ({ topic, partition: assignedPartition })),
-    );
   }
 
   assignment(): TopicPartition[] {
@@ -324,27 +276,8 @@ export class Consumer<K = Uint8Array | null, V = Uint8Array | null> implements A
     return this.#positions.get(partitionKey(topic, partition));
   }
 
-  async watermarks(topic: string, partition: number): Promise<Watermarks> {
-    const metadata = await this.#cluster.topic(topic);
-    const leader = metadata.partitions.find((item) => item.id === partition)?.leader;
-    if (leader === undefined) {
-      throw new RangeError(`Partition ${partition} does not exist on ${topic}`);
-    }
-    const query = async (timestamp: number) => {
-      const response = await this.#cluster.request(
-        leader,
-        API_LIST_OFFSETS,
-        1,
-        writeListOffsetsRequest(new Map([[topic, [{ partition, timestamp: BigInt(timestamp) }]]])),
-      );
-      const item = readListOffsetsResponse(response)[0];
-      if (item?.error) {
-        throw kafkaError(item.error, `${topic}[${partition}]`);
-      }
-      return item?.offset ?? -1n;
-    };
-    const [low, high] = await Promise.all([query(EARLIEST_OFFSET), query(-1)]);
-    return { low, high };
+  watermarks(topic: string, partition: number): Promise<Watermarks> {
+    return fetchWatermarks(this.#cluster, topic, partition);
   }
 
   async close(): Promise<void> {

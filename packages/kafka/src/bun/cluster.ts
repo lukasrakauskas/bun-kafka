@@ -1,6 +1,9 @@
 import { KafkaError } from "../errors.ts";
 import type { ClusterMetadata } from "../types.ts";
 import { Connection, type ConnectionOptions } from "./connection/index.ts";
+import { checkClusterHealth } from "./cluster/health.ts";
+import { resolveClusterOptions } from "./cluster/options.ts";
+import { ClusterTelemetry } from "./cluster/telemetry.ts";
 import {
   RequestBody,
   ResponseBody,
@@ -14,79 +17,22 @@ import {
   API_API_VERSIONS,
   API_FIND_COORDINATOR,
   API_METADATA,
-  DEFAULT_CONNECT_TIMEOUT_MS,
-  DEFAULT_INITIAL_BACKOFF_MS,
-  DEFAULT_MAX_BACKOFF_MS,
-  DEFAULT_MAX_RESPONSE_BYTES,
-  DEFAULT_MAX_RETRIES,
-  DEFAULT_REQUEST_TIMEOUT_MS,
-  SIZE_I32,
   address,
   kafkaError,
   retryDelay,
   type HealthReport,
   type KafkaEvent,
   type KafkaOptions,
-  type Logger,
   type RetryOptions,
   type ClusterStats,
   type TopicMetadata,
 } from "./shared.ts";
 
-function validateClusterTimeouts(
-  requestTimeoutMs: number,
-  connectTimeoutMs: number,
-  maxResponseBytes: number,
-  retry: Required<RetryOptions>,
-): void {
-  if (
-    !Number.isSafeInteger(requestTimeoutMs) ||
-    requestTimeoutMs <= 0 ||
-    !Number.isSafeInteger(connectTimeoutMs) ||
-    connectTimeoutMs <= 0 ||
-    !Number.isSafeInteger(maxResponseBytes) ||
-    maxResponseBytes < SIZE_I32 ||
-    !Number.isSafeInteger(retry.maxRetries) ||
-    retry.maxRetries < 0 ||
-    !Number.isFinite(retry.initialBackoffMs) ||
-    retry.initialBackoffMs < 0 ||
-    !Number.isFinite(retry.maxBackoffMs) ||
-    retry.maxBackoffMs < retry.initialBackoffMs
-  ) {
-    throw new RangeError("Invalid Kafka timeout, response size, or retry options");
-  }
-}
-
-function validateSaslOptions(options: KafkaOptions): void {
-  const sasl = options.sasl;
-  if (
-    sasl &&
-    (!new Set(["plain", "scram-sha-256", "scram-sha-512", "oauthbearer"]).has(sasl.mechanism) ||
-      (sasl.mechanism === "oauthbearer" ? !sasl.token : !sasl.username || !sasl.password))
-  ) {
-    throw new TypeError("Invalid Kafka SASL options");
-  }
-}
-
-function validateStatsInterval(options: KafkaOptions): void {
-  if (
-    options.statsIntervalMs !== undefined &&
-    (!Number.isSafeInteger(options.statsIntervalMs) || options.statsIntervalMs < 1)
-  ) {
-    throw new RangeError("Invalid Kafka statsIntervalMs");
-  }
-}
-
 export class Cluster {
   #bootstrap: string[];
   #options: ConnectionOptions;
   #retry: Required<RetryOptions>;
-  #onEvent?: (event: KafkaEvent) => void;
-  #logger?: Partial<Logger>;
-  #retries = 0;
-  #throttles = 0;
-  #throttleTimeMs = 0;
-  #statsTimer?: ReturnType<typeof setInterval>;
+  #telemetry: ClusterTelemetry;
   #connections = new Map<string, Connection>();
   #brokers = new Map<number, string>();
   #controller?: number;
@@ -94,32 +40,15 @@ export class Cluster {
   #topics = new Map<string, TopicMetadata>();
 
   constructor(options: KafkaOptions) {
-    if (!Array.isArray(options.brokers) || !options.brokers.length) {
-      throw new TypeError("Kafka requires at least one broker");
-    }
-    const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-    const connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
-    const maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
-    const retry = {
-      maxRetries: options.retry?.maxRetries ?? DEFAULT_MAX_RETRIES,
-      initialBackoffMs: options.retry?.initialBackoffMs ?? DEFAULT_INITIAL_BACKOFF_MS,
-      maxBackoffMs: options.retry?.maxBackoffMs ?? DEFAULT_MAX_BACKOFF_MS,
-    };
-    validateClusterTimeouts(requestTimeoutMs, connectTimeoutMs, maxResponseBytes, retry);
-    validateSaslOptions(options);
-    validateStatsInterval(options);
-    this.#bootstrap = [...options.brokers];
-    this.#retry = retry;
-    this.#onEvent = options.onEvent;
-    this.#logger = options.logger ?? {};
-    this.#options = {
-      clientId: options.clientId ?? "bun-kafka",
-      requestTimeoutMs,
-      connectTimeoutMs,
-      maxResponseBytes,
-      tls: options.tls,
-      sasl: options.sasl,
-    };
+    const resolved = resolveClusterOptions(options);
+    this.#bootstrap = resolved.bootstrap;
+    this.#retry = resolved.retry;
+    this.#options = resolved.connection;
+    this.#telemetry = new ClusterTelemetry(
+      () => this.#connections.values(),
+      options.onEvent,
+      options.logger,
+    );
   }
 
   #connection(broker: string): Connection {
@@ -248,7 +177,7 @@ export class Cluster {
   }
 
   async #retryRequest(apiKey: number, attempt: number, error: KafkaError): Promise<void> {
-    this.#retries++;
+    this.#telemetry.bumpRetries(1);
     const delay = retryDelay(this.#retry, attempt);
     this.log("warn", `retrying ${apiKey} attempt ${attempt + 1} in ${delay}ms: ${String(error)}`);
     this.event({ type: "retry", apiKey, attempt: attempt + 1, delayMs: delay, error });
@@ -330,117 +259,49 @@ export class Cluster {
   }
 
   event(event: KafkaEvent): void {
-    try {
-      this.#onEvent?.(event);
-    } catch {
-      /* Observability must not break requests. */
-    }
+    this.#telemetry.event(event);
   }
 
-  log(level: keyof Logger, message: string): void {
-    try {
-      this.#logger?.[level]?.(message);
-    } catch {
-      /* Logging must not break requests. */
-    }
+  log(level: keyof import("./shared.ts").Logger, message: string): void {
+    this.#telemetry.log(level, message);
   }
 
   throttle(apiKey: number, durationMs: number): void {
-    if (durationMs > 0) {
-      this.#throttles++;
-      this.#throttleTimeMs += durationMs;
-      this.log("debug", `broker throttled ${apiKey} by ${durationMs}ms`);
-      this.event({ type: "throttle", apiKey, durationMs });
-    }
+    this.#telemetry.throttle(apiKey, durationMs);
   }
 
-  /** Aggregate counters across all live broker connections. */
   stats(): ClusterStats {
-    let requests = 0;
-    let bytesSent = 0;
-    let bytesReceived = 0;
-    for (const connection of this.#connections.values()) {
-      const one = connection.stats;
-      requests += one.requests;
-      bytesSent += one.bytesSent;
-      bytesReceived += one.bytesReceived;
-    }
-    return {
-      connections: this.#connections.size,
-      requests: requests + this.#retries,
-      bytesSent,
-      bytesReceived,
-      retries: this.#retries,
-      throttles: this.#throttles,
-      throttleTimeMs: this.#throttleTimeMs,
-    };
+    return this.#telemetry.stats();
   }
 
-  /** Start emitting periodic stats events. */
   trackStats(intervalMs: number): void {
-    if (!Number.isSafeInteger(intervalMs) || intervalMs < 1) {
-      throw new RangeError("Invalid stats interval");
-    }
-    this.stopTrackingStats();
-    this.#statsTimer = setInterval(
-      () => this.event({ type: "stats", stats: this.stats() }),
-      intervalMs,
-    );
-    this.#statsTimer.unref?.();
+    this.#telemetry.track(intervalMs);
   }
 
   stopTrackingStats(): void {
-    if (this.#statsTimer) {
-      clearInterval(this.#statsTimer);
-    }
-    this.#statsTimer = undefined;
+    this.#telemetry.stop();
   }
 
-  /**
-   * Ping every known broker with an ApiVersions request and report latency.
-   */
-  async healthCheck(timeoutMs = 5_000): Promise<HealthReport> {
-    const targets = new Map<string, number | undefined>();
-    for (const [id, addr] of this.#brokers) {
-      targets.set(addr, id);
-    }
-    for (const addr of this.#bootstrap) {
-      if (!targets.has(addr)) {
-        targets.set(addr, undefined);
-      }
-    }
-    const checks = await Promise.all(
-      [...targets].map(async ([addr, brokerId]) => {
-        const startedAt = performance.now();
-        try {
-          await this.#connection(addr).request(API_API_VERSIONS, 0, writeEmptyRequest(), timeoutMs);
-          return {
-            address: addr,
-            brokerId,
-            ok: true as const,
-            latencyMs: Math.round(performance.now() - startedAt),
-          };
-        } catch (error) {
-          this.log("warn", `health check failed for ${addr}: ${String(error)}`);
-          return {
-            address: addr,
-            brokerId,
-            ok: false as const,
-            latencyMs: Math.round(performance.now() - startedAt),
-            error,
-          };
-        }
-      }),
+  /** Ping every known broker with an ApiVersions request and report latency. */
+  healthCheck(timeoutMs = 5_000): Promise<HealthReport> {
+    return checkClusterHealth(
+      {
+        brokers: this.#brokers,
+        bootstrap: this.#bootstrap,
+        request: (broker, timeout) =>
+          this.#connection(broker).request(API_API_VERSIONS, 0, writeEmptyRequest(), timeout),
+        log: (message) => this.log("warn", message),
+      },
+      timeoutMs,
     );
-    return { brokers: checks };
   }
 
   bumpRetries(n = 1): void {
-    this.#retries += n;
+    this.#telemetry.bumpRetries(n);
   }
 
   close(): void {
-    this.stopTrackingStats();
+    this.#telemetry.stop();
     for (const connection of this.#connections.values()) {
       connection.close();
     }
