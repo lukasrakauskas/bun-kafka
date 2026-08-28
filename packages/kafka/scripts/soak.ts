@@ -505,8 +505,9 @@ function throughputGates(durationS: number): GateResult[] {
     gate(
       "throughput-decay-below-5-percent",
       !enforced || last >= first * 0.95,
-      `first quarter ${first.toFixed(0)} msg/s vs final quarter ${last.toFixed(0)} msg/s` +
-        (enforced ? "" : " (informational; run shorter than 15 min)"),
+      `first quarter ${first.toFixed(0)} msg/s vs final quarter ${last.toFixed(0)} msg/s${
+        enforced ? "" : " (informational; run shorter than 15 min)"
+      }`,
     ),
   ];
 }
@@ -631,9 +632,9 @@ function renderReport(a: SoakArtifact): string {
     "# Soak test result",
     "",
     `- Commit: \`${a.commit}\``,
-    "- Started: " + new Date(startedMs).toISOString(),
-    "- Duration: " + a.duration_seconds + " seconds",
-    "- Bun: " + a.environment.bun,
+    `- Started: ${new Date(startedMs).toISOString()}`,
+    `- Duration: ${a.duration_seconds} seconds`,
+    `- Bun: ${a.environment.bun}`,
     "",
     "## Workload",
     "",
@@ -702,7 +703,7 @@ async function main(): Promise<number> {
   await kafka.disconnect();
 
   const gates = evaluateGates(durationS);
-  const allPassed = gates.every((gate) => gate.passed);
+  const allPassed = gates.every((check) => check.passed);
   const sendSummary = cumulativeSend.snapshot();
   const fetchSummary = cumulativeFetch.snapshot();
 
@@ -778,12 +779,12 @@ async function main(): Promise<number> {
   const directory = new URL("../out/soak/", import.meta.url).pathname;
   mkdirSync(directory, { recursive: true });
   const stamp = new Date(startedMs).toISOString().replaceAll(":", "-");
-  await Bun.write(`${directory}${stamp}.json`, JSON.stringify(artifact, null, 2) + "\n");
+  await Bun.write(`${directory}${stamp}.json`, `${JSON.stringify(artifact, null, 2)}\n`);
   await Bun.write(`${directory}${stamp}.md`, renderReport(artifact));
 
   console.log(`\nsoak: ${allPassed ? "PASS" : "FAIL"}`);
-  for (const gate of gates) {
-    console.log(`  ${gate.passed ? "ok  " : "FAIL"} ${gate.name}: ${gate.detail}`);
+  for (const check of gates) {
+    console.log(`  ${check.passed ? "ok  " : "FAIL"} ${check.name}: ${check.detail}`);
   }
   console.log(`artifacts: out/soak/${stamp}.{json,md}`);
   return allPassed ? 0 : 1;

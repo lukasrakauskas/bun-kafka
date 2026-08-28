@@ -180,7 +180,8 @@ export class Connection {
     }
     const socket = await this.#connect();
     await this.#prepare(socket, apiKey, apiVersion, timeoutMs);
-    const correlation = (this.#correlation = (this.#correlation + 1) & 0x7fffffff);
+    this.#correlation = (this.#correlation + 1) & 0x7fffffff;
+    const correlation = this.#correlation;
     const frame = new Writer();
     frame
       .i32(0)
@@ -442,7 +443,8 @@ export class Connection {
     timeoutMs: number,
     flexible = false,
   ): Promise<Reader> {
-    const correlation = (this.#correlation = (this.#correlation + 1) & 0x7fffffff);
+    this.#correlation = (this.#correlation + 1) & 0x7fffffff;
+    const correlation = this.#correlation;
     const frame = new Writer();
     frame.i32(0).i16(apiKey).i16(apiVersion).i32(correlation).string(this.#options.clientId);
     // Flexible requests append a tagged-field section to the header itself
@@ -455,13 +457,13 @@ export class Connection {
     this.#requests++;
     this.#bytesSent += frame.length;
     if (process.env.DEBUG_TXKEYS) {
-      console.error("TX", apiKey, "v" + apiVersion);
+      console.error("TX", apiKey, `v${apiVersion}`);
     }
     if (process.env.DEBUG_FRAME) {
       console.error(
         "FRAME",
         apiKey,
-        "v" + apiVersion,
+        `v${apiVersion}`,
         Array.from(frame.result())
           .slice(0, 80)
           .map((b) => b.toString(16).padStart(2, "0"))

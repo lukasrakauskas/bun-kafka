@@ -104,10 +104,11 @@ export class BunAdmin {
             (assignmentWriter, assignment) =>
               assignmentWriter
                 .i32(assignment.partition)
-                .array(assignment.brokers, (writer, broker) => writer.i32(broker)),
+                .array(assignment.brokers, (brokerWriter, broker) => brokerWriter.i32(broker)),
           )
-          .array(topic.configs ? Object.entries(topic.configs) : [], (writer, [name, value]) =>
-            writer.string(name).string(value),
+          .array(
+            topic.configs ? Object.entries(topic.configs) : [],
+            (configWriter, [name, value]) => configWriter.string(name).string(value),
           );
       })
       .i32(options.timeoutMs ?? 30_000)
@@ -177,7 +178,7 @@ export class BunAdmin {
           .string(topic.name)
           .i32(topic.count)
           .array(topic.assignments ?? [], (assignmentWriter, assignment) =>
-            assignmentWriter.array(assignment, (writer, broker) => writer.i32(broker)),
+            assignmentWriter.array(assignment, (brokerWriter, broker) => brokerWriter.i32(broker)),
           );
       })
       .i32(options.timeoutMs ?? 30_000)
@@ -203,7 +204,7 @@ export class BunAdmin {
       writer
         .i8(resource.resourceType)
         .string(resource.resourceName)
-        .array(resource.configNames ?? null, (writer, name) => writer.string(name)),
+        .array(resource.configNames ?? null, (configWriter, name) => configWriter.string(name)),
     );
     const response = await this.#cluster.anyRequest(API_DESCRIBE_CONFIGS, 0, body);
     this.#cluster.throttle(API_DESCRIBE_CONFIGS, response.i32());
@@ -236,8 +237,8 @@ export class BunAdmin {
       writer
         .i8(resource.resourceType)
         .string(resource.resourceName)
-        .array(Object.entries(resource.configs), (writer, [name, value]) =>
-          writer.string(name).string(value),
+        .array(Object.entries(resource.configs), (configWriter, [name, value]) =>
+          configWriter.string(name).string(value),
         ),
     );
     const response = await this.#cluster.anyRequest(API_ALTER_CONFIGS, 0, body);

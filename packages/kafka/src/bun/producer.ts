@@ -695,7 +695,7 @@ export class BunProducer {
     let metadata: TopicMetadata | undefined;
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
-      metadata = await this.#cluster.topic(topic, refresh || !!metadata);
+      metadata = await this.#cluster.topic(topic, refresh || Boolean(metadata));
       if (topicMetadataReady(metadata)) {
         return metadata;
       }

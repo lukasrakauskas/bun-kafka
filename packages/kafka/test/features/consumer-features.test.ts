@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
 import { isString, isUint8Array } from "../../src/type-guards.ts";
-import { Writer, decodeRecordSet, encodeRecordBatch } from "../../src/bun/protocol.ts";
+import {
+  Writer,
+  decodeRecordSet,
+  encodeRecordBatch,
+  RecordSetDecoder,
+} from "../../src/bun/protocol.ts";
 import type { AbortedTransaction } from "../../src/types.ts";
-import { RecordSetDecoder } from "../../src/bun/protocol.ts";
 
 function writeConsumerResponse(socket: Bun.Socket, correlation: number, body: Writer): void {
   const response = new Writer().i32(0).i32(correlation).raw(body.result());

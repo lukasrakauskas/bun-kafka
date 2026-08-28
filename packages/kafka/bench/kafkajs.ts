@@ -57,9 +57,9 @@ console.log(
     lib: "kafkajs",
     topic,
     count,
-    produce_ms: +produceMs.toFixed(2),
-    consume_ms: +consumeMs.toFixed(2),
-    produce_msg_s: +(count / (produceMs / 1000)).toFixed(0),
-    consume_msg_s: +(count / (consumeMs / 1000)).toFixed(0),
+    produce_ms: Number(produceMs.toFixed(2)),
+    consume_ms: Number(consumeMs.toFixed(2)),
+    produce_msg_s: Number((count / (produceMs / 1000)).toFixed(0)),
+    consume_msg_s: Number((count / (consumeMs / 1000)).toFixed(0)),
   }),
 );

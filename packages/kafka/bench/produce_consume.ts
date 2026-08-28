@@ -38,8 +38,8 @@ try {
     JSON.stringify({
       lib: "bun-kafka",
       count,
-      produce_ms: +produceMs.toFixed(2),
-      consume_ms: +consumeMs.toFixed(2),
+      produce_ms: Number(produceMs.toFixed(2)),
+      consume_ms: Number(consumeMs.toFixed(2)),
       produce_msg_s: Math.round((count * 1000) / produceMs),
       consume_msg_s: Math.round((count * 1000) / consumeMs),
     }),

@@ -582,7 +582,10 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const response = await this.#cluster.request(coordinator, API_OFFSET_COMMIT, 2, body);
     for (const result of response.array((reader) => ({
       topic: reader.string() ?? "",
-      partitions: reader.array((reader) => ({ partition: reader.i32(), error: reader.i16() })),
+      partitions: reader.array((partitionReader) => ({
+        partition: partitionReader.i32(),
+        error: partitionReader.i16(),
+      })),
     }))) {
       for (const partition of result.partitions) {
         if (partition.error) {
@@ -610,11 +613,11 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
     const result: CommittedOffset[] = [];
     for (const topic of response.array((reader) => ({
       topic: reader.string() ?? "",
-      partitions: reader.array((reader) => ({
-        partition: reader.i32(),
-        offset: reader.i64(),
-        metadata: reader.string(),
-        error: reader.i16(),
+      partitions: reader.array((partitionReader) => ({
+        partition: partitionReader.i32(),
+        offset: partitionReader.i64(),
+        metadata: partitionReader.string(),
+        error: partitionReader.i16(),
       })),
     }))) {
       for (const partition of topic.partitions) {
@@ -1130,7 +1133,10 @@ export class BunConsumer<K = Uint8Array | null, V = Uint8Array | null> implement
       }
       return [...this.#assigned.values()]
         .filter((assigned) => assigned.topic === topic)
-        .map(({ partition }) => ({ topic, partition }));
+        .map(({ partition: assignedPartition }) => ({
+          topic,
+          partition: assignedPartition,
+        }));
     });
   }
 

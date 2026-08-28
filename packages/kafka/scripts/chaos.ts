@@ -46,7 +46,7 @@ try {
   const directory = `${import.meta.dir}/../out/chaos`;
   Bun.spawnSync(["mkdir", "-p", directory]);
   const stamp = started.toISOString().replaceAll(":", "-");
-  await Bun.write(`${directory}/${stamp}.json`, JSON.stringify(result, null, 2) + "\n");
+  await Bun.write(`${directory}/${stamp}.json`, `${JSON.stringify(result, null, 2)}\n`);
   await Bun.write(
     `${directory}/${stamp}.md`,
     `# Chaos test result\n\n- Commit: \`${commit}\`\n- Started: ${result.started}\n- Duration: ${result.duration_seconds} seconds\n- Brokers: 3\n- Fault cycles: ${result.fault_cycles}\n- Result: **${result.passed ? "PASS" : "FAIL"}**\n`,
