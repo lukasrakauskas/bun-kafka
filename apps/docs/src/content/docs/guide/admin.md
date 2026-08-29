@@ -1,6 +1,6 @@
 ---
 title: Administration
-description: Administration
+description: Manage topics, configs, groups, offsets, quotas, ACLs, and tokens.
 ---
 
 All admin operations go through `kafka.admin()`:

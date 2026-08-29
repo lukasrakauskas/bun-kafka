@@ -144,69 +144,12 @@ const kafka = new Kafka({
 
 The fixed API versions require Kafka 0.11 or newer. Use a current Kafka or Redpanda release.
 
-## Documentation
+## Learn more
 
-Guides and reference pages live in the Starlight site under
-[apps/docs](../apps/docs/src/content/docs/guide/getting-started.md):
-
-```bash
-bun install          # from the repository root (workspace install)
-bun run docs:dev     # starlight dev server
-bun run docs:build   # static build into apps/docs/dist
-```
-
-Readiness documentation:
-
-- [Getting started guide](../apps/docs/src/content/docs/guide/getting-started.md)
-- [Recorded benchmarks](../apps/docs/src/content/docs/benchmarks.md)
-- [Performance validation and soak tests](../apps/docs/src/content/docs/performance-validation.md)
-- [Broker failure and chaos testing](../apps/docs/src/content/docs/chaos-testing.md)
-- [Kafka feature completeness and client comparison](../apps/docs/src/content/docs/feature-completeness.md)
-- [Kafka versions, APIs, and KIPs mapped to this client](../apps/docs/src/content/docs/kafka-versions-and-kips.md)
-- [Gap audit versus kafkajs / node-rdkafka / franz-go](../apps/docs/src/content/docs/client-gap-audit.md)
-
-The native client has short-run benchmark evidence, a passing three-broker chaos qualification (`out/chaos/`), and passing 30-minute and 24-hour soak runs (`out/soak/`). The 72-hour release soak remains outstanding for changes that require that additional duration.
-
-## Test
-
-```bash
-bun run test            # unit + feature suites (mock broker)
-bun run test:coverage   # same, with code coverage report
-KAFKA_BROKERS=127.0.0.1:9092 bun test test/impl/bun-integration.test.ts
-bun run test:chaos:mock
-bun run test:chaos
-bun run test:soak
-```
-
-Tests are split by scope: `test/unit/` (wire protocol primitives), `test/features/` (client features against a mock broker), and `test/impl/` (implementation tests against a real broker, chaos, perf, soak). The unit/feature suites use a Bun TCP mock broker.
-
-## Soak
-
-`SOAK_DURATION_S=1800 SOAK_RATE=1000 bun run test:soak` runs one long-lived Bun process that produces at a fixed offered rate, drains with a consumer, samples latency/memory/socket/CPU metrics every 10 seconds, injects periodic bursts, validates per-partition sequence integrity, evaluates release-gate checks, and writes JSON and Markdown artifacts to `out/soak/`. See [performance validation](../apps/docs/src/content/docs/performance-validation.md) for the full gate definitions.
-
-## Releasing
-
-1. Bump `version` in `package.json`.
-2. In CHANGELOG.md, rename `[Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD` and start a fresh `[Unreleased]` section.
-3. Tag `vX.Y.Z` and push the tag.
-
-A release requires green CI plus the soak gates defined in [performance validation](../apps/docs/src/content/docs/performance-validation.md). Releases that change protocol, connection, producer, or consumer behavior also require the 72-hour follow-up soak described there.
-
-## Benchmark
-
-Install [hyperfine](https://github.com/sharkdp/hyperfine), then run:
-
-```bash
-bun run bench
-bun run bench:build # optional Go and Rust comparison binaries
-KAFKA_BROKERS=127.0.0.1:9092 bun run bench
-```
-
-Results are written to:
-
-- `native/build/bun-native-hyperfine.md`
-- `native/build/bun-native-hyperfine.json`
-
-See [the recorded baseline](../apps/docs/src/content/docs/benchmarks.md).
-
-The offline lanes process the same record count with one-record and 100-record batches. If `KAFKA_BROKERS` is set, hyperfine also runs a produce/consume broker round trip.
+- [Getting started](https://github.com/lukasrakauskas/bun-kafka/blob/main/apps/docs/src/content/docs/guide/getting-started.md)
+- [Producing records](https://github.com/lukasrakauskas/bun-kafka/blob/main/apps/docs/src/content/docs/guide/producing.md)
+- [Consuming records](https://github.com/lukasrakauskas/bun-kafka/blob/main/apps/docs/src/content/docs/guide/consuming.md)
+- [Security](https://github.com/lukasrakauskas/bun-kafka/blob/main/apps/docs/src/content/docs/guide/security.md)
+- [Configuration reference](https://github.com/lukasrakauskas/bun-kafka/blob/main/apps/docs/src/content/docs/guide/configuration.md)
+- [Supported features](https://github.com/lukasrakauskas/bun-kafka/blob/main/apps/docs/src/content/docs/reference/supported-features.md)
+- [Migrating from kafkajs](https://github.com/lukasrakauskas/bun-kafka/blob/main/apps/docs/src/content/docs/guide/kafkajs-migration.md)

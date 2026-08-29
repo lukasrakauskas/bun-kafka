@@ -1,7 +1,4 @@
----
-title: Feature completeness
-description: Kafka feature completeness
----
+# Feature completeness audit
 
 ## Verdict
 
@@ -229,7 +226,7 @@ The current local, fresh-topic benchmark uses 5,000 100-byte records, one partit
 | bun-kafka    |             239.5 ms |   22,691 msg/s |  621,956 msg/s |
 | rdkafka-rust |             718.5 ms |   24,486 msg/s |    9,923 msg/s |
 
-See [benchmarks.md](benchmarks.md) and [performance-validation.md](performance-validation.md).
+See [user-facing benchmarks](../../apps/docs/src/content/docs/reference/benchmarks.md) and [performance-validation.md](performance-validation.md).
 
 ## Selection guidance
 

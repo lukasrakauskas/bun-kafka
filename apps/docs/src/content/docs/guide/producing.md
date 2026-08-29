@@ -1,6 +1,6 @@
 ---
 title: Producing
-description: Producing
+description: Send records with batching, compression, partitioning, and delivery guarantees.
 ---
 
 ## The basics

@@ -1,7 +1,4 @@
----
-title: Chaos testing handoff
-description: Chaos testing handoff
----
+# Chaos testing handoff
 
 ## Current state
 

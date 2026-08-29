@@ -1,7 +1,4 @@
----
-title: Gap audit versus other clients
-description: Gap audit versus other Kafka clients
----
+# Client gap audit
 
 A line-by-line look at what kafkajs (pure JS), node-rdkafka (librdkafka binding), and franz-go
 (Go) can do that bun-kafka cannot, with an explicit disposition for every finding. Companion to
@@ -35,11 +32,11 @@ Dispositions:
 
 ## Consumer
 
-| Finding                                                                                               | Status here                                                                                                                                              | Disposition                                                                                                                                                                |
-| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Next-generation consumer protocol (KIP-848, GA Kafka 4.0) — all mature clients are adopting           | Classic group protocol (JoinGroup/SyncGroup/Heartbeat)                                                                                                   | Deferred. Every current broker runs both protocols side-by-side; adopt once KIP-848 client libraries stabilize across vendors. Tracked as the largest future protocol item |
-| Rack-aware fetching (KIP-881; franz-go `ClientOpts.rack`, librdkafka `client.rack`)                   | Not sent                                                                                                                                                 | Deferred until a multi-AZ user needs egress-cost savings; requires Fetch request rack field + replica selection and real cross-rack testing                                |
-| Long-lived blocking iteration driven by background fetch pipeline (kafkajs `run()`, librdkafka queue) | Pull-style `fetch()` / async iterator with bounded batches; kafkajs-shaped `run()`/`eachBatch` lives in [kafkajs-compat](../src/kafkajs-compat/index.ts) | Documented: pull model keeps memory bounded and backpressure explicit                                                                                                      |
+| Finding                                                                                               | Status here                                                                                                                                                                | Disposition                                                                                                                                                                |
+| ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Next-generation consumer protocol (KIP-848, GA Kafka 4.0) — all mature clients are adopting           | Classic group protocol (JoinGroup/SyncGroup/Heartbeat)                                                                                                                     | Deferred. Every current broker runs both protocols side-by-side; adopt once KIP-848 client libraries stabilize across vendors. Tracked as the largest future protocol item |
+| Rack-aware fetching (KIP-881; franz-go `ClientOpts.rack`, librdkafka `client.rack`)                   | Not sent                                                                                                                                                                   | Deferred until a multi-AZ user needs egress-cost savings; requires Fetch request rack field + replica selection and real cross-rack testing                                |
+| Long-lived blocking iteration driven by background fetch pipeline (kafkajs `run()`, librdkafka queue) | Pull-style `fetch()` / async iterator with bounded batches; kafkajs-shaped `run()`/`eachBatch` lives in [kafkajs-compat](../../packages/kafka/src/kafkajs-compat/index.ts) | Documented: pull model keeps memory bounded and backpressure explicit                                                                                                      |
 
 ## Administration
 

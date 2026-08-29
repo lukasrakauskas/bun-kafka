@@ -1,7 +1,4 @@
----
-title: Performance validation
-description: Performance validation and soak tests
----
+# Performance validation
 
 ## Status
 
@@ -22,7 +19,7 @@ The recorded local baseline uses Bun 1.4.0, TypeScript 7.0.2, Redpanda 25.2.1, o
 | Consume median                      | 621,956 msg/s |
 | Difference from franz-go end to end |    14% slower |
 
-See [benchmarks.md](benchmarks.md) for the method and the full comparison.
+See [user-facing benchmarks](../../apps/docs/src/content/docs/reference/benchmarks.md) for the method and the full comparison.
 
 This baseline is a regression reference. It is not a production capacity limit.
 

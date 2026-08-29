@@ -1,35 +1,34 @@
 ---
 title: bun-kafka
-description: Zero-dependency Kafka wire protocol client for Bun
+description: A zero-dependency Kafka client built for Bun
 template: splash
 hero:
-  tagline: A zero-dependency Kafka client for Bun. Pure TypeScript over `Bun.connect()` — no JVM, no librdkafka, no proxy.
+  tagline: Produce, consume, and administer Kafka from Bun with a typed TypeScript API and no native dependencies.
   actions:
     - text: Get started
       link: /guide/getting-started
       icon: right-arrow
-    - text: npm install bun-kafka
-      link: /guide/getting-started#install
-      icon: download
+    - text: View supported features
+      link: /reference/supported-features
 ---
 
 import { Card, CardGrid } from "@astrojs/starlight/components";
 
 <CardGrid stagger>
-  <Card title="Produce" color="amber">
-    Idempotent or transactional batches with acks 0/1/all, four compression codecs, and per-message
-    delivery callbacks.
+  <Card title="Send records">
+    Start with a small producer, then add batching, compression, idempotence, or transactions when
+    your application needs them. [Learn to produce records](/guide/producing).
   </Card>
-  <Card title="Consume" color="green">
-    Consumer groups with eager or cooperative-sticky assignment, incremental fetch sessions,
-    zero-copy payloads.
+  <Card title="Process records">
+    Use manual partitions or consumer groups with explicit backpressure and offset control. [Learn
+    to consume records](/guide/consuming).
   </Card>
-  <Card title="Administer" color="blue">
-    Topics, partitions, configs (incremental), groups, quotas, ACLs, and delegation tokens — typed
-    end to end.
+  <Card title="Run in production">
+    Configure TLS and SASL, expose health and stats, and shut down without losing queued work.
+    [Review production operations](/guide/observability).
   </Card>
-  <Card title="Verify" color="purple">
-    Mock-broker suites, three-broker chaos qualification, and release-gate soak evidence in the
-    repo.
+  <Card title="Move from kafkajs">
+    Start with the compatibility import, then move to the native pull-based API at your own pace.
+    [Read the migration guide](/guide/kafkajs-migration).
   </Card>
 </CardGrid>

@@ -1,7 +1,4 @@
----
-title: Chaos testing
-description: Broker failure and chaos testing
----
+# Chaos testing
 
 ## Status
 

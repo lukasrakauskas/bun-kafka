@@ -1,6 +1,6 @@
 ---
 title: Configuration reference
-description: Configuration reference
+description: Find client, producer, consumer, retry, and shutdown options.
 ---
 
 ## Kafka options
