@@ -1,6 +1,4 @@
-import { AdminSecurity } from "./admin/security.ts";
-
-export class Admin extends AdminSecurity {}
+export { AdminSecurity as Admin } from "./admin/security.ts";
 
 export type {
   AclBinding,

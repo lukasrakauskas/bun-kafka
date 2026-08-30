@@ -375,7 +375,10 @@ describe("Bun native Kafka client (mock brokers)", () => {
     });
     const admin = kafka.admin();
     try {
-      expect((await admin.createTopics([{ name: "events", numPartitions: 1 }]))[0]?.error).toBe(0);
+      expect(
+        (await admin.createTopics([{ name: "events", numPartitions: 1, assignments: [[1]] }]))[0]
+          ?.error,
+      ).toBe(0);
       expect((await admin.deleteTopics(["events"]))[0]?.name).toBe("events");
       expect((await admin.createPartitions([{ name: "events", count: 2 }]))[0]?.error).toBe(0);
       expect(

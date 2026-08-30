@@ -36,7 +36,7 @@ function response(correlation: number, body: KafkaEncoder | Uint8Array): Uint8Ar
   const frame = encoder()
     .i32(0)
     .i32(correlation)
-    .raw(body instanceof KafkaEncoder ? body.result() : body);
+    .raw(isUint8Array(body) ? body : body.result());
   frame.patchI32(0, frame.length - 4);
   return frame.result();
 }
@@ -250,7 +250,7 @@ describe("deterministic Kafka chaos", () => {
     let partial = false;
     const broker = mockBroker(({ apiKey, count, correlation, socket }) => {
       if (apiKey === 1 && count === 2) {
-        const frame = response(correlation, defaultBody(1, broker, 1n));
+        const frame = response(correlation, defaultBody(1, broker.address, 1n));
         socket.write(frame.subarray(0, Math.floor(frame.length / 2)));
         socket.terminate();
         partial = true;
@@ -315,7 +315,7 @@ describe("deterministic Kafka chaos", () => {
         socket.terminate();
         return true;
       }
-      setTimeout(() => reply(defaultBody(2, broker)), 20);
+      setTimeout(() => reply(defaultBody(2, broker.address)), 20);
       return true;
     });
     const client = kafka([broker], {
@@ -464,8 +464,8 @@ describe("deterministic Kafka chaos", () => {
     }
 
     const broker = mockBroker(({ apiKey, correlation }, reply) => {
-      reply(defaultBody(apiKey, broker), correlation + 100);
-      reply(defaultBody(apiKey, broker));
+      reply(defaultBody(apiKey, broker.address), correlation + 100);
+      reply(defaultBody(apiKey, broker.address));
       return true;
     });
     const client = kafka([broker]);
