@@ -1,10 +1,8 @@
 # Developer documentation
 
-This directory contains notes for bun-kafka contributors and maintainers. It is not part of the
-user documentation site.
+This directory contains notes for bun-kafka contributors and maintainers. It is not part of the user documentation site.
 
-For installation and API help, go to the [user documentation](../apps/docs/src/content/docs/index.mdx)
-or the [package README](../packages/kafka/README.md).
+For installation and API help, go to the [user documentation](../apps/docs/src/content/docs/index.mdx) or the [package README](../packages/kafka/README.md).
 
 ## Contributor guides
 

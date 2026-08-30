@@ -14,6 +14,11 @@ hero:
 
 import { Card, CardGrid } from "@astrojs/starlight/components";
 
+:::caution[Early development]
+bun-kafka is under active development and is not yet recommended for production workloads. APIs
+may change between releases.
+:::
+
 <CardGrid stagger>
   <Card title="Send records">
     Start with a small producer, then add batching, compression, idempotence, or transactions when

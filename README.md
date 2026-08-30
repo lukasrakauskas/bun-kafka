@@ -1,5 +1,9 @@
 # bun-kafka
 
+> [!WARNING]
+> **Early development:** bun-kafka is under active development and is not yet recommended for
+> production workloads. APIs may change between releases.
+
 This repository contains `bun-kafka`, a zero-dependency Kafka client for Bun, and its documentation
 site.
 

@@ -1,16 +1,11 @@
 # Compatibility test gap audit
 
-Companion to `feature-completeness.md`, which tracks _implementation_ coverage. This document records (a) what the external compatibility suites
-prove and (b) where bun-kafka's **own test suites** still have gaps against
-the full Kafka feature set.
+Companion to `feature-completeness.md`, which tracks _implementation_ coverage. This document records (a) what the external compatibility suites prove and (b) where bun-kafka's **own test suites** still have gaps against the full Kafka feature set.
 
 ## External suites
 
-Runner: `~/dev/bun-kafka-test-suites/runner.ts` (deterministic order, pinned
-vendor SHAs, writes `REPORT.md`; skips cleanly when no broker is reachable).
-Adaptation is dependency-injection only: stub packages `kafkajs` and
-`@confluentinc/kafka-javascript` resolve to `bun-kafka/kafkajs-compat`, so the
-vendored application code runs unmodified under Bun.
+Runner: `~/dev/bun-kafka-test-suites/runner.ts` (deterministic order, pinned vendor SHAs, writes `REPORT.md`; skips cleanly when no broker is reachable).
+Adaptation is dependency-injection only: stub packages `kafkajs` and `@confluentinc/kafka-javascript` resolve to `bun-kafka/kafkajs-compat`, so the vendored application code runs unmodified under Bun.
 
 | Suite                 | Vendored project                                                | What it exercises                                                                                                                                                                                                                                                                                                                        |
 | --------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
