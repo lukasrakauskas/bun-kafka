@@ -150,8 +150,8 @@ Each connection uses ApiVersions to verify that the broker supports the fixed re
 | Create partitions             | Yes    | Fixed CreatePartitions v2 request                                                                    |
 | Describe or alter configs     | Yes    | Fixed v0 config APIs plus IncrementalAlterConfigs v1 (set/append/subtract/delete individual entries) |
 | ACL operations                | Yes    | Describe/Create/Delete ACLs v0 with real-broker round-trip coverage                                  |
-| Consumer group administration | Yes    | ListGroups, DescribeGroups, DeleteGroups                                                             |
-| Topic offset administration   | Yes    | Watermarks plus DeleteRecords truncation                                                             |
+| Consumer group administration | Yes    | ListGroups, DescribeGroups, DeleteGroups, and group offset reads/updates/resets                       |
+| Topic offset administration   | Yes    | Watermarks, timestamp lookup, and DeleteRecords truncation                                            |
 | Delegation tokens             | Yes    | Create/Renew/Expire/Describe v2 (mock wire-shape tests; requires SASL + broker support)              |
 | Quota administration          | Yes    | DescribeClientQuotas/AlterClientQuotas v1 flexible encoding                                          |
 
