@@ -112,7 +112,7 @@ export class CompatAdminTopics extends CompatAdminBase {
           host: broker.host,
           port: broker.port,
         })),
-        controller: metadata.brokers.length ? metadata.brokers[0].id : null,
+        controller: metadata.brokers[0]?.id ?? null,
         clusterId: metadata.clusterId ?? null,
       };
     } catch (error) {

@@ -3,6 +3,7 @@ export type CompatValue =
   | number
   | boolean
   | bigint
+  | Uint8Array
   | null
   | undefined
   | CompatValue[]

@@ -68,7 +68,6 @@ export class CompatAdminConfigs extends CompatAdminGroups {
   }
 
   async alterConfigs({
-    validateOnly = false,
     resources,
   }: {
     validateOnly?: boolean;
@@ -81,7 +80,6 @@ export class CompatAdminConfigs extends CompatAdminGroups {
           resourceName: resource.name,
           configs: resource.configEntries,
         })),
-        { validateOnly },
       );
     } catch (error) {
       throw wrapError(error);

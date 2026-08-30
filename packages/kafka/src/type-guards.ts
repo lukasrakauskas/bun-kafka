@@ -9,7 +9,7 @@ export function isString<T>(value: T): value is T & string {
   return typeof value === "string";
 }
 
-export function isFunction<T>(value: T): value is T & ((...args: never[]) => void) {
+export function isFunction<T>(value: T): value is Extract<T, Function> {
   return typeof value === "function";
 }
 

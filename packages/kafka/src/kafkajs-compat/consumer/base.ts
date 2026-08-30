@@ -36,14 +36,11 @@ export class CompatConsumerBase {
   }
 
   protected underlying(): Consumer {
-    if (!this.consumer) {
-      this.consumer = new Consumer(
-        this.getter().acquire(),
-        createCompatConsumerOptions(this.options),
-        this.getter().release,
-      );
-    }
-    return this.consumer;
+    return (this.consumer ??= new Consumer(
+      this.getter().acquire(),
+      createCompatConsumerOptions(this.options),
+      this.getter().release,
+    ));
   }
 
   async connect(): Promise<void> {
@@ -88,7 +85,9 @@ export class CompatConsumerBase {
       }
       this.subscribedTopics = new Set(merged);
       await this.underlying().subscribe({ topics: merged, fromBeginning });
-      this.emitter.emit(CONSUMER_EVENTS.GROUP_JOIN, { groupId: this.options.groupId });
+      this.emitter.emit(CONSUMER_EVENTS.GROUP_JOIN, {
+        groupId: String(this.options.groupId ?? ""),
+      });
     } catch (error) {
       throw wrapError(error);
     }
@@ -130,7 +129,7 @@ export class CompatConsumerBase {
       }
       await consumer.commitOffsets(entries);
       this.emitter.emit(CONSUMER_EVENTS.COMMIT_OFFSETS, {
-        groupId: this.options.groupId,
+        groupId: String(this.options.groupId ?? ""),
         topics: entries.map((entry) => entry.topic),
       });
     } catch (error) {
@@ -154,20 +153,22 @@ export class CompatConsumerBase {
   pause(
     topicPartitions: Array<{ topic: string; partitions?: number[] }>,
   ): Array<{ topic: string; partitions: number[] }> {
-    for (const target of this.resolvePartitions(topicPartitions)) {
+    const resolved = this.resolvePartitions(topicPartitions);
+    for (const target of resolved) {
       this.pausedPartitions.add(`${target.topic}\u0000${target.partition}`);
     }
-    this.underlying().pause(topicPartitions);
+    this.underlying().pause(resolved);
     return this.paused();
   }
 
   resume(
     topicPartitions: Array<{ topic: string; partitions?: number[] }>,
   ): Array<{ topic: string; partitions: number[] }> {
-    for (const target of this.resolvePartitions(topicPartitions)) {
+    const resolved = this.resolvePartitions(topicPartitions);
+    for (const target of resolved) {
       this.pausedPartitions.delete(`${target.topic}\u0000${target.partition}`);
     }
-    this.underlying().resume(topicPartitions);
+    this.underlying().resume(resolved);
     return this.paused();
   }
 
@@ -198,7 +199,23 @@ export class CompatConsumerBase {
       const admin = new Admin(this.getter().acquire(), this.getter().release);
       try {
         const [group] = await admin.describeGroups([String(this.options.groupId)]);
-        return group ?? {};
+        return group
+          ? {
+              errorCode: group.error,
+              errorMessage: group.message,
+              groupId: group.groupId,
+              state: group.state,
+              protocolType: group.protocolType,
+              protocolData: group.protocol,
+              members: group.members.map((member) => ({
+                memberId: member.memberId,
+                clientId: member.clientId,
+                clientHost: member.clientHost,
+                memberMetadata: member.memberMetadata,
+                memberAssignment: member.memberAssignment,
+              })),
+            }
+          : {};
       } finally {
         await admin.close();
       }

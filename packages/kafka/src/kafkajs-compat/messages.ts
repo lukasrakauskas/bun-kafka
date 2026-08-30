@@ -39,7 +39,7 @@ export type KafkaJsConsumedMessage = {
   leaderEpoch?: number | null;
 };
 
-type KafkaJsPartitioner =
+export type KafkaJsPartitioner =
   | ((topic: string, count: number, key: Uint8Array | null) => number)
   | { partition: (context: PartitionerContext) => number };
 

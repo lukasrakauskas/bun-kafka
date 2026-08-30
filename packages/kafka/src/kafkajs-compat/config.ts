@@ -85,7 +85,7 @@ function createBasicSasl(
 
 function createSaslCredentials(
   mechanism: CompatOptions["mechanism"],
-  config: CompatOptions | undefined,
+  config: CompatOptions,
   token: string | (() => Promise<string>) | undefined,
 ): BunKafkaSasl | undefined {
   if (mechanism === "plain" || mechanism === "scram-sha-256" || mechanism === "scram-sha-512") {
@@ -95,7 +95,10 @@ function createSaslCredentials(
 }
 
 function mapSaslConfig(saslConfig: CompatOptions | undefined): BunKafkaSasl | undefined {
-  const mechanism = saslConfig?.mechanism;
+  if (saslConfig === undefined) {
+    return undefined;
+  }
+  const mechanism = saslConfig.mechanism;
   validateSaslMechanism(mechanism);
   return createSaslCredentials(mechanism, saslConfig, resolveSaslToken(saslConfig));
 }

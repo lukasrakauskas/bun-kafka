@@ -10,6 +10,7 @@ import {
   toWireMessage,
   type KafkaJsSendRecord,
   type KafkaJsSendBatchRecord,
+  type KafkaJsPartitioner,
 } from "./messages.ts";
 
 function producerOptions(options: CompatOptions) {
@@ -22,7 +23,9 @@ function producerOptions(options: CompatOptions) {
     transactionTimeoutMs: isNumber(options.transactionTimeout)
       ? options.transactionTimeout
       : undefined,
-    partitioner: toBunPartitioner(options.createPartitioner ?? options.partitioner),
+    partitioner: toBunPartitioner(
+      (options.createPartitioner ?? options.partitioner) as KafkaJsPartitioner | null | undefined,
+    ),
   };
 }
 

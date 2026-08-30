@@ -23,11 +23,14 @@ export class CompatConsumerRunner extends CompatConsumerBatch {
     const loop = this.loop(options).catch(async (error) => {
       this.running = false;
       const wrapped = error instanceof Error ? wrapError(error) : new KafkaJSError(String(error));
-      this.logger.error(`consumer crashed: ${wrapped.message}`, {
-        groupId: this.options.groupId,
+      this.logger().error(`consumer crashed: ${wrapped.message}`, {
+        groupId: String(this.options.groupId ?? ""),
         stack: wrapped.stack,
       });
-      this.emitter.emit(CONSUMER_EVENTS.CRASH, { error: wrapped, groupId: this.options.groupId });
+      this.emitter.emit(CONSUMER_EVENTS.CRASH, {
+        error: wrapped,
+        groupId: String(this.options.groupId ?? ""),
+      });
       await options.onCrash?.(wrapped);
     });
     this.stopping = loop;

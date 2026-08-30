@@ -21,7 +21,11 @@ export class CompatConsumerBatch extends CompatConsumerBase {
         return;
       }
       this.track(topic, partition, raw.offset + 1n);
-      await options.eachMessage({
+      const eachMessage = options.eachMessage;
+      if (!eachMessage) {
+        return;
+      }
+      await eachMessage({
         topic,
         partition,
         message: toKafkajsMessage(raw),
@@ -45,6 +49,9 @@ export class CompatConsumerBatch extends CompatConsumerBase {
     heartbeat: () => Promise<void>,
     pause: () => void,
   ): Promise<void> {
+    if (!items.length || !options.eachBatch) {
+      return;
+    }
     const highWatermark = await this.highWatermark(topic, partition, items, consumer);
     const messages = items.map(toKafkajsMessage);
     const resolved = new Set<string>();
@@ -78,7 +85,8 @@ export class CompatConsumerBatch extends CompatConsumerBase {
     try {
       return String((await consumer.watermarks(topic, partition)).high);
     } catch {
-      return String(items[items.length - 1].offset + 1n);
+      const last = items.at(-1);
+      return last ? String(last.offset + 1n) : "0";
     }
   }
 
@@ -99,10 +107,12 @@ export class CompatConsumerBatch extends CompatConsumerBase {
       highWatermark,
       messages,
       isEmpty: () => messages.length === 0,
-      firstOffset: () => (messages.length ? messages[0].offset : null),
-      lastOffset: () => (messages.length ? messages[messages.length - 1].offset : null),
-      offsetLag: () =>
-        (BigInt(highWatermark) - BigInt(messages[messages.length - 1].offset) - 1n).toString(),
+      firstOffset: () => messages.at(0)?.offset ?? null,
+      lastOffset: () => messages.at(-1)?.offset ?? null,
+      offsetLag: () => {
+        const last = messages.at(-1);
+        return last ? (BigInt(highWatermark) - BigInt(last.offset) - 1n).toString() : "0";
+      },
       isStale: () => !this.running,
       resolveOffset: (offset) => resolved.add(BigInt(offset).toString()),
       commitOffsetsIfNecessary: async () => {
@@ -123,13 +133,16 @@ export class CompatConsumerBatch extends CompatConsumerBase {
     options: RunOptions,
     autoCommitEnabled: boolean,
   ): Promise<void> {
+    const first = items.at(0);
+    const last = items.at(-1);
+    if (!first || !last) {
+      return;
+    }
     if (options.eachBatchAutoResolve !== false) {
       for (const raw of items) {
         resolved.add(raw.offset.toString());
       }
     }
-    const first = items[0];
-    const last = items[items.length - 1];
     const nextOffset = resolved.size ? highestOffset(resolved) + 1n : first.offset;
     if (nextOffset <= last.offset) {
       consumer.seek({ topic, partition, offset: nextOffset });
@@ -168,7 +181,7 @@ export class CompatConsumerBatch extends CompatConsumerBase {
     this.pendingOffsets.clear();
     this.uncommittedCount = 0;
     this.emitter.emit(CONSUMER_EVENTS.COMMIT_OFFSETS, {
-      groupId: this.options.groupId,
+      groupId: String(this.options.groupId ?? ""),
       topics: serializable.map((entry) => entry.topic),
     });
     await options.afterCommit?.(serializable);

@@ -74,7 +74,7 @@ export class KafkaJSNumberOfRetriesExceeded extends KafkaJSError {
 }
 
 /** Surface bun-kafka errors through kafkajs-shaped classes, preserving codes. */
-export function wrapError(error: ErrorCause): Error {
+export function wrapError<T>(error: T): Error {
   if (error instanceof KafkaError) {
     const wrapped = new KafkaJSProtocolError(error.message, error.code);
     wrapped.retriable = error.retriable;
