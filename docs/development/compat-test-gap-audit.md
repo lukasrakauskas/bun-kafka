@@ -50,7 +50,7 @@ test today.
   cover explicit topic lists; the compat admin approximates all-topic queries
   by scanning cluster metadata. A dedicated OffsetFetch v5 flexible test is
   missing.
-- **DescribeConfigs v1+/AlterConfigs v1 (incremental)**: only v0 exercised;
+- **DescribeConfigs v1+/AlterConfigs v1**: only v0 exercised;
   `isDefault`/`configSource` mapping is pinned by a fixture
   (test/features/api-versions.test.ts); config sources against a live broker
   matrix remain uncovered.
@@ -120,9 +120,19 @@ test today.
   Redpanda-shaped negative fixture in our suites. Add recorded-bytes
   regression fixtures (hex frames) so broker quirks can't regress silently.
 - **Group offset administration**: `groupOffsets`, `setGroupOffsets`,
-  `resetGroupOffsets`, `topicOffsets`, and `offsetByTimestamp` now live on
-  core `Admin`; no dedicated feature tests cover them yet.
-- **IncrementalAlterConfigs (KIP-248)**: not implemented, not tested.
+  `resetGroupOffsets`, `topicOffsets`, and `offsetByTimestamp` live in the
+  [core admin implementation](../../packages/kafka/src/bun/admin/groups.ts) and
+  are covered by
+  [mock-broker feature tests](../../packages/kafka/test/features/admin-groups.test.ts)
+  plus
+  [fixed-version assertions](../../packages/kafka/test/features/api-versions.test.ts).
+  A live-broker round trip remains uncovered.
+- **IncrementalAlterConfigs (KIP-339)**: implemented in the
+  [topic admin client](../../packages/kafka/src/bun/admin/topics.ts); the
+  [mock-broker suite](../../packages/kafka/test/features/admin-incremental-configs.test.ts)
+  pins v1 flexible encoding, all four operations, and per-resource errors. The
+  [live-broker suite](../../packages/kafka/test/impl/incremental-configs-real.test.ts)
+  verifies non-clobbering updates, deletes, and broker errors.
 - **ListPartitionReassignments / AlterPartitionReassignments (KIP-455)**:
   absent from impl and suites.
 - **ElectLeaders (KIP-460)**: absent.
