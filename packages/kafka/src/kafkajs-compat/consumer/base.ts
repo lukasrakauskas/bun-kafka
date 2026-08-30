@@ -196,9 +196,12 @@ export class CompatConsumerBase {
   async describeGroup(): Promise<CompatOptions> {
     try {
       const admin = new Admin(this.getter().acquire(), this.getter().release);
-      const [group] = await admin.describeGroups([String(this.options.groupId)]);
-      admin.close();
-      return group ?? {};
+      try {
+        const [group] = await admin.describeGroups([String(this.options.groupId)]);
+        return group ?? {};
+      } finally {
+        await admin.close();
+      }
     } catch (error) {
       throw wrapError(error);
     }
