@@ -8,13 +8,7 @@ export interface LoggerEntry {
   log: LogFields;
 }
 
-const LEVEL_LABELS = {
-  0: "NOTHING",
-  1: "ERROR",
-  2: "WARN",
-  3: "INFO",
-  4: "DEBUG",
-} satisfies Record<number, string>;
+const LEVEL_LABELS = ["NOTHING", "ERROR", "WARN", "INFO", "DEBUG"] as const;
 
 export class Logger {
   #level: number;

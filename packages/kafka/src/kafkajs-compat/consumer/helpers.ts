@@ -1,4 +1,4 @@
-import { Consumer } from "../../consumer/index.ts";
+import type { ConsumerOptions } from "../../consumer/index.ts";
 import { hasStringName, isBoolean, isNumber, isString } from "../../type-guards.ts";
 import type { CompatOptions, CompatValue } from "../types.ts";
 
@@ -6,9 +6,7 @@ export function numberOption(value: CompatValue): number | undefined {
   return isNumber(value) ? value : undefined;
 }
 
-export function createCompatConsumerOptions(
-  options: CompatOptions,
-): ConstructorParameters<typeof Consumer>[1] {
+export function createCompatConsumerOptions(options: CompatOptions): ConsumerOptions {
   const assignors = Array.isArray(options.partitionAssignors) ? options.partitionAssignors : [];
   const cooperative = assignors.some(
     (assignor) => hasStringName(assignor) && assignor.name === "CooperativeStickyAssignor",
