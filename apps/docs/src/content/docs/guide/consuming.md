@@ -1,6 +1,6 @@
 ---
 title: Consuming
-description: Consuming
+description: Read records with manual assignment or managed consumer groups.
 ---
 
 ## Three ways to consume

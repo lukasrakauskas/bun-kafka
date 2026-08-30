@@ -12,12 +12,13 @@ describe("Consumer", () => {
     try {
       await c.subscribe(name);
       const got: string[] = [];
-      while (got.length < 25)
+      while (got.length < 25) {
         got.push(
           ...(await c.fetch({ maxWaitMs: 200, maxMessages: 25 - got.length })).map((m) =>
-            dec(m.value)!,
+            dec(m.value),
           ),
         );
+      }
       expect(got[0]).toBe("hello-0");
       expect(got[24]).toBe("hello-24");
     } finally {
@@ -39,7 +40,9 @@ describe("Consumer", () => {
         expect(message.topic).toBe(name);
         expect(message.key).toBeTruthy();
         expect(message.headers.i).toBeTruthy();
-        if (++count >= 5) break;
+        if (++count >= 5) {
+          break;
+        }
       }
       expect(count).toBe(5);
     } finally {
@@ -63,7 +66,7 @@ describe("Consumer", () => {
       const start = first.offset;
       await c.fetch({ maxWaitMs: 500, maxMessages: 4 });
       c.seek({ topic: name, partition: 0, offset: start });
-      const again = (await c.fetch({ maxWaitMs: 500, maxMessages: 1 }))[0]!;
+      const again = (await c.fetch({ maxWaitMs: 500, maxMessages: 1 }))[0];
       expect(again.offset).toBe(start);
       expect(c.position(name, 0)).toBe(start + 1n);
     } finally {

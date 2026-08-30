@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { Writer } from "../../src/bun/protocol.ts";
+import { encoder, type KafkaEncoder } from "../../src/protocol/index.ts";
 
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 
 describe("SASL OAUTHBEARER reauthentication", () => {
   test("re-authenticates before the advertised session lifetime elapses", async () => {
@@ -19,22 +21,30 @@ describe("SASL OAUTHBEARER reauthentication", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          if (key === 36) authEvents.push(Date.now());
-          let body: Writer;
-          if (key === 18) body = apiVersions();
-          else if (key === 17)
-            body = new Writer().i16(0).array(["OAUTHBEARER"], (writer, m) => writer.string(m));
-          else if (key === 36)
-            body = new Writer().i16(0).string(null).bytes(new Uint8Array()).i64(500); // lifetime 500ms
-          else body = metadataBody(listener.port);
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
+          if (key === 36) {
+            authEvents.push(Date.now());
+          }
+          let body: KafkaEncoder;
+          if (key === 18) {
+            body = apiVersions();
+          } else if (key === 17) {
+            body = encoder()
+              .i16(0)
+              .array(["OAUTHBEARER"], (writer, m) => writer.string(m));
+          } else if (key === 36) {
+            body = encoder().i16(0).string(null).bytes(new Uint8Array()).i64(500);
+          } // lifetime 500ms
+          else {
+            body = metadataBody(listener.port);
+          }
+          const response = encoder().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());
         },
       },
     });
     function metadataBody(port: number) {
-      return new Writer()
+      return encoder()
         .array([{ id: 1, host: "127.0.0.1", port }], (writer, b) =>
           writer.i32(b.id).string(b.host).i32(b.port).string(null),
         )

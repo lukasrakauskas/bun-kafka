@@ -1,6 +1,6 @@
 ---
 title: Security
-description: Security
+description: Connect with TLS, mTLS, SASL, SCRAM, or OAuth bearer tokens.
 ---
 
 ## TLS

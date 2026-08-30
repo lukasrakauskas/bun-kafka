@@ -1,6 +1,6 @@
 ---
 title: Observability
-description: Observability and operations
+description: Monitor broker health, collect client metrics, and shut down safely.
 ---
 
 ## Stats
@@ -20,9 +20,8 @@ console.log(kafka.stats());
 // { connections, requests, bytesSent, bytesReceived, retries, throttles, throttleTimeMs }
 ```
 
-Counters are cumulative since client creation. Ship them to your metrics system on the interval;
-derive rates and error ratios there. Histograms are deliberately left to your metrics stack (see
-the [gap audit](../client-gap-audit.md)).
+Counters are cumulative since client creation. Send them to your metrics system on the interval,
+then calculate rates, error ratios, and latency histograms there.
 
 ## Health checks
 
@@ -34,7 +33,8 @@ const report = await kafka.healthCheck();
 report.ok; // convenience: all brokers fine
 ```
 
-Wire this into Kubernetes liveness/readiness or a `/healthz` route.
+Use this for readiness checks or diagnostics. Keep liveness checks process-local so a broker outage
+does not restart every application instance.
 
 ## Logging hooks
 
@@ -69,6 +69,4 @@ best-effort LeaveGroup so rebalancing starts immediately instead of after the se
 - Enable idempotent producers where duplicates hurt.
 - Prefer cooperative-sticky assignment for fleets with many partitions.
 - Monitor `retries`/`throttles` counters; sustained growth means broker pressure.
-- Run the soak harness (`bun run test:soak`) against a staging cluster before major rollouts —
-  it validates throughput, latency, memory, lag recovery, and record-order integrity with
-  release gates ([methodology](../performance-validation.md)).
+- Before a major rollout, run a produce-and-consume smoke test against your staging cluster.

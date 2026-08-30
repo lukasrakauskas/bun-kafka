@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 
 const hyperfine = Bun.which("hyperfine");
-if (!hyperfine) throw new Error("hyperfine is required: https://github.com/sharkdp/hyperfine");
+if (!hyperfine) {
+  throw new Error("hyperfine is required: https://github.com/sharkdp/hyperfine");
+}
 
 await Bun.$`mkdir -p native/build`;
 const COMMAND_NAME = "--command-name";
@@ -32,14 +34,16 @@ if (process.env.KAFKA_BROKERS) {
     "bun-kafka",
     `bun bench/bun-produce-consume.ts ${topic}-bun-$(date +%s%N) ${count}`,
   );
-  if (await Bun.file("native/build/bench-go").exists())
+  if (await Bun.file("native/build/bench-go").exists()) {
     args.push(COMMAND_NAME, "franz-go", `native/build/bench-go ${topic}-go-$(date +%s%N) ${count}`);
-  if (await Bun.file("native/build/bench-rust").exists())
+  }
+  if (await Bun.file("native/build/bench-rust").exists()) {
     args.push(
       COMMAND_NAME,
       "rdkafka-rust",
       `native/build/bench-rust ${topic}-rust-$(date +%s%N) ${count}`,
     );
+  }
 }
 
 const result = Bun.spawnSync([hyperfine, ...args], {

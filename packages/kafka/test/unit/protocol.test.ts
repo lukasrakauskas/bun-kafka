@@ -1,14 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { KafkaError } from "../../index.ts";
 import {
-  Reader,
   RecordSetDecoder,
-  Writer,
   crc32c,
   decodeRecordSet,
   encodeRecordBatch,
   murmur2,
-} from "../../src/bun/protocol.ts";
+} from "../../src/protocol/index.ts";
+import {
+  decoder,
+  type KafkaDecoder,
+  encoder,
+  type KafkaEncoder,
+} from "../../src/protocol/index.ts";
 
 const decode = (value: Uint8Array | null) =>
   value === null ? null : new TextDecoder().decode(value);
@@ -22,14 +26,14 @@ describe("Kafka wire protocol primitives", () => {
     const messages = decodeRecordSet(batch, "events", 3, 7);
 
     expect(messages).toHaveLength(2);
-    expect(messages[0]!.offset).toBe(0n);
-    expect(messages[1]!.offset).toBe(1n);
-    expect(messages[1]!.timestamp).toBe(1005n);
-    expect(decode(messages[0]!.key)).toBe("a");
-    expect(decode(messages[0]!.value)).toBe("one");
-    expect(decode(messages[0]!.headers.trace!)).toBe("x");
-    expect(messages[0]!.headers.empty).toBeNull();
-    expect(messages[1]!.value).toBeNull();
+    expect(messages[0].offset).toBe(0n);
+    expect(messages[1].offset).toBe(1n);
+    expect(messages[1].timestamp).toBe(1005n);
+    expect(decode(messages[0].key)).toBe("a");
+    expect(decode(messages[0].value)).toBe("one");
+    expect(decode(messages[0].headers.trace)).toBe("x");
+    expect(messages[0].headers.empty).toBeNull();
+    expect(messages[1].value).toBeNull();
   });
 
   test("grows record batches beyond the initial writer buffer", () => {
@@ -44,22 +48,28 @@ describe("Kafka wire protocol primitives", () => {
     const batch = encodeRecordBatch(Array.from({ length: 25 }, (_, i) => ({ value: `v-${i}` })));
     const decoder = new RecordSetDecoder(batch, "paged", 0, 1);
     const messages = [];
-    while (!decoder.done) messages.push(...decoder.read(7));
+    while (!decoder.done) {
+      messages.push(...decoder.read(7));
+    }
     expect(messages).toHaveLength(25);
     expect(messages.map((message) => message.offset)).toEqual(
       Array.from({ length: 25 }, (_, i) => BigInt(i)),
     );
-    expect(messages[0]!.value!.buffer).toBe(batch.buffer);
+    expect(messages[0].value.buffer).toBe(batch.buffer);
 
     const copied = new RecordSetDecoder(batch, "paged", 0, 1, { copy: true }).read(1);
-    expect(copied[0]!.value!.buffer).not.toBe(batch.buffer);
+    expect(copied[0].value.buffer).not.toBe(batch.buffer);
   });
 
   test("uses fast number varints and bigint varlongs", () => {
-    const writer = new Writer();
-    for (const value of [-2147483648, -1, 0, 1, 2147483647]) writer.varInt(value);
-    for (const value of [-9007199254740991n, -1n, 0n, 1n, 9007199254740991n]) writer.varLong(value);
-    const reader = new Reader(writer.result());
+    const writer = encoder();
+    for (const value of [-2147483648, -1, 0, 1, 2147483647]) {
+      writer.varInt(value);
+    }
+    for (const value of [-9007199254740991n, -1n, 0n, 1n, 9007199254740991n]) {
+      writer.varLong(value);
+    }
+    const reader = decoder(writer.result());
     expect(Array.from({ length: 5 }, () => reader.varInt())).toEqual([
       -2147483648, -1, 0, 1, 2147483647,
     ]);
@@ -75,7 +85,7 @@ describe("Kafka wire protocol primitives", () => {
   test("CRC32C uses the Kafka polynomial and rejects corruption", () => {
     expect(crc32c(new TextEncoder().encode("123456789"))).toBe(0xe3069283);
     const batch = encodeRecordBatch([{ value: "safe" }]);
-    batch[batch.length - 1]! ^= 1;
+    batch[batch.length - 1] ^= 1;
     expect(() => decodeRecordSet(batch, "t", 0, 0)).toThrow(KafkaError);
   });
 
@@ -111,6 +121,6 @@ describe("Kafka wire protocol primitives", () => {
   });
 
   test("reader rejects truncated input", () => {
-    expect(() => new Reader(new Uint8Array([0])).i32()).toThrow(KafkaError);
+    expect(() => decoder(new Uint8Array([0])).i32()).toThrow(KafkaError);
   });
 });

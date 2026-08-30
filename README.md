@@ -1,30 +1,43 @@
 # bun-kafka
 
-Monorepo for [bun-kafka](packages/kafka) — a zero-dependency Kafka wire protocol client for Bun —
-and its [Starlight documentation site](apps/docs).
+> [!WARNING]
+> **Early development:** bun-kafka is under active development and is not yet recommended for
+> production workloads. APIs may change between releases.
 
-## Layout
+This repository contains `bun-kafka`, a zero-dependency Kafka client for Bun, and its documentation
+site.
 
-| Package                            | Description                                                                |
-| ---------------------------------- | -------------------------------------------------------------------------- |
-| [`packages/kafka`](packages/kafka) | The `bun-kafka` library: producer, consumer, admin, transactions, SASL/TLS |
-| [`apps/docs`](apps/docs)   | Documentation site ([Starlight](https://starlight.astro.build))            |
+## Use bun-kafka
 
-## Commands
+Install the package:
 
 ```bash
-bun install                 # install all workspaces
-
-# library (packages/kafka)
-bun run test                # unit + feature suites
-bun run lint                # oxlint
-bun run typecheck           # tsc --noEmit
-
-# docs site (apps/docs)
-bun run docs:dev            # dev server with hot reload
-bun run docs:build          # static build into apps/docs/dist
+bun add bun-kafka
 ```
 
-Package scripts delegate to the owning workspace (`--cwd`), so they can run from anywhere in the
-repository. See [packages/kafka/README.md](packages/kafka/README.md) for the full client
-documentation and release process.
+Start with the [package README](packages/kafka/README.md) or the
+[user documentation](apps/docs/src/content/docs/index.mdx).
+
+## Contribute
+
+```bash
+bun install
+bun run test
+bun run typecheck
+bun run lint
+bun run docs:build
+```
+
+Commands run from the repository root and delegate to the correct workspace. See the
+[developer documentation](docs/README.md) for test plans, release gates, audits, and maintenance
+notes.
+
+## Repository layout
+
+| Path                               | Purpose                                        |
+| ---------------------------------- | ---------------------------------------------- |
+| [`packages/kafka`](packages/kafka) | Published Kafka client and tests               |
+| [`apps/docs`](apps/docs)           | User documentation site                        |
+| [`docs`](docs/README.md)           | Contributor and maintainer documentation       |
+| [`bench`](bench)                   | Cross-client benchmark programs                |
+| [`native`](native)                 | Native comparison clients and benchmark output |

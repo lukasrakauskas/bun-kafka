@@ -21,8 +21,12 @@ const env = { ...process.env, KAFKA_BROKERS: brokers, MSG_SIZE: process.env.MSG_
 const cmds: Array<[string, string]> = [
   ["bun-kafka", `bun ${root}/bench/produce_consume.ts ${topicBase}-bun ${count}`],
 ];
-if (existsSync(goBin)) cmds.push(["franz-go", `${goBin} ${topicBase}-go ${count}`]);
-if (existsSync(rustBin)) cmds.push(["rdkafka-rust", `${rustBin} ${topicBase}-rust ${count}`]);
+if (existsSync(goBin)) {
+  cmds.push(["franz-go", `${goBin} ${topicBase}-go ${count}`]);
+}
+if (existsSync(rustBin)) {
+  cmds.push(["rdkafka-rust", `${rustBin} ${topicBase}-rust ${count}`]);
+}
 try {
   await import("kafkajs");
   cmds.push(["kafkajs", `bun ${root}/bench/kafkajs.ts ${topicBase}-kjs ${count}`]);
@@ -39,7 +43,9 @@ const args = [
   "--export-markdown",
   join(build, "hyperfine.md"),
 ];
-for (const [name, command] of cmds) args.push("--command-name", name, command);
+for (const [name, command] of cmds) {
+  args.push("--command-name", name, command);
+}
 
 console.log(
   "Running hyperfine:",

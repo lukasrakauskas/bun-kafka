@@ -17,7 +17,9 @@ function compose(...args: string[]): string {
     stdout: "pipe",
     stderr: "pipe",
   });
-  if (result.exitCode) throw new Error(new TextDecoder().decode(result.stderr));
+  if (result.exitCode) {
+    throw new Error(new TextDecoder().decode(result.stderr));
+  }
   return new TextDecoder().decode(result.stdout);
 }
 
@@ -37,7 +39,9 @@ async function waitFor<T>(fn: () => Promise<T | undefined>, timeoutMs = 15_000):
   while (Date.now() < deadline) {
     try {
       const result = await fn();
-      if (result !== undefined) return result;
+      if (result !== undefined) {
+        return result;
+      }
     } catch (error) {
       lastError = error;
     }
@@ -72,7 +76,7 @@ async function start(id: number): Promise<void> {
   compose("start", service(id));
   await waitFor(async () => {
     const client = new Kafka({
-      brokers: [brokers[id]!],
+      brokers: [brokers[id]],
       connectTimeoutMs: 300,
       requestTimeoutMs: 300,
       retry: { maxRetries: 0 },
@@ -141,7 +145,7 @@ async function scan(
   await waitFor(async () => {
     messages.push(...(await consumer.fetch({ maxWaitMs: 50, maxMessages: 500, copy: true })));
     return assignments.every(
-      ({ partition }) => (consumer.position(name, partition) ?? 0n) >= highs[partition]!,
+      ({ partition }) => (consumer.position(name, partition) ?? 0n) >= highs[partition],
     )
       ? true
       : undefined;
@@ -166,7 +170,7 @@ chaos("three-broker Kafka chaos", () => {
       });
       const consumer = client.consumer({ fromBeginning: true });
       await consumer.assign([{ topic: name, partition: 0, offset: 0n }]);
-      const held = (await consumer.fetch({ maxWaitMs: 50, maxMessages: 1 }))[0]!;
+      const held = (await consumer.fetch({ maxWaitMs: 50, maxMessages: 1 }))[0];
       killed = await leader(client, name);
       stop(killed);
 
@@ -212,7 +216,9 @@ chaos("three-broker Kafka chaos", () => {
         await recovered.disconnect();
       }
     } finally {
-      if (killed >= 0) await start(killed);
+      if (killed >= 0) {
+        await start(killed);
+      }
       await client.disconnect();
     }
   }, 60_000);
@@ -261,7 +267,9 @@ chaos("three-broker Kafka chaos", () => {
         }
       });
     } finally {
-      if (paused >= 0) unpause(paused);
+      if (paused >= 0) {
+        unpause(paused);
+      }
       await client.disconnect();
     }
   }, 30_000);
@@ -287,8 +295,9 @@ chaos("three-broker Kafka chaos", () => {
               messages: [{ partition: id, value: messageId }],
             }),
           )) === "fulfilled"
-        )
+        ) {
           acknowledged.push(messageId);
+        }
         await start(id);
         stopped = -1;
       }
@@ -311,13 +320,16 @@ chaos("three-broker Kafka chaos", () => {
         });
         acknowledged.push(finalId);
         const values = (await scan(recovered, name, 3)).map((message) => decode(message.value));
-        for (const id of acknowledged)
+        for (const id of acknowledged) {
           expect(values.filter((value) => value === id)).toHaveLength(1);
+        }
       } finally {
         await recovered.disconnect();
       }
     } finally {
-      if (stopped >= 0) await start(stopped);
+      if (stopped >= 0) {
+        await start(stopped);
+      }
       await client.disconnect();
     }
   }, 120_000);
@@ -420,8 +432,9 @@ chaos("three-broker Kafka chaos", () => {
           );
         }
       } finally {
-        if (id >= 0)
+        if (id >= 0) {
           compose("exec", "-T", service(id), "sh", "-c", "tc qdisc del dev eth0 root || true");
+        }
         await client.disconnect();
       }
     },

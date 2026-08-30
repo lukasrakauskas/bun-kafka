@@ -74,8 +74,8 @@ describe("Producer delivery options (real broker)", () => {
           value: `v${n}`,
           onDelivery: (error, result) => {
             expect(error).toBeNull();
-            expect(result!.topic).toBe(name);
-            expect(result!.baseOffset).toBeGreaterThanOrEqual(0n);
+            expect(result.topic).toBe(name);
+            expect(result.baseOffset).toBeGreaterThanOrEqual(0n);
             delivered.push(`k${n}`);
           },
         })),

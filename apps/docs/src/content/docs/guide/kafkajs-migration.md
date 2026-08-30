@@ -1,6 +1,6 @@
 ---
 title: Migrating from kafkajs
-description: Migrating from kafkajs
+description: Move an existing kafkajs application to bun-kafka in small steps.
 ---
 
 bun-kafka ships a drop-in-shaped compatibility layer so existing kafkajs code runs under Bun

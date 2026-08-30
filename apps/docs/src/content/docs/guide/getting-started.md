@@ -1,25 +1,24 @@
 ---
 title: Getting started
-description: Getting started
+description: Install bun-kafka and send and receive your first Kafka record.
 ---
+
+This guide takes you from installation to a working producer and consumer.
 
 ## Requirements
 
 - [Bun](https://bun.sh) 1.4 or newer
-- Any Apache Kafka 0.11+ or Redpanda broker reachable over TCP
+- Apache Kafka 0.11 or newer, or a Kafka-compatible Redpanda broker
 
-## Install
+## Install bun-kafka
 
 ```bash
 bun add bun-kafka
 ```
 
-The package has zero runtime dependencies: it speaks the Kafka wire protocol directly through
-`Bun.connect()`.
-
 ## Start a local broker
 
-Redpanda in one container is the fastest way to get a Kafka-compatible cluster:
+Skip this step if you already have a broker. For local development, start Redpanda in Docker:
 
 ```bash
 docker run -d --name redpanda -p 9092:9092 \
@@ -29,7 +28,9 @@ docker run -d --name redpanda -p 9092:9092 \
   --advertise-kafka-addr=PLAINTEXT://127.0.0.1:9092
 ```
 
-## Produce your first record
+## Send a record
+
+Create `example.ts`:
 
 ```ts
 import { Kafka } from "bun-kafka";
@@ -45,34 +46,41 @@ await producer.send({
 await kafka.disconnect();
 ```
 
-Topics are created automatically by most dev brokers. If yours does not, create the topic first
-with the admin API (see [administration](admin.md)).
+Run it:
 
-## Consume your first records
+```bash
+bun example.ts
+```
 
-Manual assignment needs no consumer group:
+Most development brokers create the topic automatically. If yours does not, create `hello` with
+your broker tools or the [admin API](admin.md).
+
+## Read the record
+
+Replace `example.ts` with:
 
 ```ts
+import { Kafka } from "bun-kafka";
+
 const kafka = new Kafka({ brokers: ["127.0.0.1:9092"] });
 const consumer = kafka.consumer({ fromBeginning: true });
 
 await consumer.assign([{ topic: "hello", partition: 0, offset: "earliest" }]);
 
-for await (const message of consumer) {
-  console.log(message.offset, new TextDecoder().decode(message.value!));
-  if (message.offset >= 9n) break;
-}
+const [message] = await consumer.fetch({ maxMessages: 1, maxWaitMs: 5_000 });
+if (!message) throw new Error("No record received");
+
+console.log(new TextDecoder().decode(message.value!));
 
 await consumer.close();
 await kafka.disconnect();
 ```
 
-`message.value` is a `Uint8Array` view into the receive buffer — decode it with
-`TextDecoder`, `JSON.parse`, or your format of choice.
+Run it again. The output is `hello world`.
 
-## Next steps
+## Choose your next guide
 
-- [Producing](producing.md): batching, compression, idempotence, delivery callbacks
-- [Consuming](consuming.md): consumer groups, offsets, rebalancing
-- [Transactions](transactions.md): exactly-once patterns
-- [Configuration reference](configuration.md): every option
+- [Producing](producing.md): delivery guarantees, batching, compression, and partitioning
+- [Consuming](consuming.md): consumer groups, offsets, and flow control
+- [Security](security.md): TLS and SASL authentication
+- [Configuration reference](configuration.md): all client, producer, and consumer options

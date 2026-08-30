@@ -1,6 +1,6 @@
-import { KafkaError, kafkaErrorName } from "../errors.ts";
+import { KafkaError, KafkaErrorCode, kafkaErrorName } from "../errors.ts";
 import type { ClusterMetadata } from "../types.ts";
-import type { BunKafkaSasl, BunKafkaTls } from "./connection.ts";
+import type { BunKafkaSasl, BunKafkaTls } from "./connection/index.ts";
 
 export {
   API_ADD_OFFSETS_TO_TXN,
@@ -83,9 +83,108 @@ const API_ADD_OFFSETS_TO_TXN = 25;
 const API_END_TXN = 26;
 const API_TXN_OFFSET_COMMIT = 28;
 
-const retriableErrors = new Set([
-  1, 2, 3, 5, 6, 7, 8, 9, 10, 13, 14, 15, 16, 19, 20, 25, 27, 32, 33, 38, 39, 41, 44, 45, 47, 49,
-  56, 70, 71, 74, 75, 78, 82, 86, 88, 89,
+/** Shared client defaults (ms / bytes). */
+export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+export const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+export const DEFAULT_MAX_RESPONSE_BYTES = 104_857_600; // 100 MiB
+export const DEFAULT_MAX_RETRIES = 3;
+export const DEFAULT_INITIAL_BACKOFF_MS = 50;
+export const DEFAULT_MAX_BACKOFF_MS = 2_000;
+export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
+export const DEFAULT_HEALTH_CHECK_TIMEOUT_MS = 5_000;
+export const DEFAULT_SESSION_TIMEOUT_MS = 45_000;
+export const DEFAULT_REBALANCE_TIMEOUT_MS = 60_000;
+export const DEFAULT_HEARTBEAT_INTERVAL_MS = 3_000;
+export const DEFAULT_FETCH_MAX_WAIT_MS = 500;
+export const DEFAULT_FETCH_IDLE_SLEEP_MS = 250;
+export const DEFAULT_FETCH_MAX_MESSAGES = 500;
+export const DEFAULT_FETCH_MAX_BYTES = 52_428_800; // 50 MiB
+export const DEFAULT_FETCH_MAX_PARTITION_BYTES = 1_048_576; // 1 MiB
+export const DEFAULT_PRODUCE_TIMEOUT_MS = 30_000;
+export const DEFAULT_PRODUCE_LINGER_MS = 5;
+export const DEFAULT_PRODUCE_BATCH_MAX_MESSAGES = 1_000;
+export const DEFAULT_TRANSACTION_TIMEOUT_MS = 60_000;
+export const DEFAULT_ADMIN_TIMEOUT_MS = 30_000;
+export const DEFAULT_ADMIN_POLL_MIN_MS = 5_000;
+export const DEFAULT_ADMIN_POLL_SLEEP_MS = 100;
+export const DEFAULT_KAFKAJS_CONNECT_TIMEOUT_MS = 1_000;
+export const DEFAULT_KAFKAJS_MAX_RETRIES = 5;
+export const DEFAULT_KAFKAJS_INITIAL_BACKOFF_MS = 300;
+export const DEFAULT_KAFKAJS_MAX_BACKOFF_MS = 30_000;
+export const DEFAULT_KAFKAJS_MAX_WAIT_MS_CAP = 1_000;
+export const DEFAULT_BROKER_PORT = 9092;
+export const SIZE_I32 = 4;
+export const SIZE_I64 = 8;
+export const INT16_MAX = 0x7fff;
+export const INT32_MAX = 0x7fff_ffff;
+export const INT32_MIN = -0x8000_0000;
+export const UINT32_MAX = 0xffff_ffff;
+export const SEQ_WRAP = 0x8000_0000;
+export const MAX_TCP_PORT = 65_535;
+export const HEX_DUMP_BYTES = 80;
+export const RETRY_JITTER_BASE = 0.5;
+export const EARLIEST_OFFSET = -2;
+export const LATEST_OFFSET = -1;
+export const CONFIG_SOURCE_DEFAULT = 5;
+export const RECORD_ATTR_CONTROL = 0x20;
+export const RECORD_ATTR_TRANSACTIONAL = 0x10;
+export const RECORD_ATTR_TIMESTAMP_TYPE = 8;
+export const RECORD_BATCH_HEADER_SIZE = 61;
+export const RECORD_BATCH_LENGTH_MIN = 9;
+export const FETCH_API_VERSION = 7;
+export const CREATE_TOPICS_API_VERSION = 4;
+export const DELETE_TOPICS_API_VERSION = 3;
+export const PRODUCE_API_VERSION = 3;
+/** Join/Sync/Heartbeat/Leave versions that carry group.instance.id. */
+export const GROUP_INSTANCE_API_VERSION = 3;
+export const JOIN_GROUP_BASE_VERSION = 2;
+export const DESCRIBE_ACLS_API_KEY = 29;
+export const METADATA_REFRESH_SLEEP_MS = 10;
+export const RADIX_HEX = 16;
+
+export const API_API_VERSIONS = 18;
+export const API_SASL_HANDSHAKE = 17;
+export const API_SASL_AUTHENTICATE = 36;
+export const COMPRESSION_MASK = 7;
+export const MAX_COMPRESSION_TYPE = 4;
+
+const retriableErrors = new Set<number>([
+  KafkaErrorCode.OFFSET_OUT_OF_RANGE,
+  KafkaErrorCode.CORRUPT_MESSAGE,
+  KafkaErrorCode.UNKNOWN_TOPIC_OR_PARTITION,
+  KafkaErrorCode.LEADER_NOT_AVAILABLE,
+  KafkaErrorCode.NOT_LEADER_OR_FOLLOWER,
+  KafkaErrorCode.REQUEST_TIMED_OUT,
+  KafkaErrorCode.BROKER_NOT_AVAILABLE,
+  KafkaErrorCode.REPLICA_NOT_AVAILABLE,
+  KafkaErrorCode.MESSAGE_TOO_LARGE,
+  KafkaErrorCode.NETWORK_EXCEPTION,
+  KafkaErrorCode.COORDINATOR_LOAD_IN_PROGRESS,
+  KafkaErrorCode.COORDINATOR_NOT_AVAILABLE,
+  KafkaErrorCode.NOT_COORDINATOR,
+  KafkaErrorCode.NOT_ENOUGH_REPLICAS,
+  KafkaErrorCode.NOT_ENOUGH_REPLICAS_AFTER_APPEND,
+  KafkaErrorCode.UNKNOWN_MEMBER_ID,
+  KafkaErrorCode.REBALANCE_IN_PROGRESS,
+  KafkaErrorCode.INVALID_TIMESTAMP,
+  KafkaErrorCode.UNSUPPORTED_SASL_MECHANISM,
+  KafkaErrorCode.INVALID_REPLICATION_FACTOR,
+  KafkaErrorCode.INVALID_REPLICA_ASSIGNMENT,
+  KafkaErrorCode.NOT_CONTROLLER,
+  KafkaErrorCode.POLICY_VIOLATION,
+  KafkaErrorCode.OUT_OF_ORDER_SEQUENCE_NUMBER,
+  KafkaErrorCode.INVALID_PRODUCER_EPOCH,
+  KafkaErrorCode.INVALID_PRODUCER_ID_MAPPING,
+  KafkaErrorCode.KAFKA_STORAGE_ERROR,
+  KafkaErrorCode.FETCH_SESSION_ID_NOT_FOUND,
+  KafkaErrorCode.INVALID_FETCH_SESSION_EPOCH,
+  KafkaErrorCode.FENCED_LEADER_EPOCH,
+  KafkaErrorCode.UNKNOWN_LEADER_EPOCH,
+  KafkaErrorCode.OFFSET_NOT_AVAILABLE,
+  KafkaErrorCode.FENCED_INSTANCE_ID,
+  KafkaErrorCode.GROUP_SUBSCRIBED_TO_TOPIC,
+  KafkaErrorCode.UNSTABLE_OFFSET_COMMIT,
+  KafkaErrorCode.THROTTLING_QUOTA_EXCEEDED,
 ]);
 
 function kafkaError(code: number, context: string, detail?: string | null): KafkaError {
@@ -94,7 +193,9 @@ function kafkaError(code: number, context: string, detail?: string | null): Kafk
     : `${context}: ${kafkaErrorName(code)}`;
   return new KafkaError(code, label, {
     retriable: retriableErrors.has(code),
-    fatal: code === 58 || code === 34,
+    fatal:
+      code === KafkaErrorCode.SASL_AUTHENTICATION_FAILED ||
+      code === KafkaErrorCode.ILLEGAL_SASL_STATE,
   });
 }
 
@@ -109,7 +210,7 @@ function partitionKey(topic: string, partition: number): string {
 
 function retryDelay(options: Required<RetryOptions>, attempt: number): number {
   const base = Math.min(options.maxBackoffMs, options.initialBackoffMs * 2 ** attempt);
-  return Math.round(base * (0.5 + Math.random()));
+  return Math.round(base * (RETRY_JITTER_BASE + Math.random()));
 }
 
 export interface RetryOptions {

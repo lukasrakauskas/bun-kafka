@@ -1,4 +1,4 @@
-import { BunAdmin, BunConsumer, BunProducer, type KafkaOptions } from "../index.ts";
+import { Admin, Consumer, Producer, type KafkaOptions } from "../index.ts";
 
 export const BROKERS = process.env.KAFKA_BROKERS ?? "127.0.0.1:9092";
 
@@ -9,15 +9,15 @@ export function topic(prefix = "bun-kafka") {
 }
 
 export function producer() {
-  return new BunProducer(options());
+  return new Producer(options());
 }
 
 export function consumer(extra: { fromBeginning?: boolean } = {}) {
-  return new BunConsumer(options(), extra);
+  return new Consumer(options(), extra);
 }
 
 export function admin() {
-  return new BunAdmin(options());
+  return new Admin(options());
 }
 
 export async function waitFor<T>(
@@ -29,7 +29,9 @@ export async function waitFor<T>(
   while (Date.now() - start < timeoutMs) {
     try {
       const value = await fn();
-      if (value !== undefined) return value;
+      if (value !== undefined) {
+        return value;
+      }
     } catch (error) {
       lastErr = error;
     }
@@ -54,7 +56,7 @@ export async function waitTopic(name: string, timeoutMs = 15_000) {
   }
 }
 
-export async function produceN(p: BunProducer, name: string, count: number, prefix = "m") {
+export async function produceN(p: Producer, name: string, count: number, prefix = "m") {
   await p.send({
     topic: name,
     messages: Array.from({ length: count }, (_, i) => ({

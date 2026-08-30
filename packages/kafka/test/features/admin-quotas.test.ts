@@ -1,12 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { Reader, Writer } from "../../src/bun/protocol.ts";
+import {
+  decoder,
+  type KafkaDecoder,
+  encoder,
+  type KafkaEncoder,
+} from "../../src/protocol/index.ts";
 
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 
 const apiVersionsBody = apiVersions();
 function requestBodyBytes(buffer: ArrayBuffer, byteOffset: number, byteLength: number): Uint8Array {
@@ -26,11 +33,11 @@ describe("Client quotas (mock broker)", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          let response: Writer;
+          let response: KafkaEncoder;
           if (key === 18) {
-            response = new Writer().i32(correlation).raw(apiVersionsBody.result());
+            response = encoder().i32(correlation).raw(apiVersionsBody.result());
             socket.write(
-              new Writer().i32(0).patchI32(0, response.length).raw(response.result()).result(),
+              encoder().i32(0).patchI32(0, response.length).raw(response.result()).result(),
             );
             return;
           }
@@ -39,7 +46,7 @@ describe("Client quotas (mock broker)", () => {
           }
           if (key === 48) {
             sawDescribe = true;
-            const req = new Reader(
+            const req = decoder(
               requestBodyBytes(request.buffer, request.byteOffset, request.byteLength),
             );
             const components = req.compactArray((r) => ({
@@ -57,7 +64,7 @@ describe("Client quotas (mock broker)", () => {
             expect(req.bool()).toBe(false); // strict
           }
           // DescribeClientQuotas v1 response with one entry.
-          response = new Writer()
+          response = encoder()
             .i32(correlation)
             .uvarint(0) // header tags
             .i32(0) // throttle
@@ -78,7 +85,7 @@ describe("Client quotas (mock broker)", () => {
             )
             .tags();
           socket.write(
-            new Writer().i32(0).patchI32(0, response.length).raw(response.result()).result(),
+            encoder().i32(0).patchI32(0, response.length).raw(response.result()).result(),
           );
         },
       },
@@ -91,8 +98,8 @@ describe("Client quotas (mock broker)", () => {
           { entityType: "client-id", matchType: "exact", match: "quota-app" },
         ]);
       expect(sawDescribe).toBe(true);
-      expect(result[0]!.entities).toEqual([{ entityType: "client-id", entityName: "quota-app" }]);
-      expect(result[0]!.values).toEqual([{ name: "producer_byte_rate", value: 1024 }]);
+      expect(result[0].entities).toEqual([{ entityType: "client-id", entityName: "quota-app" }]);
+      expect(result[0].values).toEqual([{ name: "producer_byte_rate", value: 1024 }]);
     } finally {
       await kafka.disconnect();
       listener.stop(true);
@@ -111,13 +118,13 @@ describe("Client quotas (mock broker)", () => {
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
           if (key === 18) {
-            const r2 = new Writer().i32(correlation).raw(apiVersionsBody.result());
-            socket.write(new Writer().i32(0).patchI32(0, r2.length).raw(r2.result()).result());
+            const r2 = encoder().i32(correlation).raw(apiVersionsBody.result());
+            socket.write(encoder().i32(0).patchI32(0, r2.length).raw(r2.result()).result());
             return;
           }
           if (key === 49) {
             sawAlter = true;
-            const body = new Reader(
+            const body = decoder(
               requestBodyBytes(request.buffer, request.byteOffset, request.byteLength),
             );
             const entries = body.compactArray((entryReader) => {
@@ -136,10 +143,10 @@ describe("Client quotas (mock broker)", () => {
               return { entity, ops, entryTags };
             });
             sawValidateOnly = body.bool();
-            expect(entries[0]!.entity[0]).toEqual({ t: "user", n: "alice", tags: 0 });
-            expect(entries[0]!.ops[0]!.key).toBe("consumer_byte_rate");
-            expect(entries[0]!.entryTags).toBe(0);
-            var responseBody = new Writer()
+            expect(entries[0].entity[0]).toEqual({ t: "user", n: "alice", tags: 0 });
+            expect(entries[0].ops[0].key).toBe("consumer_byte_rate");
+            expect(entries[0].entryTags).toBe(0);
+            const resp = encoder()
               .i32(correlation)
               .uvarint(0)
               .i32(0)
@@ -155,9 +162,8 @@ describe("Client quotas (mock broker)", () => {
                     .tags(),
               )
               .tags();
+            socket.write(encoder().i32(0).patchI32(0, resp.length).raw(resp.result()).result());
           }
-          const resp: Writer = responseBody!;
-          socket.write(new Writer().i32(0).patchI32(0, resp.length).raw(resp.result()).result());
         },
       },
     });
@@ -172,8 +178,8 @@ describe("Client quotas (mock broker)", () => {
       ]);
       expect(sawAlter).toBe(true);
       expect(sawValidateOnly).toBe(true);
-      expect(result[0]!.error).toBe(0);
-      expect(result[0]!.entity).toEqual([{ entityType: "user", entityName: "alice" }]);
+      expect(result[0].error).toBe(0);
+      expect(result[0].entity).toEqual([{ entityType: "user", entityName: "alice" }]);
     } finally {
       await kafka.disconnect();
       listener.stop(true);
@@ -194,13 +200,13 @@ describe("Delegation tokens (mock broker)", () => {
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
           if (key === 18) {
-            const r3 = new Writer().i32(correlation).raw(apiVersionsBody.result());
-            socket.write(new Writer().i32(0).patchI32(0, r3.length).raw(r3.result()).result());
+            const r3 = encoder().i32(correlation).raw(apiVersionsBody.result());
+            socket.write(encoder().i32(0).patchI32(0, r3.length).raw(r3.result()).result());
             return;
           }
           if (key === 38) {
             sawCreate = true;
-            const body = new Reader(
+            const body = decoder(
               requestBodyBytes(request.buffer, request.byteOffset, request.byteLength),
             );
             expect(body.compactString()).toBe(null); // owner principal type
@@ -208,7 +214,7 @@ describe("Delegation tokens (mock broker)", () => {
             expect(body.i64()).toBe(-1n); // renew period: default
           }
           hmacBytes = new TextEncoder().encode("token-hmac-bytes");
-          const response = new Writer()
+          const response = encoder()
             .i32(correlation)
             .uvarint(0)
             .i32(0)
@@ -224,7 +230,7 @@ describe("Delegation tokens (mock broker)", () => {
             .compactBytes(hmacBytes)
             .tags();
           socket.write(
-            new Writer().i32(0).patchI32(0, response.length).raw(response.result()).result(),
+            encoder().i32(0).patchI32(0, response.length).raw(response.result()).result(),
           );
         },
       },
@@ -235,7 +241,7 @@ describe("Delegation tokens (mock broker)", () => {
       expect(sawCreate).toBe(true);
       expect(token.principalName).toBe("alice");
       expect(token.tokenId).toBe("token-id-1");
-      expect(new TextDecoder().decode(token.hmac!)).toBe("token-hmac-bytes");
+      expect(new TextDecoder().decode(token.hmac)).toBe("token-hmac-bytes");
       expect(token.expiryTimestampMs).toBe(1710000000000n);
     } finally {
       await kafka.disconnect();
@@ -253,8 +259,10 @@ describe("Delegation tokens (mock broker)", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          if (key !== 18) seenKeys.push(key);
-          const response = new Writer()
+          if (key !== 18) {
+            seenKeys.push(key);
+          }
+          const response = encoder()
             .i32(correlation)
             .uvarint(0)
             .i32(0)
@@ -263,7 +271,7 @@ describe("Delegation tokens (mock broker)", () => {
             .i64(1234567890n)
             .tags();
           socket.write(
-            new Writer().i32(0).patchI32(0, response.length).raw(response.result()).result(),
+            encoder().i32(0).patchI32(0, response.length).raw(response.result()).result(),
           );
         },
       },
@@ -291,7 +299,7 @@ describe("Delegation tokens (mock broker)", () => {
         data(socket, request) {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const correlation = view.getInt32(8);
-          const response = new Writer()
+          const response = encoder()
             .i32(correlation)
             .uvarint(0)
             .i32(0)
@@ -313,7 +321,7 @@ describe("Delegation tokens (mock broker)", () => {
             )
             .tags();
           socket.write(
-            new Writer().i32(0).patchI32(0, response.length).raw(response.result()).result(),
+            encoder().i32(0).patchI32(0, response.length).raw(response.result()).result(),
           );
         },
       },

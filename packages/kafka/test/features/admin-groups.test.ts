@@ -1,17 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { Writer } from "../../src/bun/protocol.ts";
+import { encoder, type KafkaEncoder } from "../../src/protocol/index.ts";
 
 const TEST_PRINCIPAL = "User:bun-kafka-test";
 
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 
 function metadataBody(listenerPort: number) {
-  return new Writer()
+  return encoder()
     .array([{ id: 1, host: "127.0.0.1", port: listenerPort }], (writer, b) =>
       writer.i32(b.id).string(b.host).i32(b.port).string(null),
     )
@@ -33,6 +35,194 @@ function metadataBody(listenerPort: number) {
     );
 }
 
+function handleFrames(
+  socket: Bun.Socket,
+  request: Uint8Array,
+  bodyFor: (key: number) => KafkaEncoder,
+  observe: (key: number) => void = () => {},
+): void {
+  let offset = 0;
+  while (offset < request.byteLength) {
+    const size = new DataView(request.buffer, request.byteOffset + offset).getInt32(0);
+    const frame = request.subarray(offset, offset + 4 + size);
+    const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
+    const key = view.getInt16(4);
+    observe(key);
+    const response = encoder().i32(0).i32(view.getInt32(8)).raw(bodyFor(key).result());
+    response.patchI32(0, response.length - 4);
+    socket.write(response.result());
+    offset += 4 + size;
+  }
+}
+
+function adminGroupBody(key: number, port: number): KafkaEncoder {
+  if (key === 18) {
+    return apiVersions();
+  }
+  if (key === 3) {
+    return metadataBody(port);
+  }
+  if (key === 16) {
+    return encoder()
+      .i32(0)
+      .i16(0)
+      .array(["workers"], (writer, group) => writer.string(group).string("consumer"));
+  }
+  if (key === 15) {
+    return encoder()
+      .i32(0)
+      .array(["workers"], (writer, group) =>
+        writer
+          .i16(0)
+          .string(null)
+          .string(group)
+          .string("Stable")
+          .string("consumer")
+          .string("range")
+          .array(["member-1"], (memberWriter, member) =>
+            memberWriter
+              .string(member)
+              .string("app-1")
+              .string("host-1")
+              .bytes(null)
+              .bytes(new Uint8Array([0, 1, 2])),
+          ),
+      );
+  }
+  if (key === 42) {
+    return encoder()
+      .i32(0)
+      .array(["workers"], (writer, group) => writer.string(group).i16(0));
+  }
+  if (key === 21) {
+    return encoder()
+      .i32(0)
+      .array(["events"], (writer, name) =>
+        writer
+          .string(name)
+          .array([{ index: 0, low: 7n }], (partitionWriter, partition) =>
+            partitionWriter.i32(partition.index).i64(partition.low).i16(0),
+          ),
+      );
+  }
+  return encoder().i16(0);
+}
+
+function aclBody(key: number, port: number): KafkaEncoder {
+  if (key === 18) {
+    return apiVersions();
+  }
+  if (key === 3) {
+    return metadataBody(port);
+  }
+  if (key === 30) {
+    return encoder()
+      .i32(0)
+      .array(["acl"], (writer) => writer.i16(0).string(null));
+  }
+  if (key === 29) {
+    return encoder()
+      .i32(0)
+      .i16(0)
+      .string(null)
+      .array([{ type: 2, name: "acl-topic" }], (writer, resource) =>
+        writer
+          .i8(resource.type)
+          .string(resource.name)
+          .array([{ principal: TEST_PRINCIPAL, host: "*" }], (aclWriter, acl) =>
+            aclWriter.string(acl.principal).string(acl.host).i8(3).i8(3),
+          ),
+      );
+  }
+  if (key === 31) {
+    return encoder()
+      .i32(0)
+      .array([true], (writer) =>
+        writer
+          .i16(0)
+          .string(null)
+          .array([{ error: 0, principal: TEST_PRINCIPAL }], (aclWriter, acl) =>
+            aclWriter
+              .i16(acl.error)
+              .string(null)
+              .i8(2)
+              .string("acl-topic")
+              .string(acl.principal)
+              .string("*")
+              .i8(3)
+              .i8(3),
+          ),
+      );
+  }
+  return encoder().i16(0);
+}
+
+type OffsetState = { listOffsets: number };
+
+function listOffsetBody(state: OffsetState): KafkaEncoder {
+  const request = state.listOffsets++;
+  let resolved = 7n;
+  if (request === 0) {
+    resolved = 5n;
+  } else if (request === 1) {
+    resolved = 9n;
+  }
+  return encoder().array(["events"], (writer, name) =>
+    writer
+      .string(name)
+      .array([0], (partitionWriter, partition) =>
+        partitionWriter.i32(partition).i16(0).i64(0).i64(resolved),
+      ),
+  );
+}
+
+function offsetBody(key: number, port: number, state: OffsetState): KafkaEncoder {
+  if (key === 18) {
+    return apiVersions();
+  }
+  if (key === 3) {
+    return metadataBody(port);
+  }
+  if (key === 10) {
+    return encoder().i16(0).i32(1).string("127.0.0.1").i32(port);
+  }
+  if (key === 2) {
+    return listOffsetBody(state);
+  }
+  if (key === 9) {
+    return encoder()
+      .array(["events"], (writer, name) =>
+        writer
+          .string(name)
+          .array([0], (partitionWriter, partition) =>
+            partitionWriter.i32(partition).i64(12).string(null).i16(0),
+          ),
+      )
+      .i16(0);
+  }
+  if (key === 8) {
+    return encoder().array(["events"], (writer, name) =>
+      writer
+        .string(name)
+        .array([0], (partitionWriter, partition) => partitionWriter.i32(partition).i16(0)),
+    );
+  }
+  if (key === 15) {
+    return encoder()
+      .i32(0)
+      .array(["g"], (writer, group) =>
+        writer
+          .i16(0)
+          .string(group)
+          .string("Dead")
+          .string(null)
+          .string(null)
+          .array([], (memberWriter) => memberWriter),
+      );
+  }
+  return encoder().i16(0);
+}
+
 describe("Admin: group and record management", () => {
   test("metadata exposes the cluster id", async () => {
     const listener = Bun.listen({
@@ -44,7 +234,7 @@ describe("Admin: group and record management", () => {
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
           const body = key === 18 ? apiVersions() : metadataBody(listener.port);
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
+          const response = encoder().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());
         },
@@ -71,70 +261,28 @@ describe("Admin: group and record management", () => {
       port: 0,
       socket: {
         data(socket, request) {
-          let offset = 0;
-          while (offset < request.byteLength) {
-            const size = new DataView(request.buffer, request.byteOffset + offset).getInt32(0);
-            const frameView = new DataView(request.buffer, request.byteOffset + offset + 4, 8);
-            const key = frameView.getInt16(0);
-            const correlation = viewCorrelation(
-              request.buffer,
-              request.byteOffset + offset + 4 + 8 - 4,
-            );
-            if (key === 16) sawListGroups = true;
-            if (key === 15) sawDescribeGroups = true;
-            if (key === 42) sawDeleteGroups = true;
-            if (key === 21) sawDeleteRecords = true;
-            let body: Writer;
-            if (key === 18) body = apiVersions();
-            else if (key === 3) body = metadataBody(listener.port);
-            // ListGroups v1 wire shape: [throttle][error][groups[{id, protocolType}]] — no per-group state (that arrived in v4).
-            else if (key === 16)
-              body = new Writer()
-                .i32(0)
-                .i16(0)
-                .array(["workers"], (writer, g) => writer.string(g).string("consumer"));
-            else if (key === 15)
-              body = new Writer().i32(0).array(["workers"], (writer, g) =>
-                writer
-                  .i16(0)
-                  .string(null)
-                  .string(g)
-                  .string("Stable")
-                  .string("consumer")
-                  .string("range")
-                  .array(["member-1"], (mWriter, m) =>
-                    mWriter
-                      .string(m)
-                      .string("app-1")
-                      .string("host-1")
-                      .bytes(null)
-                      .bytes(new Uint8Array([0, 1, 2])),
-                  ),
-              );
-            else if (key === 42)
-              body = new Writer().i32(0).array(["workers"], (writer, g) => writer.string(g).i16(0));
-            else if (key === 21)
-              body = new Writer()
-                .i32(0)
-                .array(["events"], (tWriter, name) =>
-                  tWriter
-                    .string(name)
-                    .array([{ index: 0, low: 7n }], (pWriter, p) =>
-                      pWriter.i32(p.index).i64(p.low).i16(0),
-                    ),
-                );
-            else body = new Writer().i16(0);
-            const response = new Writer().i32(0).i32(correlation).raw(body.result());
-            response.patchI32(0, response.length - 4);
-            socket.write(response.result());
-            offset += 4 + size;
-          }
+          handleFrames(
+            socket,
+            request,
+            (key) => adminGroupBody(key, listener.port),
+            (key) => {
+              if (key === 16) {
+                sawListGroups = true;
+              }
+              if (key === 15) {
+                sawDescribeGroups = true;
+              }
+              if (key === 42) {
+                sawDeleteGroups = true;
+              }
+              if (key === 21) {
+                sawDeleteRecords = true;
+              }
+            },
+          );
         },
       },
     });
-    function viewCorrelation(buffer: ArrayBuffer, at: number): number {
-      return new DataView(buffer, at, 4).getInt32(0);
-    }
     const kafka = new Kafka({ brokers: [`127.0.0.1:${listener.port}`] });
     try {
       const a = kafka.admin();
@@ -170,60 +318,22 @@ describe("Admin: group and record management", () => {
       port: 0,
       socket: {
         data(socket, request) {
-          let offset = 0;
-          while (offset < request.byteLength) {
-            const size = new DataView(request.buffer, request.byteOffset + offset).getInt32(0);
-            const frameView = new DataView(request.buffer, request.byteOffset + offset + 4, 8);
-            const key = frameView.getInt16(0);
-            const correlation = new DataView(
-              request.buffer,
-              request.byteOffset + offset + 4 + 8 - 4,
-              4,
-            ).getInt32(0);
-            if (key === 30) sawCreate = true;
-            if (key === 29) sawDescribe = true;
-            if (key === 31) sawDelete = true;
-            let body: Writer;
-            if (key === 18) body = apiVersions();
-            else if (key === 3) body = metadataBody(listener.port);
-            else if (key === 30)
-              body = new Writer().i32(0).array(["acl"], (writer) => writer.i16(0).string(null));
-            else if (key === 29)
-              body = new Writer()
-                .i32(0)
-                .i16(0)
-                .string(null)
-                .array([{ type: 2, name: "acl-topic" }], (writer, r) =>
-                  writer
-                    .i8(r.type)
-                    .string(r.name)
-                    .array([{ principal: TEST_PRINCIPAL, host: "*" }], (aclWriter, acl) =>
-                      aclWriter.string(acl.principal).string(acl.host).i8(3).i8(3),
-                    ),
-                );
-            else if (key === 31)
-              body = new Writer().i32(0).array([true], (writer) =>
-                writer
-                  .i16(0)
-                  .string(null)
-                  .array([{ error: 0, principal: TEST_PRINCIPAL }], (aclWriter, acl) =>
-                    aclWriter
-                      .i16(acl.error)
-                      .string(null)
-                      .i8(2)
-                      .string("acl-topic")
-                      .string(acl.principal)
-                      .string("*")
-                      .i8(3)
-                      .i8(3),
-                  ),
-              );
-            else body = new Writer().i16(0);
-            const response = new Writer().i32(0).i32(correlation).raw(body.result());
-            response.patchI32(0, response.length - 4);
-            socket.write(response.result());
-            offset += 4 + size;
-          }
+          handleFrames(
+            socket,
+            request,
+            (key) => aclBody(key, listener.port),
+            (key) => {
+              if (key === 30) {
+                sawCreate = true;
+              }
+              if (key === 29) {
+                sawDescribe = true;
+              }
+              if (key === 31) {
+                sawDelete = true;
+              }
+            },
+          );
         },
       },
     });
@@ -283,70 +393,29 @@ describe("Admin: group and record management", () => {
     let sawFindCoordinator = false;
     let listOffsets = 0;
     let describedWithoutMessage = false;
-    function viewCorrelation(buffer: ArrayBuffer, at: number): number {
-      return new DataView(buffer, at, 4).getInt32(0);
-    }
     const listener = Bun.listen({
       hostname: "127.0.0.1",
       port: 0,
       socket: {
         data(socket, request) {
-          let offset = 0;
-          while (offset < request.byteLength) {
-            const size = new DataView(request.buffer, request.byteOffset + offset).getInt32(0);
-            const frameView = new DataView(request.buffer, request.byteOffset + offset + 4, 8);
-            const key = frameView.getInt16(0);
-            const correlation = viewCorrelation(
-              request.buffer,
-              request.byteOffset + offset + 4 + 8 - 4,
-            );
-            let body: Writer;
-            if (key === 18) body = apiVersions();
-            else if (key === 3) body = metadataBody(listener.port);
-            else if (key === 10) {
-              sawFindCoordinator = true;
-              body = new Writer().i16(0).i32(1).string("127.0.0.1").i32(listener.port);
-            } else if (key === 2) {
-              // ListOffsets v1: arrival order is earliest then latest; later calls are timestamp lookups.
-              const resolved = listOffsets === 0 ? 5n : listOffsets === 1 ? 9n : 7n;
-              listOffsets++;
-              body = new Writer().array(["events"], (writer, name) =>
-                writer
-                  .string(name)
-                  .array([0], (pWriter, p) => pWriter.i32(p).i16(0).i64(0).i64(resolved)),
-              );
-            } else if (key === 9) {
-              // OffsetFetch v2: [topics][top-level error], no throttle.
-              body = new Writer()
-                .array(["events"], (writer, name) =>
-                  writer
-                    .string(name)
-                    .array([0], (pWriter, p) => pWriter.i32(p).i64(12).string(null).i16(0)),
-                )
-                .i16(0);
-            } else if (key === 8) {
-              sawOffsetCommit++;
-              body = new Writer().array(["events"], (writer, name) =>
-                writer.string(name).array([0], (pWriter, p) => pWriter.i32(p).i16(0)),
-              );
-            } else if (key === 15) {
-              // Redpanda-style entry with the nullable error_message omitted entirely.
-              describedWithoutMessage = true;
-              body = new Writer().i32(0).array(["g"], (writer, g) =>
-                writer
-                  .i16(0)
-                  .string(g)
-                  .string("Dead")
-                  .string(null)
-                  .string(null)
-                  .array([], (mWriter) => mWriter),
-              );
-            } else body = new Writer().i16(0);
-            const response = new Writer().i32(0).i32(correlation).raw(body.result());
-            response.patchI32(0, response.length - 4);
-            socket.write(response.result());
-            offset += 4 + size;
-          }
+          const state = { listOffsets };
+          handleFrames(
+            socket,
+            request,
+            (key) => offsetBody(key, listener.port, state),
+            (key) => {
+              if (key === 10) {
+                sawFindCoordinator = true;
+              }
+              if (key === 8) {
+                sawOffsetCommit++;
+              }
+              if (key === 15) {
+                describedWithoutMessage = true;
+              }
+            },
+          );
+          listOffsets = state.listOffsets;
         },
       },
     });

@@ -2,43 +2,51 @@ import { describe, expect, test } from "bun:test";
 import { Kafka, KafkaError } from "../../index.ts";
 import { isUint8Array } from "../../src/type-guards.ts";
 import {
-  Reader,
+  decoder,
+  type KafkaDecoder,
   RecordSetDecoder,
-  Writer,
+  encoder,
+  type KafkaEncoder,
   crc32c,
   encodeRecordBatch,
-} from "../../src/bun/protocol.ts";
+} from "../../src/protocol/index.ts";
 
 type Request = { apiKey: number; correlation: number; count: number; socket: Bun.Socket };
 type MockBroker = { address: string; close(): void; active(): number };
 type Handler = (
   request: Request,
-  reply: (body: Writer | Uint8Array, correlation?: number) => void,
+  reply: (body: KafkaEncoder | Uint8Array, correlation?: number) => void,
 ) => boolean | void;
 
 const topic = "chaos";
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 const recordBatch = (value: string, offset = 0n) => {
   const batch = encodeRecordBatch([{ value }]);
   new DataView(batch.buffer, batch.byteOffset, batch.byteLength).setBigInt64(0, offset);
   return batch;
 };
 
-function response(correlation: number, body: Writer | Uint8Array): Uint8Array {
-  const frame = new Writer()
+function response(correlation: number, body: KafkaEncoder | Uint8Array): Uint8Array {
+  const frame = encoder()
     .i32(0)
     .i32(correlation)
-    .raw(body instanceof Writer ? body.result() : body);
+    .raw(isUint8Array(body) ? body : body.result());
   frame.patchI32(0, frame.length - 4);
   return frame.result();
 }
 
-function metadataBody(brokers: MockBroker[], leader = 1, error = 0): Writer {
-  return new Writer()
+function metadataBody(
+  brokers: Array<Pick<MockBroker, "address">>,
+  leader = 1,
+  error = 0,
+): KafkaEncoder {
+  return encoder()
     .array(brokers, (writer, broker) => {
       const url = new URL(`tcp://${broker.address}`);
       writer
@@ -71,25 +79,31 @@ function metadataBody(brokers: MockBroker[], leader = 1, error = 0): Writer {
     );
 }
 
-function defaultBody(apiKey: number, broker: MockBroker, fetchOffset = 0n): Writer {
-  if (apiKey === 18) return apiVersions();
-  if (apiKey === 3) return metadataBody([broker]);
-  if (apiKey === 2)
-    return new Writer().array([topic], (writer, name) =>
+function defaultBody(apiKey: number, brokerAddress: string, fetchOffset = 0n): KafkaEncoder {
+  if (apiKey === 18) {
+    return apiVersions();
+  }
+  if (apiKey === 3) {
+    return metadataBody([{ address: brokerAddress }]);
+  }
+  if (apiKey === 2) {
+    return encoder().array([topic], (writer, name) =>
       writer
         .string(name)
         .array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(0).i64(0)),
     );
-  if (apiKey === 0)
-    return new Writer()
+  }
+  if (apiKey === 0) {
+    return encoder()
       .array([topic], (writer, name) =>
         writer
           .string(name)
           .array([0], (partitionWriter) => partitionWriter.i32(0).i16(0).i64(fetchOffset).i64(-1)),
       )
       .i32(0);
-  if (apiKey === 1)
-    return new Writer()
+  }
+  if (apiKey === 1) {
+    return encoder()
       .i32(0)
       .i16(0)
       .i32(0)
@@ -105,15 +119,17 @@ function defaultBody(apiKey: number, broker: MockBroker, fetchOffset = 0n): Writ
             .bytes(recordBatch(`value-${fetchOffset}`, fetchOffset));
         }),
       );
-  if (apiKey === 22) return new Writer().i32(0).i16(0).i64(1).i16(0);
-  return new Writer();
+  }
+  if (apiKey === 22) {
+    return encoder().i32(0).i16(0).i64(1).i16(0);
+  }
+  return encoder();
 }
 
 function mockBroker(handler: Handler = () => false): MockBroker {
   const buffers = new WeakMap<Bun.Socket, Uint8Array>();
   const counts = new Map<number, number>();
   let open = 0;
-  let broker: MockBroker;
   const listener = Bun.listen({
     hostname: "127.0.0.1",
     port: 0,
@@ -132,29 +148,33 @@ function mockBroker(handler: Handler = () => false): MockBroker {
         let at = 0;
         while (input.byteLength - at >= 4) {
           const size = new DataView(input.buffer, input.byteOffset + at, 4).getInt32(0);
-          if (size < 0 || input.byteLength - at < size + 4) break;
+          if (size < 0 || input.byteLength - at < size + 4) {
+            break;
+          }
           const frame = input.subarray(at, at + size + 4);
           const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
           const apiKey = view.getInt16(4);
           const correlation = view.getInt32(8);
           const count = (counts.get(apiKey) ?? 0) + 1;
           counts.set(apiKey, count);
-          const reply = (body: Writer | Uint8Array, responseCorrelation = correlation) =>
+          const reply = (body: KafkaEncoder | Uint8Array, responseCorrelation = correlation) =>
             socket.write(response(responseCorrelation, body));
-          if (handler({ apiKey, correlation, count, socket }, reply) === false)
-            reply(defaultBody(apiKey, broker, BigInt(Math.max(0, count - 1))));
+          if (handler({ apiKey, correlation, count, socket }, reply) === false) {
+            reply(
+              defaultBody(apiKey, `127.0.0.1:${listener.port}`, BigInt(Math.max(0, count - 1))),
+            );
+          }
           at += size + 4;
         }
         buffers.set(socket, input.slice(at));
       },
     },
   });
-  broker = {
+  return {
     address: `127.0.0.1:${listener.port}`,
     close: () => listener.stop(true),
     active: () => open,
   };
-  return broker;
 }
 
 const kafka = (
@@ -176,7 +196,9 @@ async function rejectsQuickly(promise: Promise<unknown>, limitMs = 500): Promise
 }
 
 function close(...brokers: MockBroker[]) {
-  for (const broker of brokers) broker.close();
+  for (const broker of brokers) {
+    broker.close();
+  }
 }
 
 describe("deterministic Kafka chaos", () => {
@@ -228,7 +250,7 @@ describe("deterministic Kafka chaos", () => {
     let partial = false;
     const broker = mockBroker(({ apiKey, count, correlation, socket }) => {
       if (apiKey === 1 && count === 2) {
-        const frame = response(correlation, defaultBody(1, broker, 1n));
+        const frame = response(correlation, defaultBody(1, broker.address, 1n));
         socket.write(frame.subarray(0, Math.floor(frame.length / 2)));
         socket.terminate();
         partial = true;
@@ -240,7 +262,7 @@ describe("deterministic Kafka chaos", () => {
     const consumer = client.consumer({ fromBeginning: true });
     try {
       await consumer.assign([{ topic, partition: 0, offset: 0n }]);
-      const held = (await consumer.fetch({ maxWaitMs: 1, maxMessages: 1 }))[0]!;
+      const held = (await consumer.fetch({ maxWaitMs: 1, maxMessages: 1 }))[0];
       await rejectsQuickly(consumer.fetch({ maxWaitMs: 1, maxMessages: 1 }));
       expect(partial).toBe(true);
       expect(isUint8Array(held.value) ? new TextDecoder().decode(held.value) : "").toBe("value-0");
@@ -256,17 +278,21 @@ describe("deterministic Kafka chaos", () => {
       const broker = mockBroker((request) => request.apiKey === apiKey || false);
       const client = kafka([broker]);
       try {
-        if (apiKey === 3) await rejectsQuickly(client.admin().metadata([topic]));
-        if (apiKey === 2)
+        if (apiKey === 3) {
+          await rejectsQuickly(client.admin().metadata([topic]));
+        }
+        if (apiKey === 2) {
           await rejectsQuickly(
             client.consumer().assign([{ topic, partition: 0, offset: "earliest" }]),
           );
-        if (apiKey === 0)
+        }
+        if (apiKey === 0) {
           await rejectsQuickly(
             client
               .producer({ lingerMs: 0 })
               .send({ topic, timeoutMs: 40, messages: [{ value: "x", partition: 0 }] }),
           );
+        }
         if (apiKey === 1) {
           const consumer = client.consumer();
           await consumer.assign([{ topic, partition: 0, offset: 0n }]);
@@ -282,12 +308,14 @@ describe("deterministic Kafka chaos", () => {
   test("retries a reset request with backoff and succeeds on a slow response", async () => {
     const events: unknown[] = [];
     const broker = mockBroker(({ apiKey, count, socket }, reply) => {
-      if (apiKey !== 2) return false;
+      if (apiKey !== 2) {
+        return false;
+      }
       if (count === 1) {
         socket.terminate();
         return true;
       }
-      setTimeout(() => reply(defaultBody(2, broker)), 20);
+      setTimeout(() => reply(defaultBody(2, broker.address)), 20);
       return true;
     });
     const client = kafka([broker], {
@@ -311,8 +339,7 @@ describe("deterministic Kafka chaos", () => {
   test("refreshes metadata and follows a transferred leader", async () => {
     let leader = 1;
     let firstProduce = true;
-    let a: MockBroker;
-    let b: MockBroker;
+    const brokers: MockBroker[] = [];
     const handler =
       (id: number): Handler =>
       ({ apiKey }, reply) => {
@@ -321,14 +348,14 @@ describe("deterministic Kafka chaos", () => {
           return true;
         }
         if (apiKey === 3) {
-          reply(metadataBody([a, b], leader));
+          reply(metadataBody(brokers, leader));
           return true;
         }
         if (apiKey === 0 && id === 1 && firstProduce) {
           firstProduce = false;
           leader = 2;
           reply(
-            new Writer()
+            encoder()
               .array([topic], (writer, name) =>
                 writer.string(name).array([0], (part) => part.i32(0).i16(6).i64(-1).i64(-1)),
               )
@@ -338,8 +365,8 @@ describe("deterministic Kafka chaos", () => {
         }
         return false;
       };
-    a = mockBroker(handler(1));
-    b = mockBroker(handler(2));
+    brokers.push(mockBroker(handler(1)), mockBroker(handler(2)));
+    const [a] = brokers;
     const client = kafka([a], { retry: { maxRetries: 1, initialBackoffMs: 0, maxBackoffMs: 0 } });
     try {
       expect(
@@ -351,18 +378,24 @@ describe("deterministic Kafka chaos", () => {
       ).toBe(topic);
     } finally {
       await client.disconnect();
-      close(a, b);
+      close(...brokers);
     }
   });
 
   test("handles broker pause, timeout, resume, and a late response", async () => {
     let metadataRequests = 0;
     const broker = mockBroker(({ apiKey }, reply) => {
-      if (apiKey !== 3) return false;
+      if (apiKey !== 3) {
+        return false;
+      }
       metadataRequests++;
-      if (metadataRequests === 1) setTimeout(() => reply(metadataBody([broker])), 20);
-      else if (metadataRequests === 2) setTimeout(() => reply(metadataBody([broker])), 80);
-      else reply(metadataBody([broker]));
+      if (metadataRequests === 1) {
+        setTimeout(() => reply(metadataBody([broker])), 20);
+      } else if (metadataRequests === 2) {
+        setTimeout(() => reply(metadataBody([broker])), 80);
+      } else {
+        reply(metadataBody([broker]));
+      }
       return true;
     });
     const client = kafka([broker]);
@@ -383,7 +416,7 @@ describe("deterministic Kafka chaos", () => {
     const broker = mockBroker(({ apiKey }, reply) => {
       if (apiKey === 0) {
         reply(
-          new Writer()
+          encoder()
             .array([topic], (writer, name) =>
               writer.string(name).array([0], (part) => part.i32(0).i16(56).i64(-1).i64(-1)),
             )
@@ -417,7 +450,7 @@ describe("deterministic Kafka chaos", () => {
   test("rejects malformed frames and accepts a valid frame after an unknown correlation ID", async () => {
     for (const size of [-1, 1025]) {
       const broker = mockBroker(({ socket }) => {
-        const header = new Writer().i32(size).result();
+        const header = encoder().i32(size).result();
         socket.write(header);
         return true;
       });
@@ -431,8 +464,8 @@ describe("deterministic Kafka chaos", () => {
     }
 
     const broker = mockBroker(({ apiKey, correlation }, reply) => {
-      reply(defaultBody(apiKey, broker), correlation + 100);
-      reply(defaultBody(apiKey, broker));
+      reply(defaultBody(apiKey, broker.address), correlation + 100);
+      reply(defaultBody(apiKey, broker.address));
       return true;
     });
     const client = kafka([broker]);
@@ -445,14 +478,14 @@ describe("deterministic Kafka chaos", () => {
   });
 
   test("rejects truncated fields, invalid arrays, varints, records, CRCs, and compression", () => {
-    expect(() => new Reader(new Uint8Array([0])).i32()).toThrow(KafkaError);
-    expect(() => new Reader(new Uint8Array([0, 0, 0, 2])).array((reader) => reader.i8())).toThrow(
+    expect(() => decoder(new Uint8Array([0])).i32()).toThrow(KafkaError);
+    expect(() => decoder(new Uint8Array([0, 0, 0, 2])).array((reader) => reader.i8())).toThrow(
       KafkaError,
     );
-    expect(() => new Reader(new Uint8Array([0x80, 0x80, 0x80, 0x80, 0x80])).varInt()).toThrow(
+    expect(() => decoder(new Uint8Array([0x80, 0x80, 0x80, 0x80, 0x80])).varInt()).toThrow(
       KafkaError,
     );
-    expect(() => new Reader(new Uint8Array(10).fill(0x80)).varLong()).toThrow(KafkaError);
+    expect(() => decoder(new Uint8Array(10).fill(0x80)).varLong()).toThrow(KafkaError);
 
     const invalidRecord = recordBatch("x");
     invalidRecord[61] = 0x7e;
@@ -460,7 +493,7 @@ describe("deterministic Kafka chaos", () => {
     expect(() => new RecordSetDecoder(invalidRecord, topic, 0, 1).read()).toThrow(KafkaError);
 
     const badCrc = recordBatch("x");
-    badCrc[badCrc.length - 1]! ^= 1;
+    badCrc[badCrc.length - 1] ^= 1;
     expect(() => new RecordSetDecoder(badCrc, topic, 0, 1).read()).toThrow(/CRC/);
 
     const badCompression = recordBatch("x");
@@ -472,7 +505,9 @@ describe("deterministic Kafka chaos", () => {
   test("does not leak sockets through repeated fault cycles", async () => {
     const cycles = Number(process.env.CHAOS_FAULT_CYCLES ?? 1_000);
     const broker = mockBroker(({ apiKey, socket }, reply) => {
-      if (apiKey !== 3) return false;
+      if (apiKey !== 3) {
+        return false;
+      }
       reply(metadataBody([broker]));
       queueMicrotask(() => socket.terminate());
       return true;

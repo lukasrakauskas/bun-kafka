@@ -1,6 +1,6 @@
 import type { ConsumedMessage } from "../types.ts";
 import { KafkaJSNonRetriableError } from "./errors.ts";
-import type { Partitioner, PartitionerContext, ProducerMessage } from "../bun/producer.ts";
+import type { Partitioner, PartitionerContext, ProducerMessage } from "../bun/producer/index.ts";
 import { isFunction, isNumber } from "../type-guards.ts";
 
 export interface KafkaJsMessage {
@@ -46,15 +46,22 @@ type KafkaJsPartitioner =
 export function toBunPartitioner(
   partitioner: KafkaJsPartitioner | null | undefined,
 ): Partitioner | undefined {
-  if (!partitioner) return undefined;
-  if (isFunction(partitioner))
+  if (!partitioner) {
+    return undefined;
+  }
+  if (isFunction(partitioner)) {
     return ({ topic, partitionCount, key }) => partitioner(topic, partitionCount, key);
-  if ("partition" in partitioner) return (context) => partitioner.partition(context);
+  }
+  if ("partition" in partitioner) {
+    return (context) => partitioner.partition(context);
+  }
   return undefined;
 }
 
 export function toWireMessage(message: KafkaJsMessage): ProducerMessage {
-  if (message.value === undefined) throw new KafkaJSNonRetriableError("Invalid message value");
+  if (message.value === undefined) {
+    throw new KafkaJSNonRetriableError("Invalid message value");
+  }
   const wire: ProducerMessage = {
     value: message.value,
     key: message.key ?? null,
@@ -65,13 +72,17 @@ export function toWireMessage(message: KafkaJsMessage): ProducerMessage {
       ]),
     ),
   };
-  if (message.partition !== undefined) wire.partition = message.partition;
-  if (message.timestamp !== undefined) wire.timestamp = Number(message.timestamp);
+  if (message.partition !== undefined) {
+    wire.partition = message.partition;
+  }
+  if (message.timestamp !== undefined) {
+    wire.timestamp = Number(message.timestamp);
+  }
   return wire;
 }
 
 function toBuffer(value: Uint8Array | null | undefined): Buffer | null {
-  return value == null ? null : Buffer.from(value);
+  return value === null || value === undefined ? null : Buffer.from(value);
 }
 
 export function toKafkajsMessage(raw: ConsumedMessage): KafkaJsConsumedMessage {
@@ -80,8 +91,9 @@ export function toKafkajsMessage(raw: ConsumedMessage): KafkaJsConsumedMessage {
     (raw.value?.byteLength ?? 0) +
     Object.values(raw.headers ?? {}).reduce((sum, header) => sum + (header?.byteLength ?? 0), 0);
   const headers: Record<string, Buffer | undefined> = {};
-  for (const [name, value] of Object.entries(raw.headers ?? {}))
-    headers[name] = value == null ? undefined : Buffer.from(value);
+  for (const [name, value] of Object.entries(raw.headers ?? {})) {
+    headers[name] = value === null || value === undefined ? undefined : Buffer.from(value);
+  }
   return {
     key: toBuffer(raw.key),
     value: toBuffer(raw.value),

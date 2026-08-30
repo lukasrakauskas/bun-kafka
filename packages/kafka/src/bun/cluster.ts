@@ -1,8 +1,20 @@
 import { KafkaError } from "../errors.ts";
 import type { ClusterMetadata } from "../types.ts";
-import { Connection, type ConnectionOptions } from "./connection.ts";
-import { Reader, Writer, readMetadataResponse } from "./protocol.ts";
+import { Connection, type ConnectionOptions } from "./connection/index.ts";
+import { checkClusterHealth } from "./cluster/health.ts";
+import { resolveClusterOptions } from "./cluster/options.ts";
+import { ClusterTelemetry } from "./cluster/telemetry.ts";
 import {
+  RequestBody,
+  ResponseBody,
+  readFindCoordinatorResponse,
+  readMetadataResponse,
+  writeEmptyRequest,
+  writeFindCoordinatorRequestV1,
+  writeMetadataRequest,
+} from "../protocol/index.ts";
+import {
+  API_API_VERSIONS,
   API_FIND_COORDINATOR,
   API_METADATA,
   address,
@@ -11,7 +23,6 @@ import {
   type HealthReport,
   type KafkaEvent,
   type KafkaOptions,
-  type Logger,
   type RetryOptions,
   type ClusterStats,
   type TopicMetadata,
@@ -21,12 +32,7 @@ export class Cluster {
   #bootstrap: string[];
   #options: ConnectionOptions;
   #retry: Required<RetryOptions>;
-  #onEvent?: (event: KafkaEvent) => void;
-  #logger?: Partial<Logger>;
-  #retries = 0;
-  #throttles = 0;
-  #throttleTimeMs = 0;
-  #statsTimer?: ReturnType<typeof setInterval>;
+  #telemetry: ClusterTelemetry;
   #connections = new Map<string, Connection>();
   #brokers = new Map<number, string>();
   #controller?: number;
@@ -34,58 +40,15 @@ export class Cluster {
   #topics = new Map<string, TopicMetadata>();
 
   constructor(options: KafkaOptions) {
-    if (!Array.isArray(options.brokers) || !options.brokers.length)
-      throw new TypeError("Kafka requires at least one broker");
-    const requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
-    const connectTimeoutMs = options.connectTimeoutMs ?? 10_000;
-    const maxResponseBytes = options.maxResponseBytes ?? 100 * 1024 * 1024;
-    const retry = {
-      maxRetries: options.retry?.maxRetries ?? 3,
-      initialBackoffMs: options.retry?.initialBackoffMs ?? 50,
-      maxBackoffMs: options.retry?.maxBackoffMs ?? 2_000,
-    };
-    if (
-      !Number.isSafeInteger(requestTimeoutMs) ||
-      requestTimeoutMs <= 0 ||
-      !Number.isSafeInteger(connectTimeoutMs) ||
-      connectTimeoutMs <= 0 ||
-      !Number.isSafeInteger(maxResponseBytes) ||
-      maxResponseBytes < 4 ||
-      !Number.isSafeInteger(retry.maxRetries) ||
-      retry.maxRetries < 0 ||
-      !Number.isFinite(retry.initialBackoffMs) ||
-      retry.initialBackoffMs < 0 ||
-      !Number.isFinite(retry.maxBackoffMs) ||
-      retry.maxBackoffMs < retry.initialBackoffMs
-    ) {
-      throw new RangeError("Invalid Kafka timeout, response size, or retry options");
-    }
-    const sasl = options.sasl;
-    if (
-      sasl &&
-      (!new Set(["plain", "scram-sha-256", "scram-sha-512", "oauthbearer"]).has(sasl.mechanism) ||
-        (sasl.mechanism === "oauthbearer" ? !sasl.token : !sasl.username || !sasl.password))
-    ) {
-      throw new TypeError("Invalid Kafka SASL options");
-    }
-    if (
-      options.statsIntervalMs !== undefined &&
-      (!Number.isSafeInteger(options.statsIntervalMs) || options.statsIntervalMs < 1)
-    ) {
-      throw new RangeError("Invalid Kafka statsIntervalMs");
-    }
-    this.#bootstrap = [...options.brokers];
-    this.#retry = retry;
-    this.#onEvent = options.onEvent;
-    this.#logger = options.logger ?? {};
-    this.#options = {
-      clientId: options.clientId ?? "bun-kafka",
-      requestTimeoutMs,
-      connectTimeoutMs,
-      maxResponseBytes,
-      tls: options.tls,
-      sasl: options.sasl,
-    };
+    const resolved = resolveClusterOptions(options);
+    this.#bootstrap = resolved.bootstrap;
+    this.#retry = resolved.retry;
+    this.#options = resolved.connection;
+    this.#telemetry = new ClusterTelemetry(
+      () => this.#connections.values(),
+      options.onEvent,
+      options.logger,
+    );
   }
 
   #connection(broker: string): Connection {
@@ -100,18 +63,18 @@ export class Cluster {
   async anyRequest(
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
     flexible = false,
-  ): Promise<Reader> {
+  ): Promise<ResponseBody> {
     return this.#anyRequest(apiKey, apiVersion, body, flexible);
   }
 
   async #anyRequest(
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
     flexible = false,
-  ): Promise<Reader> {
+  ): Promise<ResponseBody> {
     let lastError: unknown;
     const candidates = [...new Set([...this.#brokers.values(), ...this.#bootstrap])];
     for (const broker of candidates) {
@@ -131,20 +94,25 @@ export class Cluster {
   }
 
   async metadata(topics: string[] | null = null): Promise<ClusterMetadata> {
-    const body = new Writer().array(topics, (writer, topic) => writer.string(topic));
+    const body = writeMetadataRequest(topics);
     const response = readMetadataResponse(await this.#anyRequest(API_METADATA, 2, body));
-    for (const broker of response.brokers)
+    for (const broker of response.brokers) {
       this.#brokers.set(broker.id, address(broker.host, broker.port));
+    }
     this.#controller = response.controllerId;
     this.#clusterId = response.clusterId;
-    for (const topic of response.topics) this.#topics.set(topic.name, topic);
+    for (const topic of response.topics) {
+      this.#topics.set(topic.name, topic);
+    }
     return { brokers: response.brokers, topics: response.topics, clusterId: response.clusterId };
   }
 
   async topic(topic: string, refresh = false): Promise<TopicMetadata> {
     if (!refresh) {
       const cached = this.#topics.get(topic);
-      if (cached?.partitions.length && !cached.err) return cached;
+      if (cached?.partitions.length && !cached.err) {
+        return cached;
+      }
     }
     const metadata = await this.metadata([topic]);
     return (
@@ -156,52 +124,79 @@ export class Cluster {
     brokerId: number,
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
     timeoutMs?: number,
     retry = true,
     flexible = false,
-  ): Promise<Reader> {
-    let lastError: unknown;
+  ): Promise<ResponseBody> {
+    return this.#requestWithRetry(brokerId, apiKey, apiVersion, body, timeoutMs, retry, flexible);
+  }
+
+  async #requestWithRetry(
+    brokerId: number,
+    apiKey: number,
+    apiVersion: number,
+    body: RequestBody,
+    timeoutMs: number | undefined,
+    retry: boolean,
+    flexible: boolean,
+  ): Promise<ResponseBody> {
     const maxRetries = retry ? this.#retry.maxRetries : 0;
+    let lastError: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        let broker = this.#brokers.get(brokerId);
-        if (!broker) {
-          await this.metadata();
-          broker = this.#brokers.get(brokerId);
-        }
-        if (!broker)
-          throw new KafkaError(-1, `Kafka broker ${brokerId} is not in metadata`, {
-            retriable: true,
-          });
-        return await this.#connection(broker).request(
-          apiKey,
-          apiVersion,
-          body,
-          timeoutMs,
-          flexible,
-        );
+        return await this.#requestOnce(brokerId, apiKey, apiVersion, body, timeoutMs, flexible);
       } catch (error) {
         lastError = error;
-        if (!(error instanceof KafkaError && error.retriable) || attempt === maxRetries)
+        if (!(error instanceof KafkaError && error.retriable) || attempt === maxRetries) {
           throw error;
-        this.#retries++;
-        const delay = retryDelay(this.#retry, attempt);
-        this.log(
-          "warn",
-          `retrying ${apiKey} attempt ${attempt + 1} in ${delay}ms: ${String(error)}`,
-        );
-        this.event({ type: "retry", apiKey, attempt: attempt + 1, delayMs: delay, error });
-        if (delay) await Bun.sleep(delay);
+        }
+        await this.#retryRequest(apiKey, attempt, error);
       }
     }
     throw lastError;
   }
 
-  async controllerRequest(apiKey: number, apiVersion: number, body: Writer): Promise<Reader> {
-    if (this.#controller === undefined) await this.metadata();
-    if (this.#controller === undefined)
+  async #requestOnce(
+    brokerId: number,
+    apiKey: number,
+    apiVersion: number,
+    body: RequestBody,
+    timeoutMs: number | undefined,
+    flexible: boolean,
+  ): Promise<ResponseBody> {
+    let broker = this.#brokers.get(brokerId);
+    if (!broker) {
+      await this.metadata();
+      broker = this.#brokers.get(brokerId);
+    }
+    if (!broker) {
+      throw new KafkaError(-1, `Kafka broker ${brokerId} is not in metadata`, { retriable: true });
+    }
+    return this.#connection(broker).request(apiKey, apiVersion, body, timeoutMs, flexible);
+  }
+
+  async #retryRequest(apiKey: number, attempt: number, error: KafkaError): Promise<void> {
+    this.#telemetry.bumpRetries(1);
+    const delay = retryDelay(this.#retry, attempt);
+    this.log("warn", `retrying ${apiKey} attempt ${attempt + 1} in ${delay}ms: ${String(error)}`);
+    this.event({ type: "retry", apiKey, attempt: attempt + 1, delayMs: delay, error });
+    if (delay) {
+      await Bun.sleep(delay);
+    }
+  }
+
+  async controllerRequest(
+    apiKey: number,
+    apiVersion: number,
+    body: RequestBody,
+  ): Promise<ResponseBody> {
+    if (this.#controller === undefined) {
+      await this.metadata();
+    }
+    if (this.#controller === undefined) {
       throw new KafkaError(-1, "Kafka metadata has no controller", { retriable: true });
+    }
     return this.request(this.#controller, apiKey, apiVersion, body);
   }
 
@@ -216,23 +211,22 @@ export class Cluster {
     const response = await this.#anyRequest(
       API_FIND_COORDINATOR,
       2,
-      new Writer().string(transactionalId).i8(1),
+      writeFindCoordinatorRequestV1(transactionalId, 1),
     );
-    const throttleMs = response.i32();
-    if (throttleMs > 0) this.throttle(API_FIND_COORDINATOR, throttleMs);
-    const error = response.i16();
-    const message = response.string();
-    if (error)
+    const coordinator = readFindCoordinatorResponse(response);
+    if (coordinator.throttleMs > 0) {
+      this.throttle(API_FIND_COORDINATOR, coordinator.throttleMs);
+    }
+    const { error, message } = coordinator;
+    if (error) {
       throw kafkaError(
         error,
         message
           ? `Find transaction coordinator ${transactionalId}: ${message}`
           : `Find transaction coordinator ${transactionalId}`,
       );
-    const coordinatorId = response.i32();
-    response.string(); // host
-    response.i32(); // port
-    return coordinatorId;
+    }
+    return coordinator.coordinatorId;
   }
 
   /** Send a Produce request without waiting for a response (acks=0). */
@@ -240,15 +234,16 @@ export class Cluster {
     brokerId: number,
     apiKey: number,
     apiVersion: number,
-    body: Writer,
+    body: RequestBody,
   ): Promise<void> {
     let broker = this.#brokers.get(brokerId);
     if (!broker) {
       await this.metadata();
       broker = this.#brokers.get(brokerId);
     }
-    if (!broker)
+    if (!broker) {
       throw new KafkaError(-1, `Kafka broker ${brokerId} is not in metadata`, { retriable: true });
+    }
     await this.#connection(broker).sendOnly(apiKey, apiVersion, body);
   }
 
@@ -264,109 +259,52 @@ export class Cluster {
   }
 
   event(event: KafkaEvent): void {
-    try {
-      this.#onEvent?.(event);
-    } catch {
-      /* Observability must not break requests. */
-    }
+    this.#telemetry.event(event);
   }
 
-  log(level: keyof Logger, message: string): void {
-    try {
-      this.#logger?.[level]?.(message);
-    } catch {
-      /* Logging must not break requests. */
-    }
+  log(level: keyof import("./shared.ts").Logger, message: string): void {
+    this.#telemetry.log(level, message);
   }
 
   throttle(apiKey: number, durationMs: number): void {
-    if (durationMs > 0) {
-      this.#throttles++;
-      this.#throttleTimeMs += durationMs;
-      this.log("debug", `broker throttled ${apiKey} by ${durationMs}ms`);
-      this.event({ type: "throttle", apiKey, durationMs });
-    }
+    this.#telemetry.throttle(apiKey, durationMs);
   }
 
-  /** Aggregate counters across all live broker connections. */
   stats(): ClusterStats {
-    let requests = 0;
-    let bytesSent = 0;
-    let bytesReceived = 0;
-    for (const connection of this.#connections.values()) {
-      const one = connection.stats;
-      requests += one.requests;
-      bytesSent += one.bytesSent;
-      bytesReceived += one.bytesReceived;
-    }
-    return {
-      connections: this.#connections.size,
-      requests: requests + this.#retries,
-      bytesSent,
-      bytesReceived,
-      retries: this.#retries,
-      throttles: this.#throttles,
-      throttleTimeMs: this.#throttleTimeMs,
-    };
+    return this.#telemetry.stats();
   }
 
-  /** Start emitting periodic stats events. */
   trackStats(intervalMs: number): void {
-    if (!Number.isSafeInteger(intervalMs) || intervalMs < 1)
-      throw new RangeError("Invalid stats interval");
-    this.stopTrackingStats();
-    this.#statsTimer = setInterval(
-      () => this.event({ type: "stats", stats: this.stats() }),
-      intervalMs,
-    );
-    this.#statsTimer.unref?.();
+    this.#telemetry.track(intervalMs);
   }
 
   stopTrackingStats(): void {
-    if (this.#statsTimer) clearInterval(this.#statsTimer);
-    this.#statsTimer = undefined;
+    this.#telemetry.stop();
   }
 
-  /**
-   * Ping every known broker with an ApiVersions request and report latency.
-   */
-  async healthCheck(timeoutMs = 5_000): Promise<HealthReport> {
-    const targets = new Map<string, number | undefined>();
-    for (const [id, addr] of this.#brokers) targets.set(addr, id);
-    for (const addr of this.#bootstrap) if (!targets.has(addr)) targets.set(addr, undefined);
-    const checks = await Promise.all(
-      [...targets].map(async ([addr, brokerId]) => {
-        const startedAt = performance.now();
-        try {
-          await this.#connection(addr).request(18, 0, new Writer(), timeoutMs);
-          return {
-            address: addr,
-            brokerId,
-            ok: true as const,
-            latencyMs: Math.round(performance.now() - startedAt),
-          };
-        } catch (error) {
-          this.log("warn", `health check failed for ${addr}: ${String(error)}`);
-          return {
-            address: addr,
-            brokerId,
-            ok: false as const,
-            latencyMs: Math.round(performance.now() - startedAt),
-            error,
-          };
-        }
-      }),
+  /** Ping every known broker with an ApiVersions request and report latency. */
+  healthCheck(timeoutMs = 5_000): Promise<HealthReport> {
+    return checkClusterHealth(
+      {
+        brokers: this.#brokers,
+        bootstrap: this.#bootstrap,
+        request: (broker, timeout) =>
+          this.#connection(broker).request(API_API_VERSIONS, 0, writeEmptyRequest(), timeout),
+        log: (message) => this.log("warn", message),
+      },
+      timeoutMs,
     );
-    return { brokers: checks };
   }
 
   bumpRetries(n = 1): void {
-    this.#retries += n;
+    this.#telemetry.bumpRetries(n);
   }
 
   close(): void {
-    this.stopTrackingStats();
-    for (const connection of this.#connections.values()) connection.close();
+    this.#telemetry.stop();
+    for (const connection of this.#connections.values()) {
+      connection.close();
+    }
     this.#connections.clear();
   }
 }

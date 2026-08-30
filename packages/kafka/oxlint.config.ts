@@ -1,6 +1,8 @@
 import sonarjs from "eslint-plugin-sonarjs";
 import { defineConfig } from "oxlint";
 
+const COGNITIVE_COMPLEXITY_MAX = 10;
+
 export default defineConfig({
   ignorePatterns: [
     ".agent/**",
@@ -15,9 +17,14 @@ export default defineConfig({
     ".roo/**",
     ".windsurf/**",
     "tools/oxlint/anti-slop/**",
+    "tools/oxlint/protocol-boundary/**",
+    "scripts/**",
+    "bench/**",
+    "test/**",
   ],
   jsPlugins: [
     { name: "anti-slop", specifier: "./tools/oxlint/anti-slop/index.ts" },
+    { name: "protocol-boundary", specifier: "./tools/oxlint/protocol-boundary/index.ts" },
     { name: "sonarjs", specifier: "eslint-plugin-sonarjs" },
   ],
   plugins: ["typescript", "unicorn", "import", "promise", "oxc"],
@@ -26,6 +33,41 @@ export default defineConfig({
   },
   rules: {
     ...sonarjs.configs.recommended.rules,
+    "sonarjs/cognitive-complexity": ["error", COGNITIVE_COMPLEXITY_MAX],
+    "max-lines": ["error", { max: 300, skipBlankLines: true, skipComments: true }],
+    curly: ["error", "all"],
+    eqeqeq: ["error", "always"],
+    "no-lonely-if": "error",
+    "no-nested-ternary": "error",
+    "no-unneeded-ternary": "error",
+    "no-else-return": "error",
+    "no-implicit-coercion": ["error", { boolean: true, number: true, string: true }],
+    "no-multi-assign": "error",
+    "no-shadow": ["error", { hoist: "functions" }],
+    "no-useless-catch": "error",
+    "no-useless-return": "error",
+    "prefer-template": "error",
+    "import/no-cycle": "error",
+    "import/no-self-import": "error",
+    "import/no-duplicates": "error",
+    "promise/no-nesting": "error",
+    "promise/no-return-in-finally": "error",
+    "no-var": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-non-null-asserted-optional-chain": "error",
+    "prefer-const": "error",
+    "no-magic-numbers": [
+      "error",
+      {
+        ignore: [-1, 0, 1, 2],
+        ignoreArrayIndexes: true,
+        ignoreDefaultValues: true,
+        ignoreClassFieldInitialValues: true,
+        detectObjects: false,
+      },
+    ],
+    "no-loss-of-precision": "error",
+    "prefer-numeric-literals": "error",
     "anti-slop/no-chained-type-assertions": "error",
     "anti-slop/no-conditional-empty-object-spread": "error",
     "anti-slop/no-known-value-widening": "error",
@@ -37,9 +79,11 @@ export default defineConfig({
     "anti-slop/no-shape-in-symbol-names": "error",
     "anti-slop/no-unknown-parameters": "error",
     "anti-slop/no-unknown-returns": "error",
+    "anti-slop/no-vague-class-names": "error",
     "anti-slop/no-unknown-type-aliases": "error",
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
+    "protocol-boundary/no-private-wire-types": "error",
   },
   env: {
     builtin: true,

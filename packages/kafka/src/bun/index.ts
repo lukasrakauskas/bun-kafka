@@ -1,7 +1,7 @@
 export { Kafka } from "./client.ts";
-export { BunProducer } from "./producer.ts";
-export { BunConsumer } from "./consumer.ts";
-export { BunAdmin } from "./admin.ts";
+export { Producer } from "./producer/index.ts";
+export { Consumer } from "../consumer/index.ts";
+export { Admin } from "./admin.ts";
 export type {
   KafkaOptions,
   KafkaEvent,
@@ -19,13 +19,13 @@ export type {
   ProducerSend,
   ProducerBatch,
   ProduceResult,
-} from "./producer.ts";
+} from "./producer/index.ts";
 export type {
   ConsumerOptions,
   ConsumerSubscribe,
   ConsumerAssignment,
   FetchOptions,
-} from "./consumer.ts";
+} from "../consumer/index.ts";
 export type {
   GroupDescription,
   GroupMemberDescription,
@@ -38,8 +38,8 @@ export type {
   CreatePartitionsInput,
   ConfigResource,
 } from "./admin.ts";
-export type { BunKafkaSasl, BunKafkaTls } from "./connection.ts";
-export { KafkaError, kafkaErrorName, kafkaErrorNames } from "../errors.ts";
+export type { BunKafkaSasl, BunKafkaTls } from "./connection/index.ts";
+export { KafkaError, KafkaErrorCode, kafkaErrorName, kafkaErrorNames } from "../errors.ts";
 export type {
   AbortedTransaction,
   Bytes,

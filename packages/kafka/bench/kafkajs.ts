@@ -24,7 +24,9 @@ for (let i = 0; i < count; i++) {
     await producer.send({ topic, messages: batch.splice(0) });
   }
 }
-if (batch.length) await producer.send({ topic, messages: batch });
+if (batch.length) {
+  await producer.send({ topic, messages: batch });
+}
 const produceMs = performance.now() - t0;
 await producer.disconnect();
 
@@ -55,9 +57,9 @@ console.log(
     lib: "kafkajs",
     topic,
     count,
-    produce_ms: +produceMs.toFixed(2),
-    consume_ms: +consumeMs.toFixed(2),
-    produce_msg_s: +(count / (produceMs / 1000)).toFixed(0),
-    consume_msg_s: +(count / (consumeMs / 1000)).toFixed(0),
+    produce_ms: Number(produceMs.toFixed(2)),
+    consume_ms: Number(consumeMs.toFixed(2)),
+    produce_msg_s: Number((count / (produceMs / 1000)).toFixed(0)),
+    consume_msg_s: Number((count / (consumeMs / 1000)).toFixed(0)),
   }),
 );

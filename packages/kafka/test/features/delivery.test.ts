@@ -1,12 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { Writer } from "../../src/bun/protocol.ts";
+import { encoder, type KafkaEncoder } from "../../src/protocol/index.ts";
 
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 
 describe("Producer delivery options", () => {
   test("acks=0 returns without a broker response", async () => {
@@ -35,7 +37,7 @@ describe("Producer delivery options", () => {
               continue; // acks=0: brokers never answer Produce requests.
             }
             const correlation = frameView.getInt32(8);
-            const metadata = new Writer()
+            const metadata = encoder()
               .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) =>
                 writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
               )
@@ -56,7 +58,7 @@ describe("Producer delivery options", () => {
                   );
               });
             const body = key === 18 ? apiVersions() : metadata;
-            const response = new Writer().i32(0).i32(correlation).raw(body.result());
+            const response = encoder().i32(0).i32(correlation).raw(body.result());
             response.patchI32(0, response.length - 4);
             socket.write(response.result());
             answered = true;
@@ -74,9 +76,11 @@ describe("Producer delivery options", () => {
       });
       // Both messages land on the single mocked partition; results are partition-level.
       expect(results).toHaveLength(1);
-      expect(results[0]!.baseOffset).toBe(-1n);
-      expect(results[0]!.logAppendTime).toBe(-1n);
-      for (let i = 0; i < 50 && produceRequests === 0; i++) await Bun.sleep(10);
+      expect(results[0].baseOffset).toBe(-1n);
+      expect(results[0].logAppendTime).toBe(-1n);
+      for (let i = 0; i < 50 && produceRequests === 0; i++) {
+        await Bun.sleep(10);
+      }
       expect(produceRequests).toBeGreaterThan(0);
       expect(answered).toBe(true); // Metadata was still answered; no hang on Produce.
       await producer.close();
@@ -111,7 +115,7 @@ describe("Producer delivery options", () => {
           const body =
             key === 18
               ? apiVersions()
-              : new Writer()
+              : encoder()
                   .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, broker) =>
                     writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
                   )
@@ -131,7 +135,7 @@ describe("Producer delivery options", () => {
                           .array([1], (w) => w.i32(1)),
                       );
                   });
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
+          const response = encoder().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());
         },

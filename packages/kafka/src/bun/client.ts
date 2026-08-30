@@ -1,8 +1,13 @@
 import { Cluster } from "./cluster.ts";
-import { BunAdmin } from "./admin.ts";
-import { BunConsumer, type ConsumerOptions } from "./consumer.ts";
-import { BunProducer, type ProducerOptions } from "./producer.ts";
-import type { ClusterStats, HealthReport, KafkaOptions } from "./shared.ts";
+import { Admin } from "./admin.ts";
+import { Consumer, type ConsumerOptions } from "../consumer/index.ts";
+import { Producer, type ProducerOptions } from "./producer/index.ts";
+import {
+  DEFAULT_HEALTH_CHECK_TIMEOUT_MS,
+  type ClusterStats,
+  type HealthReport,
+  type KafkaOptions,
+} from "./shared.ts";
 
 export class Kafka {
   #cluster: Cluster;
@@ -10,7 +15,9 @@ export class Kafka {
 
   constructor(options: KafkaOptions) {
     this.#cluster = new Cluster({ ...options, brokers: [...options.brokers] });
-    if (options.statsIntervalMs !== undefined) this.#cluster.trackStats(options.statsIntervalMs);
+    if (options.statsIntervalMs !== undefined) {
+      this.#cluster.trackStats(options.statsIntervalMs);
+    }
   }
 
   /** Aggregate client counters (requests, bytes, retries, throttles). */
@@ -20,28 +27,29 @@ export class Kafka {
 
   /** Ping all known brokers and report per-broker latency. */
   healthCheck(timeoutMs?: number): Promise<HealthReport> {
-    return this.#cluster.healthCheck(timeoutMs ?? Math.min(this.#cluster.requestTimeoutMs, 5_000));
+    return this.#cluster.healthCheck(
+      timeoutMs ?? Math.min(this.#cluster.requestTimeoutMs, DEFAULT_HEALTH_CHECK_TIMEOUT_MS),
+    );
   }
 
-  producer(options: ProducerOptions = {}): BunProducer {
-    let producer: BunProducer;
-    producer = new BunProducer(this.#cluster, options, () => this.#clients.delete(producer));
+  producer(options: ProducerOptions = {}): Producer {
+    const producer = new Producer(this.#cluster, options, () => this.#clients.delete(producer));
     this.#clients.add(producer);
     return producer;
   }
 
   consumer<K = Uint8Array | null, V = Uint8Array | null>(
     options: ConsumerOptions<K, V> = {},
-  ): BunConsumer<K, V> {
-    let consumer: BunConsumer<K, V>;
-    consumer = new BunConsumer(this.#cluster, options, () => this.#clients.delete(consumer));
+  ): Consumer<K, V> {
+    const consumer = new Consumer<K, V>(this.#cluster, options, () =>
+      this.#clients.delete(consumer),
+    );
     this.#clients.add(consumer);
     return consumer;
   }
 
-  admin(): BunAdmin {
-    let admin: BunAdmin;
-    admin = new BunAdmin(this.#cluster, () => this.#clients.delete(admin));
+  admin(): Admin {
+    const admin = new Admin(this.#cluster, () => this.#clients.delete(admin));
     this.#clients.add(admin);
     return admin;
   }

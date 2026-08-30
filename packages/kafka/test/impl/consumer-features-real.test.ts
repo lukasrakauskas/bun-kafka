@@ -5,9 +5,15 @@ import { admin, topic } from "../helpers.ts";
 const BROKER = "127.0.0.1:9092";
 import { isString, isUint8Array } from "../../src/type-guards.ts";
 function decode(value: Uint8Array | null | unknown): string | null {
-  if (value == null) return null;
-  if (isString(value)) return value;
-  if (!isUint8Array(value)) throw new TypeError("Expected bytes");
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (isString(value)) {
+    return value;
+  }
+  if (!isUint8Array(value)) {
+    throw new TypeError("Expected bytes");
+  }
   return new TextDecoder().decode(value);
 }
 
@@ -51,13 +57,13 @@ describe("Regex subscription and deserializers", () => {
 
       const consumer = kafka.consumer({
         keyDeserializer: (data) => (data === null ? null : decode(data)),
-        valueDeserializer: (data) => (data === null ? null : JSON.parse(decode(data)!)),
+        valueDeserializer: (data) => (data === null ? null : JSON.parse(decode(data))),
       });
       await consumer.assign([{ topic: name, partition: 0, offset: "earliest" }]);
       const messages = await consumer.fetch({ maxWaitMs: 5_000, maxMessages: 2, copy: true });
-      expect(messages[0]!.key).toBe("k1");
-      expect(messages[0]!.value).toEqual({ n: 1 });
-      expect(messages[1]!.value).toEqual({ n: 2 });
+      expect(messages[0].key).toBe("k1");
+      expect(messages[0].value).toEqual({ n: 1 });
+      expect(messages[1].value).toEqual({ n: 2 });
       await consumer.close();
     } finally {
       await kafka.disconnect();
@@ -78,7 +84,7 @@ describe("Regex subscription and deserializers", () => {
         maxMessages: 1,
         copy: true,
       });
-      expect(messages[0]!.value).toBeInstanceOf(Uint8Array);
+      expect(messages[0].value).toBeInstanceOf(Uint8Array);
       await consumer.close();
     } finally {
       await kafka.disconnect();

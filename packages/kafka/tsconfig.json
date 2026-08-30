@@ -30,6 +30,7 @@
   "include": [
     "index.ts",
     "src/bun/**/*.ts",
+    "src/consumer/**/*.ts",
     "src/errors.ts",
     "src/types.ts",
     "test/bun-*.test.ts",

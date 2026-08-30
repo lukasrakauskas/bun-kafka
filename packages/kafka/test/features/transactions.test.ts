@@ -1,17 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { Writer } from "../../src/bun/protocol.ts";
+import { encoder, type KafkaEncoder } from "../../src/protocol/index.ts";
 
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 
 describe("Transactions (mock broker)", () => {
   test("commit flow sends InitProducerId, AddPartitionsToTxn, Produce, EndTxn", async () => {
     const apiCalls: Array<{ key: number; flags?: number[] }> = [];
-    let txnPartitionAdded = false;
+    const txnPartitionAdded = false;
     const listener = Bun.listen({
       hostname: "127.0.0.1",
       port: 0,
@@ -20,7 +22,7 @@ describe("Transactions (mock broker)", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          const metadata = new Writer()
+          const metadata = encoder()
             .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, b) =>
               writer.i32(b.id).string(b.host).i32(b.port).string(null),
             )
@@ -40,26 +42,30 @@ describe("Transactions (mock broker)", () => {
                     .array([1], (w) => w.i32(1)),
                 ),
             );
-          let body: Writer;
-          if (key === 18) body = apiVersions();
-          else if (key === 10)
-            body = new Writer()
+          let body: KafkaEncoder;
+          if (key === 18) {
+            body = apiVersions();
+          } else if (key === 10) {
+            body = encoder()
               .i32(0)
               .i16(0)
               .string(null)
               .i32(1)
               .string("127.0.0.1")
-              .i32(listener.port); // FindCoordinator v2: txn coordinator is this mock broker
-          else if (key === 3) body = metadata;
-          else if (key === 22)
-            body = new Writer().i32(0).i16(0).i64(500).i16(1); // pid=500 epoch=1
-          else if (key === 24)
-            body = new Writer()
+              .i32(listener.port);
+          } // FindCoordinator v2: txn coordinator is this mock broker
+          else if (key === 3) {
+            body = metadata;
+          } else if (key === 22) {
+            body = encoder().i32(0).i16(0).i64(500).i16(1);
+          } // pid=500 epoch=1
+          else if (key === 24) {
+            body = encoder()
               .i32(0)
               .array(["events"], (writer, t) =>
                 writer.string(t).array([0], (p) => p.i32(p.index ?? 0).i16(0)),
               );
-          else if (key === 26) {
+          } else if (key === 26) {
             // EndTxn body starts after header + client_id string; commit flag follows txn_id string + pid i64 + epoch i16.
             const clientIdLen = view.getInt16(12);
             const bodyStart = 14 + clientIdLen;
@@ -73,18 +79,23 @@ describe("Transactions (mock broker)", () => {
               key,
               flags: [new DataView(request.buffer, request.byteOffset + at, 1).getInt8(0)],
             });
-            body = new Writer().i32(0).i16(0);
-          } else if (key === 28)
-            body = new Writer().i32(0).i16(0); // TxnOffsetCommit
+            body = encoder().i32(0).i16(0);
+          } else if (key === 28) {
+            body = encoder().i32(0).i16(0);
+          } // TxnOffsetCommit
           else if (key === 0) {
-            body = new Writer()
+            body = encoder()
               .i32(0)
               .array(["events"], (writer, t) =>
                 writer.string(t).array([0], (p) => p.i32(0).i16(0).i64(10).i64(-1)),
               );
-          } else body = new Writer().i32(0).i16(0);
-          if (!apiCalls.some((c) => c.key === key)) apiCalls.push({ key });
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
+          } else {
+            body = encoder().i32(0).i16(0);
+          }
+          if (!apiCalls.some((c) => c.key === key)) {
+            apiCalls.push({ key });
+          }
+          const response = encoder().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());
         },
@@ -116,7 +127,7 @@ describe("Transactions (mock broker)", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          const metadata = new Writer()
+          const metadata = encoder()
             .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, b) =>
               writer.i32(b.id).string(b.host).i32(b.port).string(null),
             )
@@ -136,31 +147,35 @@ describe("Transactions (mock broker)", () => {
                     .array([1], (w) => w.i32(1)),
                 ),
             );
-          let body: Writer;
-          if (key === 18) body = apiVersions();
-          else if (key === 10)
-            body = new Writer()
+          let body: KafkaEncoder;
+          if (key === 18) {
+            body = apiVersions();
+          } else if (key === 10) {
+            body = encoder()
               .i32(0)
               .i16(0)
               .string(null)
               .i32(1)
               .string("127.0.0.1")
-              .i32(listener.port); // FindCoordinator v2: txn coordinator is this mock broker
-          else if (key === 3) body = metadata;
-          else if (key === 22) body = new Writer().i32(0).i16(0).i64(500).i16(1);
-          else if (key === 24)
-            body = new Writer()
+              .i32(listener.port);
+          } // FindCoordinator v2: txn coordinator is this mock broker
+          else if (key === 3) {
+            body = metadata;
+          } else if (key === 22) {
+            body = encoder().i32(0).i16(0).i64(500).i16(1);
+          } else if (key === 24) {
+            body = encoder()
               .i32(0)
               .array(["events"], (writer, t) =>
                 writer.string(t).array([0], (p) => p.i32(0).i16(0)),
               );
-          else if (key === 0)
-            body = new Writer()
+          } else if (key === 0) {
+            body = encoder()
               .i32(0)
               .array(["events"], (writer, t) =>
                 writer.string(t).array([0], (p) => p.i32(0).i16(0).i64(10).i64(-1)),
               );
-          else if (key === 26) {
+          } else if (key === 26) {
             const clientIdLen = view.getInt16(12);
             const bodyStart = 14 + clientIdLen;
             const txnIdLen = new DataView(
@@ -170,9 +185,11 @@ describe("Transactions (mock broker)", () => {
             ).getInt16(0);
             const at = bodyStart + 2 + txnIdLen + 8 + 2;
             endTxnFlags.push(new DataView(request.buffer, request.byteOffset + at, 1).getInt8(0));
-            body = new Writer().i32(0).i16(0);
-          } else body = new Writer().i32(0).i16(0);
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
+            body = encoder().i32(0).i16(0);
+          } else {
+            body = encoder().i32(0).i16(0);
+          }
+          const response = encoder().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());
         },
@@ -202,7 +219,7 @@ describe("Transactions (mock broker)", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          const metadata = new Writer()
+          const metadata = encoder()
             .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, b) =>
               writer.i32(b.id).string(b.host).i32(b.port).string(null),
             )
@@ -222,28 +239,34 @@ describe("Transactions (mock broker)", () => {
                     .array([1], (w) => w.i32(1)),
                 ),
             );
-          let body: Writer;
-          if (key === 18) body = apiVersions();
-          else if (key === 10)
-            body = new Writer()
+          let body: KafkaEncoder;
+          if (key === 18) {
+            body = apiVersions();
+          } else if (key === 10) {
+            body = encoder()
               .i32(0)
               .i16(0)
               .string(null)
               .i32(1)
               .string("127.0.0.1")
-              .i32(listener.port); // FindCoordinator v2: txn coordinator is this mock broker
-          else if (key === 3) body = metadata;
-          else if (key === 22) body = new Writer().i32(0).i16(0).i64(9).i16(2);
-          else if (key === 25 || key === 26 || key === 28) {
+              .i32(listener.port);
+          } // FindCoordinator v2: txn coordinator is this mock broker
+          else if (key === 3) {
+            body = metadata;
+          } else if (key === 22) {
+            body = encoder().i32(0).i16(0).i64(9).i16(2);
+          } else if (key === 25 || key === 26 || key === 28) {
             seenKeys.push(key);
             body =
               key === 28
-                ? new Writer()
+                ? encoder()
                     .i32(0)
                     .array(["events"], (w, t) => w.string(t).array([0], (p) => p.i32(0).i16(0)))
-                : new Writer().i32(0).i16(0);
-          } else body = new Writer().i32(0).i16(0);
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
+                : encoder().i32(0).i16(0);
+          } else {
+            body = encoder().i32(0).i16(0);
+          }
+          const response = encoder().i32(0).i32(correlation).raw(body.result());
           response.patchI32(0, response.length - 4);
           socket.write(response.result());
         },

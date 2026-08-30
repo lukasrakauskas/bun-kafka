@@ -1,15 +1,190 @@
+function writeResponse(socket: Bun.Socket, correlation: number, body: KafkaEncoder): void {
+  const response = encoder().i32(0).i32(correlation).raw(body.result());
+  response.patchI32(0, response.length - 4);
+  socket.write(response.result());
+}
+
+type OwnedPartitionsResult = { protocol: string; version: number; partitions: number[] };
+
+function readOwnedPartitions(request: Uint8Array): OwnedPartitionsResult {
+  const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
+  const clientIdLength = view.getInt16(12);
+  const reader = decoder(
+    new Uint8Array(
+      request.buffer,
+      request.byteOffset + 14 + clientIdLength,
+      request.byteLength - 14 - clientIdLength,
+    ),
+  );
+  reader.string();
+  reader.i32();
+  reader.i32();
+  reader.string();
+  reader.string();
+  const protocols = reader.array((item) => ({
+    name: item.string() ?? "",
+    metadata: item.bytes() ?? new Uint8Array(),
+  }));
+  const metadata = decoder(protocols[0].metadata);
+  const version = metadata.i16();
+  metadata.array((item) => item.string());
+  const partitions = metadata
+    .array((item) => {
+      item.string();
+      return item.array((partition) => partition.i32());
+    })
+    .flat();
+  return { protocol: protocols[0].name, version, partitions };
+}
+
+function cooperativeBody(key: number, port: number): KafkaEncoder {
+  if (key === 18) {
+    return apiVersions();
+  }
+  if (key === 10) {
+    return encoder().i16(0).i32(1).string("127.0.0.1").i32(port);
+  }
+  if (key === 3) {
+    return encoder()
+      .array([{ id: 1, host: "127.0.0.1", port }], (writer, broker) =>
+        writer.i32(broker.id).string(broker.host).i32(broker.port).string(null),
+      )
+      .string(null)
+      .i32(1)
+      .array([{ name: "events" }], (writer, topic) =>
+        writer
+          .i16(0)
+          .string(topic.name)
+          .bool(false)
+          .array([0, 1], (pw, partition) =>
+            pw
+              .i16(0)
+              .i32(partition)
+              .i32(1)
+              .array([1], (w) => w.i32(1))
+              .array([1], (w) => w.i32(1)),
+          ),
+      );
+  }
+  if (key === 11) {
+    const metadata = encoder()
+      .i16(1)
+      .array(["events"], (writer, topic) => writer.string(topic))
+      .array([{ topic: "events", partitions: [0] }], (writer, item) =>
+        writer
+          .string(item.topic)
+          .array(item.partitions, (partitionWriter, partition) => partitionWriter.i32(partition)),
+      )
+      .bytes(null);
+    return encoder()
+      .i32(0)
+      .i16(0)
+      .i32(10)
+      .string(COOPERATIVE_STICKY)
+      .string(MEMBER_ID)
+      .string(MEMBER_ID)
+      .array([[MEMBER_ID, metadata.result()] as const], (writer, [memberId, value]) =>
+        writer.string(memberId).bytes(value),
+      );
+  }
+  if (key === 14) {
+    const assignment = encoder()
+      .i16(0)
+      .array(["events"], (writer, topic) =>
+        writer.string(topic).array([0, 1], (item, partition) => item.i32(partition)),
+      )
+      .bytes(null);
+    return encoder().i16(0).bytes(assignment.result());
+  }
+  if (key === 9) {
+    return encoder()
+      .array(["events"], (writer, topic) =>
+        writer
+          .string(topic)
+          .array([0, 1], (item, partition) => item.i32(partition).i64(7).string(null).i16(0)),
+      )
+      .i16(0);
+  }
+  if (key === 2) {
+    return encoder()
+      .i32(0)
+      .array(["events"], (writer, topic) =>
+        writer.string(topic).array([0, 1], (item, partition) => item.i32(partition).i16(0).i64(10)),
+      );
+  }
+  if (key === 8) {
+    return encoder().array(["events"], (writer, topic) =>
+      writer.string(topic).array([0, 1], (item) => item.i16(0)),
+    );
+  }
+  return encoder().i16(0);
+}
+
+function retainPartitions(
+  members: Array<{ memberId: string; owned: Array<{ partition: number }> }>,
+  partitions: number[],
+  targetSize: Map<string, number>,
+  finals: Map<string, number[]>,
+  ownedBy: Map<number, string>,
+): void {
+  for (const member of members) {
+    for (const owned of member.owned) {
+      if (!partitions.includes(owned.partition) || ownedBy.has(owned.partition)) {
+        continue;
+      }
+      const mine = finals.get(member.memberId);
+      if (mine.length >= targetSize.get(member.memberId)) {
+        continue;
+      }
+      ownedBy.set(owned.partition, member.memberId);
+      mine.push(owned.partition);
+    }
+  }
+}
+
+function assignRemaining(
+  members: Array<{ memberId: string }>,
+  partitions: number[],
+  finals: Map<string, number[]>,
+  ownedBy: Map<number, string>,
+  targetSize: Map<string, number>,
+): void {
+  for (const partition of partitions) {
+    if (ownedBy.has(partition)) {
+      continue;
+    }
+    const chosen =
+      members
+        .filter((member) => finals.get(member.memberId).length < targetSize.get(member.memberId))
+        .sort(
+          (a, b) =>
+            finals.get(a.memberId).length - finals.get(b.memberId).length ||
+            a.memberId.localeCompare(b.memberId),
+        )[0] ?? members[0];
+    ownedBy.set(partition, chosen.memberId);
+    finals.get(chosen.memberId).push(partition);
+  }
+}
+
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
-import { Reader, Writer } from "../../src/bun/protocol.ts";
+import {
+  decoder,
+  type KafkaDecoder,
+  encoder,
+  type KafkaEncoder,
+} from "../../src/protocol/index.ts";
 
 const COOPERATIVE_STICKY = "cooperative-sticky";
 const MEMBER_ID = "member-1";
 
 const apiVersions = () =>
-  new Writer().i16(0).array(
-    Array.from({ length: 64 }, (_, key) => key),
-    (writer, key) => writer.i16(key).i16(0).i16(20),
-  );
+  encoder()
+    .i16(0)
+    .array(
+      Array.from({ length: 64 }, (_, key) => key),
+      (writer, key) => writer.i16(key).i16(0).i16(20),
+    );
 
 describe("Cooperative-sticky assignor (mock broker)", () => {
   test("JoinGroup declares the cooperative-sticky protocol and owned partitions", async () => {
@@ -24,118 +199,13 @@ describe("Cooperative-sticky assignor (mock broker)", () => {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
           const key = view.getInt16(4);
           const correlation = view.getInt32(8);
-          if (process.env.JG_DEBUG) console.error("REQ key:", key, "len:", request.byteLength);
           if (key === 11) {
-            // JoinGroup body after groupId string: sessionTimeout(4) rebalanceTimeout(4) memberId(string) protocolType...
-            const clientIdLen = view.getInt16(12);
-            const r2 = new Reader(
-              new Uint8Array(
-                request.buffer,
-                request.byteOffset + 14 + clientIdLen,
-                request.byteLength - 14 - clientIdLen,
-              ),
-            );
-            r2.string(); // group id
-            r2.i32();
-            r2.i32();
-            r2.string(); // member id
-            r2.string(); // protocol type
-            const protocols = r2.array((pr) => ({
-              name: pr.string() ?? "",
-              metadata: pr.bytes() ?? new Uint8Array(),
-            }));
-            joinProtocol = protocols[0]!.name;
-            const meta = new Reader(protocols[0]!.metadata);
-            subscriptionVersion = meta.i16();
-            const subs = meta.array((r) => r.string() ?? "");
-            void subs; // subscribed topics (must be consumed to stay aligned)
-            const ownedTopics = meta.array((ot) => ({
-              topic: ot.string() ?? "",
-              partitions: ot.array((p) => p.i32()),
-            }));
-            ownedPartitions = ownedTopics.flatMap((t) => t.partitions);
+            const owned = readOwnedPartitions(request);
+            joinProtocol = owned.protocol;
+            subscriptionVersion = owned.version;
+            ownedPartitions = owned.partitions;
           }
-          let body: Writer;
-          if (key === 18) body = apiVersions();
-          else if (key === 10)
-            body = new Writer().i16(0).i32(1).string("127.0.0.1").i32(listener.port);
-          else if (key === 3)
-            body = new Writer()
-              .array([{ id: 1, host: "127.0.0.1", port: listener.port }], (writer, b) =>
-                writer.i32(b.id).string(b.host).i32(b.port).string(null),
-              )
-              .string(null)
-              .i32(1)
-              .array([{ name: "events" }], (writer, item) =>
-                writer
-                  .i16(0)
-                  .string(item.name)
-                  .bool(false)
-                  .array([0, 1], (pw, pid) =>
-                    pw
-                      .i16(0)
-                      .i32(pid)
-                      .i32(1)
-                      .array([1], (w) => w.i32(1))
-                      .array([1], (w) => w.i32(1)),
-                  ),
-              );
-          else if (key === 11) {
-            // pretend we already own partition 0 so the subscription must carry it
-            const metadata = new Writer()
-              .i16(1)
-              .array(["events"], (writer, topicName) => writer.string(topicName))
-              .array([{ topic: "events", partitions: [0] }], (writer, o) =>
-                writer
-                  .string(o.topic)
-                  .array(o.partitions, (partitionWriter, p) => partitionWriter.i32(p)),
-              )
-              .bytes(null);
-            body = new Writer()
-              .i32(0)
-              .i16(0)
-              .i32(10)
-              .string(COOPERATIVE_STICKY)
-              .string(MEMBER_ID) // leader
-              .string(MEMBER_ID) // member id
-              .array([[MEMBER_ID, metadata.result()] as const], (writer, [memberId, md]) =>
-                writer.string(memberId).bytes(md),
-              );
-          } else if (key === 14) {
-            const assignment = new Writer()
-              .i16(0)
-              .array(["events"], (writer, topicName) =>
-                writer.string(topicName).array([0, 1], (item, partition) => item.i32(partition)),
-              )
-              .bytes(null);
-            // client uses SyncGroup v0 here (no group.instance.id): no throttle field
-            body = new Writer().i16(0).bytes(assignment.result());
-          } else if (key === 9)
-            body = new Writer()
-              .array(["events"], (writer, topicName) =>
-                writer
-                  .string(topicName)
-                  .array([0, 1], (item, partition) =>
-                    item.i32(partition).i64(7).string(null).i16(0),
-                  ),
-              )
-              .i16(0);
-          else if (key === 2)
-            body = new Writer()
-              .i32(0)
-              .array(["events"], (w2, tName) =>
-                w2
-                  .string(tName)
-                  .array([0, 1], (item, partition) => item.i32(partition).i16(0).i64(10)),
-              );
-          else if (key === 8)
-            body = new Writer().array(["events"], (writer, topicName) =>
-              writer.string(topicName).array([0, 1], (item, _partition) => item.i16(0)),
-            );
-          else body = new Writer().i16(0);
-          const response = new Writer().i32(0).i32(correlation).raw(body.result());
-          response.patchI32(0, response.length - 4);
-          socket.write(response.result());
+          writeResponse(socket, correlation, cooperativeBody(key, listener.port));
         },
       },
     });
@@ -175,29 +245,8 @@ describe("Cooperative-sticky assignor (mock broker)", () => {
     );
     const finals = new Map<string, number[]>(members.map((m) => [m.memberId, []]));
     const ownedBy = new Map<number, string>();
-    for (const m of members) {
-      for (const o of m.owned) {
-        if (!partitions.includes(o.partition)) continue;
-        if (ownedBy.has(o.partition)) continue;
-        const mine = finals.get(m.memberId)!;
-        if (mine.length >= targetSize.get(m.memberId)!) continue;
-        ownedBy.set(o.partition, m.memberId);
-        mine.push(o.partition);
-      }
-    }
-    for (const partition of partitions) {
-      if (ownedBy.has(partition)) continue;
-      const candidates = members
-        .filter((m) => finals.get(m.memberId)!.length < targetSize.get(m.memberId)!)
-        .sort(
-          (a, b) =>
-            finals.get(a.memberId)!.length - finals.get(b.memberId)!.length ||
-            a.memberId.localeCompare(b.memberId),
-        );
-      const chosen = candidates[0] ?? members[0]!;
-      ownedBy.set(partition, chosen.memberId);
-      finals.get(chosen.memberId)!.push(partition);
-    }
+    retainPartitions(members, partitions, targetSize, finals, ownedBy);
+    assignRemaining(members, partitions, finals, ownedBy, targetSize);
     expect(finals.get("a")).toEqual([0]); // retained
     expect(finals.get("b")).toEqual([1]); // newly acquired
   });

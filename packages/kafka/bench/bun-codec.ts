@@ -1,4 +1,5 @@
-import { decodeRecordSet, encodeRecordBatch } from "../src/bun/protocol.ts";
+import { decodeRecordSet, encodeRecordBatch } from "../src/protocol/index.ts";
+import { requiredValue } from "../src/type-guards.ts";
 
 const width = Number(process.argv[2] ?? 100);
 const total = Number(process.argv[3] ?? 100_000);
@@ -13,7 +14,7 @@ for (let done = 0; done < total; done += width) {
     1_700_000_000_000,
   );
   const decoded = decodeRecordSet(batch, "bench", 0, 1);
-  checksum += BigInt(decoded.length) + decoded.at(-1)!.offset;
+  checksum += BigInt(decoded.length) + requiredValue(decoded.at(-1)).offset;
 }
 
 console.log(JSON.stringify({ recordsPerBatch: width, total, checksum: String(checksum) }));

@@ -65,7 +65,7 @@ describe("Transactions (real broker)", () => {
       const uncommitted = client.consumer({ isolationLevel: "read_uncommitted" });
       await uncommitted.assign([{ topic: name, partition: 0, offset: "earliest" }]);
       const all = await uncommitted.fetch({ maxWaitMs: 5_000, maxMessages: 10, copy: true });
-      expect(all.some((m) => m.offset >= visible[visible.length - 1]!.offset + 1n)).toBe(true);
+      expect(all.some((m) => m.offset >= visible[visible.length - 1].offset + 1n)).toBe(true);
 
       await committed.close();
       await uncommitted.close();

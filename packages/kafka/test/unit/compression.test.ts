@@ -5,14 +5,14 @@ import {
   lz4Decompress,
   lz4DecompressBlock,
   xxhash32,
-} from "../../src/bun/lz4.ts";
+} from "../../src/protocol/lz4.ts";
 import {
   snappyCompress,
   snappyCompressBlock,
   snappyDecompress,
   snappyDecompressBlock,
-} from "../../src/bun/snappy.ts";
-import { decodeRecordSet, encodeRecordBatch } from "../../src/bun/protocol.ts";
+} from "../../src/protocol/snappy.ts";
+import { decodeRecordSet, encodeRecordBatch } from "../../src/protocol/index.ts";
 
 const decode = (value: Uint8Array) => new TextDecoder().decode(value);
 
@@ -32,7 +32,9 @@ describe("snappy codec", () => {
       0, 1, 3, 4, 12, 13, 59, 60, 61, 64, 100, 256, 257, 65536, 65537, 500, 5000,
     ]) {
       const data = pattern(length);
-      if (length >= 40) data.set(pattern(20), length - 20);
+      if (length >= 40) {
+        data.set(pattern(20), length - 20);
+      }
       expect(same(snappyDecompressBlock(snappyCompressBlock(data)), data)).toBe(true);
     }
   });
@@ -47,7 +49,7 @@ describe("snappy codec", () => {
     const first = pattern(50);
     const second = new TextEncoder().encode("second-chunk-payload");
     const blocks = [first, second].map((block) => snappyCompressBlock(block));
-    const framed = new Uint8Array(16 + 4 + blocks[0]!.byteLength + 4 + blocks[1]!.byteLength);
+    const framed = new Uint8Array(16 + 4 + blocks[0].byteLength + 4 + blocks[1].byteLength);
     framed.set(new Uint8Array([0x82, 0x53, 0x4e, 0x41, 0x50, 0x50, 0x59, 0x00]));
     const view = new DataView(framed.buffer);
     view.setInt32(8, 1);
@@ -122,7 +124,9 @@ describe("lz4 codec", () => {
     const frame = new Uint8Array(total);
     let at = 0;
     for (const part of parts) {
-      if (part === parts[1]) new DataView(part.buffer).setUint32(0, compressed.byteLength, true);
+      if (part === parts[1]) {
+        new DataView(part.buffer).setUint32(0, compressed.byteLength, true);
+      }
       frame.set(part, at);
       at += part.byteLength;
     }
@@ -142,8 +146,8 @@ describe("record batch compression codecs", () => {
       const batch = encodeRecordBatch(records, Date.now(), codec);
       const messages = decodeRecordSet(batch, "t", 0, 1);
       expect(messages).toHaveLength(records.length);
-      expect(decode(messages[49]!.value!)).toBe(records[49]!.value);
-      expect(decode(messages[7]!.headers.index!)).toBe("7");
+      expect(decode(messages[49].value)).toBe(records[49].value);
+      expect(decode(messages[7].headers.index)).toBe("7");
     }
   });
 

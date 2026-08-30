@@ -26,7 +26,9 @@ export class Logger {
     this.#creator = creator;
   }
   #write(level: number, message: string, extra: LogFields): void {
-    if (level > this.#level) return;
+    if (level > this.#level) {
+      return;
+    }
     const entry: LoggerEntry = {
       namespace: this.#namespace,
       level,
@@ -37,7 +39,12 @@ export class Logger {
       this.#creator(entry);
       return;
     }
-    const target = level <= 1 ? console.error : level === 2 ? console.warn : console.log;
+    let target = console.log;
+    if (level <= 1) {
+      target = console.error;
+    } else if (level === 2) {
+      target = console.warn;
+    }
     target(
       `{"level":"${entry.label}","timestamp":${Date.now()},"logger":"${entry.namespace}","message":${JSON.stringify(message)}}`,
     );

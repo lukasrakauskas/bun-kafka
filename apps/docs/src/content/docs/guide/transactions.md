@@ -1,6 +1,6 @@
 ---
 title: Transactions
-description: Transactions
+description: Write records and consumer offsets as one atomic Kafka transaction.
 ---
 
 Kafka transactions let one producer write records to many partitions _and_ commit consumer
@@ -78,8 +78,8 @@ produced records and the offset commit disappear together — no duplicates, no 
 - Consumers must set `isolationLevel: "read_committed"` or they will see uncommitted/aborted
   records anyway.
 
-## Fencing verification
+## Fenced producers
 
-A fenced zombie gets `FENCED_INSTANCE_ID`/`INVALID_PRODUCER_EPOCH` typed errors on its next
-request. The real-broker suite exercises this:
-`KAFKA_BROKERS=127.0.0.1:9092 bun test test/impl/transactions-fencing-real.test.ts`.
+If another process uses the same `transactionalId`, Kafka fences the older producer. Treat
+`FENCED_INSTANCE_ID` and `INVALID_PRODUCER_EPOCH` as fatal: stop that producer and investigate
+duplicate instance identities.
