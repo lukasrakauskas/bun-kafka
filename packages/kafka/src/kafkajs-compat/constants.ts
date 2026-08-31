@@ -1,3 +1,7 @@
+import { INT32_MAX } from "../bun/shared.ts";
+import { asBytes, murmur2 } from "../protocol/index.ts";
+import type { KafkaJsPartitioner } from "./messages.ts";
+
 export const COMPRESSION_NAMES = ["none", "gzip", "snappy", "lz4", "zstd"] as const;
 
 export const CompressionTypes = {
@@ -11,17 +15,31 @@ export const CompressionTypes = {
 /** Registry kept for kafkajs API parity; bun-kafka ships all five codecs natively. */
 export const CompressionCodecs: Record<number, never> = {};
 
-/** bun-kafka produces Java-compatible murmur2 partitioning natively. */
+/** KafkaJS's default partitioner uses Java-compatible Murmur2 key affinity. */
+const javaCompatiblePartitioner: KafkaJsPartitioner = () => {
+  const counters = new Map<string, number>();
+  return ({ topic, partitionMetadata, message }) => {
+    if (message.partition !== undefined) {
+      return message.partition;
+    }
+    const key = asBytes(message.key);
+    if (key) {
+      return (murmur2(key) & INT32_MAX) % partitionMetadata.length;
+    }
+    const counter = counters.get(topic) ?? 0;
+    counters.set(topic, counter + 1);
+    const partition = partitionMetadata[counter % partitionMetadata.length];
+    if (!partition) {
+      throw new RangeError(`No partitions available for ${topic}`);
+    }
+    return partition.partitionId;
+  };
+};
+
 export const Partitioners = {
-  DefaultPartitioner: () => ({
-    partition: (ctx: { partitionCount: number }) => Math.floor(Math.random() * ctx.partitionCount),
-  }),
-  JavaCompatiblePartitioner: () => ({
-    partition: (ctx: { partitionCount: number }) => Math.floor(Math.random() * ctx.partitionCount),
-  }),
-  LegacyPartitioner: () => ({
-    partition: (ctx: { partitionCount: number }) => Math.floor(Math.random() * ctx.partitionCount),
-  }),
+  DefaultPartitioner: javaCompatiblePartitioner,
+  JavaCompatiblePartitioner: javaCompatiblePartitioner,
+  LegacyPartitioner: javaCompatiblePartitioner,
 };
 
 export const logLevel = { NOTHING: 0, ERROR: 1, WARN: 2, INFO: 3, DEBUG: 4 } as const;

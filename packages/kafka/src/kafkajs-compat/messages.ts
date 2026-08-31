@@ -1,6 +1,6 @@
 import type { ConsumedMessage } from "../types.ts";
 import { KafkaJSNonRetriableError } from "./errors.ts";
-import type { Partitioner, PartitionerContext, ProducerMessage } from "../bun/producer/index.ts";
+import type { Partitioner, ProducerMessage } from "../bun/producer/index.ts";
 import { isFunction, isNumber } from "../type-guards.ts";
 
 export interface KafkaJsMessage {
@@ -39,23 +39,51 @@ export type KafkaJsConsumedMessage = {
   leaderEpoch?: number | null;
 };
 
-export type KafkaJsPartitioner =
-  | ((topic: string, count: number, key: Uint8Array | null) => number)
-  | { partition: (context: PartitionerContext) => number };
+export type KafkaJsPartitionMetadata = {
+  partitionErrorCode: number;
+  partitionId: number;
+  leader: number;
+  replicas: number[];
+  isr: number[];
+};
+
+export type KafkaJsPartitionerContext = {
+  topic: string;
+  partitionMetadata: KafkaJsPartitionMetadata[];
+  message: KafkaJsMessage;
+};
+
+export type KafkaJsPartitioner = () => (context: KafkaJsPartitionerContext) => number;
 
 export function toBunPartitioner(
-  partitioner: KafkaJsPartitioner | null | undefined,
+  createPartitioner: KafkaJsPartitioner | null | undefined,
 ): Partitioner | undefined {
-  if (!partitioner) {
+  if (!createPartitioner) {
     return undefined;
   }
-  if (isFunction(partitioner)) {
-    return ({ topic, partitionCount, key }) => partitioner(topic, partitionCount, key);
+  const partitioner = createPartitioner();
+  if (!isFunction(partitioner)) {
+    throw new TypeError("KafkaJS createPartitioner must return a function");
   }
-  if ("partition" in partitioner) {
-    return (context) => partitioner.partition(context);
-  }
-  return undefined;
+  const metadata = new Map<number, KafkaJsPartitionMetadata[]>();
+  return ({ topic, partitionCount, key }) => {
+    let partitionMetadata = metadata.get(partitionCount);
+    if (!partitionMetadata) {
+      partitionMetadata = Array.from({ length: partitionCount }, (_, partitionId) => ({
+        partitionErrorCode: 0,
+        partitionId,
+        leader: 0,
+        replicas: [],
+        isr: [],
+      }));
+      metadata.set(partitionCount, partitionMetadata);
+    }
+    return partitioner({
+      topic,
+      partitionMetadata,
+      message: { key: key && Buffer.from(key), value: null },
+    });
+  };
 }
 
 export function toWireMessage(message: KafkaJsMessage): ProducerMessage {
