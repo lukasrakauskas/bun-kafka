@@ -44,14 +44,17 @@ export function writeAlterConfigsRequest(
     resourceName: string;
     configs: Record<string, string | null>;
   }[],
+  validateOnly: boolean,
 ): RequestBody {
   return encodeRequest((w) =>
-    w.array(resources, (x, r) =>
-      x
-        .i8(r.resourceType)
-        .string(r.resourceName)
-        .array(Object.entries(r.configs), (c, [n, v]) => c.string(n).string(v)),
-    ),
+    w
+      .array(resources, (x, r) =>
+        x
+          .i8(r.resourceType)
+          .string(r.resourceName)
+          .array(Object.entries(r.configs), (c, [n, v]) => c.string(n).string(v)),
+      )
+      .bool(validateOnly),
   );
 }
 export function readAlterConfigsResponse(body: ResponseBody) {
