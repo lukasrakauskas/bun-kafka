@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import type { ClusterGetter } from "../../src/kafkajs-compat/config.ts";
 import { Logger } from "../../src/kafkajs-compat/logger.ts";
 import { CompatConsumer, type RunOptions } from "../../src/kafkajs-compat/consumer.ts";
+import type { Consumer } from "../../src/consumer/index.ts";
+import type { TopicPartition } from "../../src/types.ts";
 import { Cluster } from "../../src/bun/cluster.ts";
 
 class FailingCluster extends Cluster {
@@ -13,6 +15,25 @@ class FailingCluster extends Cluster {
 class HandlerFailingConsumer extends CompatConsumer {
   protected override async loop(options: RunOptions): Promise<void> {
     await options.eachMessage?.({} as never);
+  }
+}
+
+class PartitionTrackingConsumer extends CompatConsumer {
+  readonly corePaused = new Set<number>();
+
+  protected override underlying(): Consumer {
+    return {
+      assignment: () => [
+        { topic: "events", partition: 0 },
+        { topic: "events", partition: 1 },
+      ],
+      pause: (partitions: TopicPartition[]) => {
+        for (const { partition } of partitions) this.corePaused.add(partition);
+      },
+      resume: (partitions: TopicPartition[]) => {
+        for (const { partition } of partitions) this.corePaused.delete(partition);
+      },
+    } as unknown as Consumer;
   }
 }
 
@@ -32,6 +53,32 @@ test("describeGroup releases its temporary admin after a failed request", async 
     message: "describe failed",
   });
   expect(releases).toBe(1);
+});
+
+test("pause and resume pass resolved partitions to the core consumer", () => {
+  const consumer = new PartitionTrackingConsumer(
+    () => {
+      throw new Error("unexpected cluster access");
+    },
+    new Logger(0, "test"),
+    { groupId: "workers" },
+  );
+
+  expect(consumer.pause([{ topic: "events", partitions: [1] }])).toEqual([
+    { topic: "events", partitions: [1] },
+  ]);
+  expect([...consumer.corePaused]).toEqual([1]);
+
+  expect(consumer.resume([{ topic: "events", partitions: [1] }])).toEqual([]);
+  expect([...consumer.corePaused]).toEqual([]);
+
+  expect(consumer.pause([{ topic: "events" }])).toEqual([{ topic: "events", partitions: [0, 1] }]);
+  expect([...consumer.corePaused]).toEqual([0, 1]);
+
+  expect(consumer.resume([{ topic: "events", partitions: [1] }])).toEqual([
+    { topic: "events", partitions: [0] },
+  ]);
+  expect([...consumer.corePaused]).toEqual([0]);
 });
 
 test("run reports a handler crash once", async () => {
