@@ -142,9 +142,10 @@ export class AdminTopics extends AdminBase {
       resourceName: string;
       configs: Record<string, string | null>;
     }[],
+    options: { validateOnly?: boolean } = {},
   ): Promise<TopicResult[]> {
     this.open();
-    const body = writeAlterConfigsRequest(resources);
+    const body = writeAlterConfigsRequest(resources, options.validateOnly ?? false);
     const response = await this.cluster.anyRequest(API_ALTER_CONFIGS, 0, body);
     const decoded = readAlterConfigsResponse(response);
     this.cluster.throttle(API_ALTER_CONFIGS, decoded.throttleMs);
