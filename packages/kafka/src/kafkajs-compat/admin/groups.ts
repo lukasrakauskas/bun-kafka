@@ -19,7 +19,7 @@ export class CompatAdminGroups extends CompatAdminTopics {
     }>
   > {
     try {
-      const listed = await this.underlying().groupOffsets(groupId, topics);
+      const listed = await this.observe(() => this.underlying().groupOffsets(groupId, topics));
       const result: Array<{
         topic: string;
         partitions: Array<{ partition: number; offset: string; metadata?: string }>;
@@ -29,7 +29,9 @@ export class CompatAdminGroups extends CompatAdminTopics {
           partitions.map(async ({ partition, offset, metadata }) => ({
             partition,
             offset: (resolveOffsets && offset < 0n
-              ? await this.underlying().offsetByTimestamp(topic, partition, EARLIEST_OFFSET)
+              ? await this.observe(() =>
+                  this.underlying().offsetByTimestamp(topic, partition, EARLIEST_OFFSET),
+                )
               : offset
             ).toString(),
             metadata: metadata ?? undefined,
@@ -58,12 +60,14 @@ export class CompatAdminGroups extends CompatAdminTopics {
     topic: string,
   ): Promise<Array<{ partition: number; offset: string; high: string; low: string }>> {
     try {
-      return (await this.underlying().topicOffsets(topic)).map(({ partition, low, high }) => ({
-        partition,
-        offset: high.toString(),
-        high: high.toString(),
-        low: low.toString(),
-      }));
+      return (await this.observe(() => this.underlying().topicOffsets(topic))).map(
+        ({ partition, low, high }) => ({
+          partition,
+          offset: high.toString(),
+          high: high.toString(),
+          low: low.toString(),
+        }),
+      );
     } catch (error) {
       throw wrapError(error);
     }
@@ -74,12 +78,14 @@ export class CompatAdminGroups extends CompatAdminTopics {
     timestamp = Date.now(),
   ): Promise<Array<{ partition: number; offset: string }>> {
     try {
-      const marks = await this.underlying().topicOffsets(topic);
+      const marks = await this.observe(() => this.underlying().topicOffsets(topic));
       return await Promise.all(
         marks.map(async ({ partition }) => ({
           partition,
           offset: (
-            await this.underlying().offsetByTimestamp(topic, partition, timestamp)
+            await this.observe(() =>
+              this.underlying().offsetByTimestamp(topic, partition, timestamp),
+            )
           ).toString(),
         })),
       );
@@ -98,16 +104,18 @@ export class CompatAdminGroups extends CompatAdminTopics {
     partitions: Array<{ partition: number; offset: string | number | bigint }>;
   }): Promise<void> {
     try {
-      await this.underlying().setGroupOffsets(groupId, [
-        {
-          topic,
-          partitions: partitions.map(({ partition, offset }) => ({
-            partition,
-            offset: BigInt(offset),
-            metadata: "",
-          })),
-        },
-      ]);
+      await this.observe(() =>
+        this.underlying().setGroupOffsets(groupId, [
+          {
+            topic,
+            partitions: partitions.map(({ partition, offset }) => ({
+              partition,
+              offset: BigInt(offset),
+              metadata: "",
+            })),
+          },
+        ]),
+      );
     } catch (error) {
       throw wrapError(error);
     }
@@ -123,7 +131,7 @@ export class CompatAdminGroups extends CompatAdminTopics {
     earliest?: boolean;
   }): Promise<void> {
     try {
-      await this.underlying().resetGroupOffsets(groupId, topic, earliest);
+      await this.observe(() => this.underlying().resetGroupOffsets(groupId, topic, earliest));
     } catch (error) {
       throw wrapError(error);
     }
@@ -133,7 +141,7 @@ export class CompatAdminGroups extends CompatAdminTopics {
     statesFilter?: string[],
   ): Promise<{ groups: Array<{ groupId: string; protocolType: string; state: string }> }> {
     try {
-      const groups = await this.underlying().listGroups(statesFilter ?? []);
+      const groups = await this.observe(() => this.underlying().listGroups(statesFilter ?? []));
       return {
         groups: groups.map(({ groupId, protocolType, state }) => ({
           groupId,
@@ -154,7 +162,7 @@ export class CompatAdminGroups extends CompatAdminTopics {
 
   async describeGroups(groupIds: string[]): Promise<{ groups: Array<CompatOptions> }> {
     try {
-      const described = await this.underlying().describeGroups(groupIds);
+      const described = await this.observe(() => this.underlying().describeGroups(groupIds));
       return {
         groups: described.map((group) => ({
           errorCode: group.error,
@@ -179,7 +187,7 @@ export class CompatAdminGroups extends CompatAdminTopics {
 
   async deleteGroups(groupIds: string[]): Promise<void> {
     try {
-      await this.underlying().deleteGroups(groupIds);
+      await this.observe(() => this.underlying().deleteGroups(groupIds));
     } catch (error) {
       throw wrapError(error);
     }
@@ -187,7 +195,7 @@ export class CompatAdminGroups extends CompatAdminTopics {
 
   async listTopics(): Promise<string[]> {
     try {
-      const metadata = await this.underlying().metadata(null);
+      const metadata = await this.observe(() => this.underlying().metadata(null));
       return metadata.topics
         .filter((topicMeta) => !topicMeta.err && topicMeta.name)
         .map((topicMeta) => topicMeta.name);

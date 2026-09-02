@@ -27,12 +27,14 @@ export class CompatAdminConfigs extends CompatAdminGroups {
     }>;
   }> {
     try {
-      const described = await this.underlying().describeConfigs(
-        resources.map((resource) => ({
-          resourceType: resource.type,
-          resourceName: resource.name,
-          configNames: resource.configNames,
-        })),
+      const described = await this.observe(() =>
+        this.underlying().describeConfigs(
+          resources.map((resource) => ({
+            resourceType: resource.type,
+            resourceName: resource.name,
+            configNames: resource.configNames,
+          })),
+        ),
       );
       return {
         resources: described.map((resource) => {
@@ -75,13 +77,15 @@ export class CompatAdminConfigs extends CompatAdminGroups {
     resources: Array<{ type: number; name: string; configEntries: Record<string, string | null> }>;
   }): Promise<void> {
     try {
-      await this.underlying().alterConfigs(
-        resources.map((resource) => ({
-          resourceType: resource.type,
-          resourceName: resource.name,
-          configs: resource.configEntries,
-        })),
-        { validateOnly },
+      await this.observe(() =>
+        this.underlying().alterConfigs(
+          resources.map((resource) => ({
+            resourceType: resource.type,
+            resourceName: resource.name,
+            configs: resource.configEntries,
+          })),
+          { validateOnly },
+        ),
       );
     } catch (error) {
       throw wrapError(error);
@@ -98,7 +102,7 @@ export class CompatAdminConfigs extends CompatAdminGroups {
         operation: Number(entry.operation),
         permissionType: Number(entry.permissionType),
       }));
-      const results = await this.underlying().createAcls(bindings);
+      const results = await this.observe(() => this.underlying().createAcls(bindings));
       return results.map((result) => result.error === 0);
     } catch (error) {
       throw wrapError(error);
@@ -124,7 +128,7 @@ export class CompatAdminConfigs extends CompatAdminGroups {
         operation: Number(filter.operation ?? 1),
         permissionType: Number(filter.permissionType ?? 1),
       };
-      const described = await this.underlying().describeAcls(aclFilter);
+      const described = await this.observe(() => this.underlying().describeAcls(aclFilter));
       return {
         resources: described.acls.map((acl) => ({
           resourceType: acl.resourceType,
@@ -163,7 +167,7 @@ export class CompatAdminConfigs extends CompatAdminGroups {
         operation: Number(filter.operation ?? 1),
         permissionType: Number(filter.permissionType ?? 1),
       }));
-      const result = await this.underlying().deleteAcls(aclFilters);
+      const result = await this.observe(() => this.underlying().deleteAcls(aclFilters));
       return {
         entries: result.map((entry) => ({
           errorCode: entry.error,

@@ -38,7 +38,12 @@ export class CompatConsumerBase {
   protected underlying(): Consumer {
     return (this.consumer ??= new Consumer(
       this.getter().acquire(),
-      createCompatConsumerOptions(this.options),
+      createCompatConsumerOptions(this.options, ({ type, ...event }) =>
+        this.emitter.emit(
+          type === "rebalancing" ? CONSUMER_EVENTS.REBALANCING : CONSUMER_EVENTS.GROUP_JOIN,
+          event,
+        ),
+      ),
       this.getter().release,
     ));
   }
@@ -85,9 +90,6 @@ export class CompatConsumerBase {
       }
       this.subscribedTopics = new Set(merged);
       await this.underlying().subscribe({ topics: merged, fromBeginning });
-      this.emitter.emit(CONSUMER_EVENTS.GROUP_JOIN, {
-        groupId: String(this.options.groupId ?? ""),
-      });
     } catch (error) {
       throw wrapError(error);
     }

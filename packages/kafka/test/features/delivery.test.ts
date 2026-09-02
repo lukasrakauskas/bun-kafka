@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
+import { Kafka as CompatKafka } from "../../src/kafkajs-compat/index.ts";
 import { encoder, type KafkaEncoder } from "../../src/protocol/index.ts";
 
 const apiVersions = () =>
@@ -67,6 +68,17 @@ describe("Producer delivery options", () => {
       },
     });
     const kafka = new Kafka({ brokers: [`127.0.0.1:${listener.port}`], requestTimeoutMs: 500 });
+    const compatProducer = new CompatKafka({
+      brokers: [`127.0.0.1:${listener.port}`],
+      requestTimeout: 500,
+    }).producer();
+    const requestEvents: unknown[] = [];
+    const queueEvents: unknown[] = [];
+    compatProducer.on(compatProducer.events.REQUEST, () => {
+      throw new Error("listener failed");
+    });
+    compatProducer.on(compatProducer.events.REQUEST, (event) => requestEvents.push(event));
+    compatProducer.on(compatProducer.events.REQUEST_QUEUE_SIZE, (event) => queueEvents.push(event));
     try {
       const producer = kafka.producer();
       const results = await producer.send({
@@ -84,7 +96,17 @@ describe("Producer delivery options", () => {
       expect(produceRequests).toBeGreaterThan(0);
       expect(answered).toBe(true); // Metadata was still answered; no hang on Produce.
       await producer.close();
+
+      await compatProducer.send({
+        topic: "events",
+        acks: 0,
+        messages: [{ value: "one" }, { value: "two" }],
+      });
+      expect(queueEvents).toContainEqual(expect.objectContaining({ queueSize: 2 }));
+      expect(requestEvents).toContainEqual(expect.objectContaining({ apiKey: 3, apiVersion: 2 }));
+      expect(requestEvents).toContainEqual(expect.objectContaining({ apiKey: 0, apiVersion: 3 }));
     } finally {
+      await compatProducer.disconnect();
       await kafka.disconnect();
       listener.stop(true);
     }

@@ -23,6 +23,7 @@ import type {
   Assigned,
   ConsumerAssignment,
   ConsumerSettings,
+  ConsumerGroupEvent,
   ConsumerState,
   GroupAssignment,
   GroupMember,
@@ -38,6 +39,7 @@ type GroupDependencies = {
     assignments: readonly ConsumerAssignment[],
   ): Promise<Array<{ offset: bigint; topic: string; partition: number }>>;
   assign(assignments: ConsumerAssignment[]): Promise<void>;
+  onEvent(event: ConsumerGroupEvent): void;
 };
 
 export class GroupCoordinator {
@@ -48,6 +50,12 @@ export class GroupCoordinator {
   }
 
   async join(topics: string[], fromBeginning: boolean): Promise<number> {
+    const startedAt = performance.now();
+    this.#event({
+      type: "rebalancing",
+      groupId: this.#deps.state.groupId ?? "",
+      memberId: this.#deps.state.memberId,
+    });
     const joined = await this.#joinRequest(topics);
     const assignments = await this.#buildAssignments(
       joined.leader,
@@ -65,7 +73,28 @@ export class GroupCoordinator {
       ? this.#retainedPositions(assigned)
       : new Map<string, bigint>();
     await this.#deps.assign(withGroupOffsets(assigned, committed, retained, fromBeginning));
+    this.#event({
+      type: "group_join",
+      groupId: this.#deps.state.groupId ?? "",
+      memberId: this.#deps.state.memberId,
+      generationId: this.#deps.state.generationId,
+      memberAssignment: Object.fromEntries(
+        [...Map.groupBy(assigned, ({ topic }) => topic)].map(([topic, topicAssignments]) => [
+          topic,
+          topicAssignments.map(({ partition }) => partition),
+        ]),
+      ),
+      duration: performance.now() - startedAt,
+    });
     return joined.coordinator;
+  }
+
+  #event(event: ConsumerGroupEvent): void {
+    try {
+      this.#deps.onEvent(event);
+    } catch {
+      // Lifecycle listeners must not change consumer behavior.
+    }
   }
 
   async #findCoordinator(): Promise<number> {

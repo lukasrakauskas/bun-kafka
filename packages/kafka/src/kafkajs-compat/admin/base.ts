@@ -1,7 +1,7 @@
 import { Admin } from "../../bun/admin.ts";
 import { ADMIN_EVENTS } from "../constants.ts";
 import type { ClusterGetter } from "../config.ts";
-import { Emitter, Logger } from "../logger.ts";
+import { Emitter, Logger, observeRequests } from "../logger.ts";
 import type { LogFields } from "../types.ts";
 
 export class CompatAdminBase {
@@ -25,6 +25,10 @@ export class CompatAdminBase {
   protected underlying(): Admin {
     this.admin ??= new Admin(this.getter().acquire(), this.getter().release);
     return this.admin;
+  }
+
+  protected observe<T>(request: () => T): T {
+    return observeRequests(this.getter().sync(), this.emitter, ADMIN_EVENTS, request);
   }
 
   async connect(): Promise<void> {

@@ -22,6 +22,7 @@ export type {
 } from "./producer/index.ts";
 export type {
   ConsumerOptions,
+  ConsumerGroupEvent,
   ConsumerSubscribe,
   ConsumerAssignment,
   FetchOptions,
