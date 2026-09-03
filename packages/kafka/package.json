@@ -40,6 +40,7 @@
     "test": "bun test test/unit test/features",
     "test:unit": "bun test test/unit",
     "test:features": "bun test test/features",
+    "test:kafkajs": "bun test test/unit/compat-consumer.test.ts test/unit/compat-partitioner.test.ts test/features/admin-alter-configs.test.ts",
     "test:coverage": "bun test --coverage test/unit test/features",
     "test:integration": "bun test test/impl/bun-integration.test.ts",
     "test:chaos:mock": "bun test test/impl/chaos.test.ts",
