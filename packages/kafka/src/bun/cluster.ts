@@ -35,6 +35,7 @@ export class Cluster {
   #bootstrap: string[];
   #options: ConnectionOptions;
   #retry: Required<RetryOptions>;
+  #rackId?: string;
   #telemetry: ClusterTelemetry;
   #connections = new Map<string, Connection>();
   #brokers = new Map<number, string>();
@@ -47,6 +48,7 @@ export class Cluster {
     const resolved = resolveClusterOptions(options);
     this.#bootstrap = resolved.bootstrap;
     this.#retry = resolved.retry;
+    this.#rackId = resolved.rackId;
     this.#options = resolved.connection;
     this.#telemetry = new ClusterTelemetry(
       () => this.#connections.values(),
@@ -265,6 +267,9 @@ export class Cluster {
   }
   get requestTimeoutMs(): number {
     return this.#options.requestTimeoutMs;
+  }
+  get rackId(): string | undefined {
+    return this.#rackId;
   }
 
   event(event: KafkaEvent): void {

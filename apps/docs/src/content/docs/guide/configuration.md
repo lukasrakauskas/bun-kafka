@@ -11,6 +11,7 @@ Passed to `new Kafka(options)`:
 | ------------------ | ----------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------- |
 | `brokers`          | `string[]`                    | required      | Bootstrap list, e.g. `["b1:9092"]`. Addresses accept `host:port` or `kafka://host:port`; default port 9092 |
 | `clientId`         | `string`                      | `"bun-kafka"` | Sent with every request; shows up in broker logs and quota rules                                           |
+| `rackId`           | `string`                      | —             | Enables rack-aware follower fetching on Kafka 2.4+ (KIP-392)                                               |
 | `tls`              | `boolean \| Bun.TLSOptions`   | —             | Enable TLS; see [security](security.md)                                                                    |
 | `sasl`             | object                        | —             | PLAIN / SCRAM-SHA-256 / SCRAM-SHA-512 / OAUTHBEARER                                                        |
 | `requestTimeoutMs` | number                        | `30000`       | Per-request timeout; pending requests reject as retriable on expiry                                        |

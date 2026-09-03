@@ -12,6 +12,7 @@ import { hasStringValue, isFunction, isString } from "../type-guards.ts";
 import type { CompatOptions } from "./types.ts";
 export interface KafkaConfig {
   clientId?: string;
+  rackId?: string;
   brokers: string[] | (() => string[] | Promise<string[]>);
   ssl?: boolean | Bun.TLSOptions;
   sasl?: CompatOptions;
@@ -32,6 +33,7 @@ export interface KafkaConfig {
 
 export interface MappedConfig {
   clientId: string;
+  rackId?: string;
   tls?: Bun.TLSOptions;
   sasl?: BunKafkaSasl;
   requestTimeoutMs: number;
@@ -110,6 +112,7 @@ export function mapConfig(
   return {
     brokers,
     clientId: config.clientId ?? "kafkajs",
+    rackId: config.rackId,
     tls: config.ssl === true ? {} : config.ssl || undefined,
     sasl: mapSaslConfig(config.sasl),
     requestTimeoutMs: config.requestTimeout ?? DEFAULT_REQUEST_TIMEOUT_MS,

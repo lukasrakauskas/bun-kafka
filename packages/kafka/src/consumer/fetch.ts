@@ -11,6 +11,7 @@ import {
   DEFAULT_FETCH_MAX_PARTITION_BYTES,
   DEFAULT_FETCH_MAX_WAIT_MS,
   FETCH_API_VERSION,
+  FETCH_RACK_API_VERSION,
   HEX_DUMP_BYTES,
   RADIX_HEX,
   kafkaError,
@@ -28,6 +29,7 @@ type FetchSessionState = {
 
 export class Fetcher<K, V> {
   #sessions = new Map<number, FetchSessionState>();
+  #preferredReplicas = new Map<string, number>();
   constructor(
     private readonly cluster: Cluster,
     private readonly options: ConsumerSettings,
@@ -45,8 +47,10 @@ export class Fetcher<K, V> {
 
   reset(): void {
     this.#sessions.clear();
+    this.#preferredReplicas.clear();
   }
   resetPartition(key: string): void {
+    this.#preferredReplicas.delete(key);
     for (const session of this.#sessions.values()) {
       session.sent.delete(key);
       session.streaming.delete(key);
@@ -94,10 +98,13 @@ export class Fetcher<K, V> {
       return [];
     }
     const isolationLevel = this.options.isolationLevel === "read_committed" ? 1 : 0;
-    const leaders = Map.groupBy(active, ([, assignment]) => assignment.leader);
+    const brokers = Map.groupBy(
+      active,
+      ([key, assignment]) => this.#preferredReplicas.get(key) ?? assignment.leader,
+    );
     const batches = await Promise.all(
-      [...leaders].map(([leader, entries]) =>
-        this.fetchBroker(leader, entries, options, isolationLevel),
+      [...brokers].map(([broker, entries]) =>
+        this.fetchBroker(broker, entries, options, isolationLevel),
       ),
     );
     this.decoder.add(batches.flat());
@@ -107,12 +114,12 @@ export class Fetcher<K, V> {
   // The fetch path combines broker sessions and protocol response handling.
   // eslint-disable-next-line sonarjs/cognitive-complexity
   private async fetchBroker(
-    leader: number,
+    broker: number,
     entries: Array<[string, Assigned]>,
     options: FetchOptions,
     isolationLevel: number,
   ): Promise<RecordSetDecoder[]> {
-    const session = this.#sessions.get(leader) ?? {
+    const session = this.#sessions.get(broker) ?? {
       id: 0,
       epoch: 0,
       sent: new Map(),
@@ -137,9 +144,9 @@ export class Fetcher<K, V> {
       session.streaming.delete(key);
     }
     const response = await this.cluster.request(
-      leader,
+      broker,
       API_FETCH,
-      FETCH_API_VERSION,
+      this.cluster.rackId === undefined ? FETCH_API_VERSION : FETCH_RACK_API_VERSION,
       writeFetchRequest(
         options.maxWaitMs ?? DEFAULT_FETCH_MAX_WAIT_MS,
         options.minBytes ?? 1,
@@ -154,6 +161,7 @@ export class Fetcher<K, V> {
           maxPartitionBytes: options.maxPartitionBytes ?? DEFAULT_FETCH_MAX_PARTITION_BYTES,
         })),
         forgotten,
+        this.cluster.rackId,
       ),
       (options.maxWaitMs ?? DEFAULT_FETCH_MAX_WAIT_MS) + this.cluster.requestTimeoutMs,
       false,
@@ -166,22 +174,23 @@ export class Fetcher<K, V> {
           .join(" "),
       );
     }
-    const fetched = readFetchResponse(response);
+    const fetched = readFetchResponse(response, this.cluster.rackId !== undefined);
     this.cluster.throttle(API_FETCH, fetched.throttleMs);
     if (fetched.topError) {
-      this.#sessions.delete(leader);
+      this.#sessions.delete(broker);
       if (
         fetched.topError === KafkaErrorCode.FETCH_SESSION_ID_NOT_FOUND ||
         fetched.topError === KafkaErrorCode.INVALID_FETCH_SESSION_EPOCH
       ) {
-        return this.fetchBroker(leader, entries, options, isolationLevel);
+        return this.fetchBroker(broker, entries, options, isolationLevel);
       }
-      throw kafkaError(fetched.topError, `Fetch from broker ${leader}`);
+      throw kafkaError(fetched.topError, `Fetch from broker ${broker}`);
     }
     session.id = session.id === 0 ? fetched.sessionId : session.id;
     session.epoch = session.id === fetched.sessionId && session.epoch === 0 ? 1 : session.epoch + 1;
-    this.#sessions.set(leader, session);
-    return fetched.partitions
+    this.#sessions.set(broker, session);
+    let routeChanged = false;
+    const decoders = fetched.partitions
       .map((partition) => {
         const key = partitionKey(partition.topic, partition.partition);
         session.sent.set(key, this.positions.get(key) ?? 0n);
@@ -189,12 +198,19 @@ export class Fetcher<K, V> {
         if (partition.error) {
           throw kafkaError(partition.error, `${partition.topic}[${partition.partition}]`);
         }
+        if (
+          partition.preferredReadReplica >= 0 &&
+          this.#preferredReplicas.get(key) !== partition.preferredReadReplica
+        ) {
+          this.#preferredReplicas.set(key, partition.preferredReadReplica);
+          routeChanged = true;
+        }
         return partition.records
           ? createRecordSetDecoder(
               partition.records,
               partition.topic,
               partition.partition,
-              leader,
+              broker,
               {
                 minOffset: this.positions.get(key) ?? 0n,
                 copy: options.copy,
@@ -205,9 +221,15 @@ export class Fetcher<K, V> {
           : null;
       })
       .filter((decoder): decoder is RecordSetDecoder => decoder !== null);
+    if (routeChanged) {
+      this.#sessions.clear();
+    }
+    return decoders;
   }
 
   private async retry(attempt: number, error: KafkaError): Promise<void> {
+    this.#preferredReplicas.clear();
+    this.#sessions.clear();
     for (const assigned of this.assigned.values()) {
       const metadata = await this.cluster.topic(assigned.topic, true);
       const partition = metadata.partitions.find((item) => item.id === assigned.partition);

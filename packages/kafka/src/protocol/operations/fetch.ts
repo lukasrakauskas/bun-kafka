@@ -28,6 +28,7 @@ export function writeFetchRequest(
   sessionEpoch: number,
   requested: readonly FetchRequestPartition[],
   forgotten: ReadonlyMap<string, readonly number[]>,
+  rackId?: string,
 ): RequestBody {
   const byTopic = Map.groupBy(requested, (item) => item.topic);
   return encodeRequest((writer) => {
@@ -40,21 +41,22 @@ export function writeFetchRequest(
       .i32(sessionId)
       .i32(sessionEpoch);
     writer.array([...byTopic], (topicWriter, [topic, values]) =>
-      topicWriter
-        .string(topic)
-        .array(values, (partitionWriter, value) =>
-          partitionWriter
-            .i32(value.partition)
-            .i64(value.offset)
-            .i64(-1n)
-            .i32(value.maxPartitionBytes),
-        ),
+      topicWriter.string(topic).array(values, (partitionWriter, value) => {
+        partitionWriter.i32(value.partition);
+        if (rackId !== undefined) {
+          partitionWriter.i32(-1); // current_leader_epoch, unknown
+        }
+        return partitionWriter.i64(value.offset).i64(-1n).i32(value.maxPartitionBytes);
+      }),
     );
     writer.array([...forgotten], (topicWriter, [topic, partitions]) =>
       topicWriter
         .string(topic)
         .array(partitions, (partitionWriter, partition) => partitionWriter.i32(partition)),
     );
+    if (rackId !== undefined) {
+      writer.string(rackId);
+    }
   });
 }
 export type FetchResponsePartition = {
@@ -62,9 +64,13 @@ export type FetchResponsePartition = {
   partition: number;
   error: number;
   abortedTransactions: Array<{ producerId: bigint; firstOffset: bigint }>;
+  preferredReadReplica: number;
   records: Uint8Array | null;
 };
-export function readFetchResponse(body: ResponseBody): {
+export function readFetchResponse(
+  body: ResponseBody,
+  rackAware = false,
+): {
   throttleMs: number;
   topError: number;
   sessionId: number;
@@ -87,8 +93,9 @@ export function readFetchResponse(body: ResponseBody): {
           producerId: item.i64(),
           firstOffset: item.i64(),
         }));
+        const preferredReadReplica = rackAware ? partitionReader.i32() : -1;
         const records = partitionReader.bytes();
-        return { topic, partition, error, abortedTransactions, records };
+        return { topic, partition, error, abortedTransactions, preferredReadReplica, records };
       });
     })
     .flat();

@@ -13,6 +13,7 @@ import {
 
 type ResolvedClusterOptions = {
   bootstrap: string[];
+  rackId?: string;
   connection: ConnectionOptions;
   retry: Required<RetryOptions>;
 };
@@ -52,6 +53,15 @@ function validateSasl(options: KafkaOptions): void {
   }
 }
 
+function validateRack(options: KafkaOptions): void {
+  if (
+    options.rackId !== undefined &&
+    (!options.rackId.length || options.rackId.trim() !== options.rackId)
+  ) {
+    throw new TypeError("Kafka rackId must be a non-empty, trimmed string");
+  }
+}
+
 function validateStats(options: KafkaOptions): void {
   if (
     options.statsIntervalMs !== undefined &&
@@ -75,9 +85,11 @@ export function resolveClusterOptions(options: KafkaOptions): ResolvedClusterOpt
   };
   validateTimeouts(requestTimeoutMs, connectTimeoutMs, maxResponseBytes, retry);
   validateSasl(options);
+  validateRack(options);
   validateStats(options);
   return {
     bootstrap: [...options.brokers],
+    rackId: options.rackId,
     retry,
     connection: {
       clientId: options.clientId ?? "bun-kafka",
