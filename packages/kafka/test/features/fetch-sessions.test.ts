@@ -22,6 +22,7 @@ type FetchRequestView = {
   sessionEpoch: number;
   topics: Array<{ name: string; partitions: number[] }>;
   forgotten: Array<{ name: string; partitions: number[] }>;
+  rackId?: string;
 };
 
 function parseFetchV7(
@@ -39,6 +40,7 @@ function parseFetchV7(
     const name = r.string() ?? "";
     const partitions = r.array((p) => {
       const index = p.i32(); // partition index (first field)
+      if (view.getInt16(6) >= 9) p.i32(); // current leader epoch
       p.i64(); // fetch offset
       p.i64(); // log start offset
       p.i32(); // partition max bytes
@@ -50,7 +52,8 @@ function parseFetchV7(
     name: r.string() ?? "",
     partitions: r.array((p) => p.i32()),
   }));
-  return { sessionId: sid, sessionEpoch: epoch, topics, forgotten };
+  const rackId = reader.remaining ? (reader.string() ?? undefined) : undefined;
+  return { sessionId: sid, sessionEpoch: epoch, topics, forgotten, rackId };
 }
 
 /** Build one single-record magic-2 batch containing the given value. */
@@ -90,23 +93,29 @@ function singleRecordBatch(value: string, baseOffset: bigint): Uint8Array {
 
 function fetchV7Response(
   sessionId: number,
-  topics: Array<{ name: string; partitions: Array<{ index: number; records: Uint8Array | null }> }>,
+  topics: Array<{
+    name: string;
+    partitions: Array<{ index: number; preferredReadReplica?: number; records: Uint8Array | null }>;
+  }>,
 ): KafkaEncoder {
   return encoder()
     .i32(0) // throttle
     .i16(0) // top-level error
     .i32(sessionId)
     .array(topics, (writer, t) =>
-      writer.string(t.name).array(t.partitions, (partitionWriter, p) =>
+      writer.string(t.name).array(t.partitions, (partitionWriter, p) => {
         partitionWriter
           .i32(p.index)
           .i16(0)
           .i64(10)
           .i64(10)
           .i64(0)
-          .array([], () => {})
-          .bytes(p.records),
-      ),
+          .array([], () => {});
+        if (p.preferredReadReplica !== undefined) {
+          partitionWriter.i32(p.preferredReadReplica);
+        }
+        return partitionWriter.bytes(p.records);
+      }),
     );
 }
 
@@ -312,6 +321,122 @@ describe("Fetch sessions (mock broker)", () => {
     } finally {
       await kafka.disconnect();
       listener.stop(true);
+    }
+  }, 15_000);
+
+  test("sends the client rack and follows the broker-selected replica", async () => {
+    const fetches: Array<{ broker: number; version: number; rackId?: string }> = [];
+    let leaderPort = 0;
+    const follower = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data(socket, request) {
+          const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
+          const key = view.getInt16(4);
+          const correlation = view.getInt32(8);
+          if (key === 18) {
+            respond(socket, correlation, apiVersions());
+          } else if (key === 1) {
+            const parsed = parseFetchV7(request.buffer, request.byteOffset, request.byteLength);
+            fetches.push({ broker: 2, version: view.getInt16(6), rackId: parsed.rackId });
+            respond(
+              socket,
+              correlation,
+              fetchV7Response(0, [
+                {
+                  name: "events",
+                  partitions: [
+                    {
+                      index: 0,
+                      preferredReadReplica: -1,
+                      records: singleRecordBatch("nearby", 0n),
+                    },
+                  ],
+                },
+              ]),
+            );
+          }
+        },
+      },
+    });
+    const leader = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data(socket, request) {
+          const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
+          const key = view.getInt16(4);
+          const correlation = view.getInt32(8);
+          if (key === 18) {
+            respond(socket, correlation, apiVersions());
+          } else if (key === 3) {
+            respond(
+              socket,
+              correlation,
+              encoder()
+                .array(
+                  [
+                    { id: 1, port: leaderPort },
+                    { id: 2, port: follower.port },
+                  ],
+                  (writer, broker) =>
+                    writer.i32(broker.id).string("127.0.0.1").i32(broker.port).string(null),
+                )
+                .string(null)
+                .i32(1)
+                .array(["events"], (writer, name) =>
+                  writer
+                    .i16(0)
+                    .string(name)
+                    .bool(false)
+                    .array([0], (partitionWriter, partition) =>
+                      partitionWriter
+                        .i16(0)
+                        .i32(partition)
+                        .i32(1)
+                        .array([1, 2], (item, broker) => item.i32(broker))
+                        .array([1, 2], (item, broker) => item.i32(broker)),
+                    ),
+                ),
+            );
+          } else if (key === 1) {
+            const parsed = parseFetchV7(request.buffer, request.byteOffset, request.byteLength);
+            fetches.push({ broker: 1, version: view.getInt16(6), rackId: parsed.rackId });
+            respond(
+              socket,
+              correlation,
+              fetchV7Response(0, [
+                {
+                  name: "events",
+                  partitions: [{ index: 0, preferredReadReplica: 2, records: null }],
+                },
+              ]),
+            );
+          }
+        },
+      },
+    });
+    leaderPort = leader.port;
+
+    const kafka = new Kafka({ brokers: [`127.0.0.1:${leader.port}`], rackId: "zone-a" });
+    try {
+      const consumer = kafka.consumer();
+      await consumer.assign([{ topic: "events", partition: 0, offset: 0n }]);
+      expect(await consumer.fetch({ maxWaitMs: 20 })).toHaveLength(0);
+      const messages = await consumer.fetch({ maxWaitMs: 20 });
+
+      expect(fetches).toEqual([
+        { broker: 1, version: 11, rackId: "zone-a" },
+        { broker: 2, version: 11, rackId: "zone-a" },
+      ]);
+      expect(messages.map((message) => [dec(message.value), message.brokerId])).toEqual([
+        ["nearby", 2],
+      ]);
+    } finally {
+      await kafka.disconnect();
+      leader.stop(true);
+      follower.stop(true);
     }
   }, 15_000);
 });

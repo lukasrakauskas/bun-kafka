@@ -138,6 +138,7 @@ export const RECORD_ATTR_TIMESTAMP_TYPE = 8;
 export const RECORD_BATCH_HEADER_SIZE = 61;
 export const RECORD_BATCH_LENGTH_MIN = 9;
 export const FETCH_API_VERSION = 7;
+export const FETCH_RACK_API_VERSION = 11;
 export const CREATE_TOPICS_API_VERSION = 4;
 export const DELETE_TOPICS_API_VERSION = 3;
 export const PRODUCE_API_VERSION = 3;
@@ -271,6 +272,8 @@ export interface ClusterStats extends Record<string, unknown> {
 export interface KafkaOptions {
   brokers: string[];
   clientId?: string;
+  /** Client rack used for broker-selected follower fetching (KIP-392). */
+  rackId?: string;
   tls?: BunKafkaTls;
   sasl?: BunKafkaSasl;
   requestTimeoutMs?: number;
