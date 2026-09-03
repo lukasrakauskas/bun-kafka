@@ -137,7 +137,8 @@ test today.
   **ElectLeaders (KIP-460)**: implemented in the topic admin client. The
   [wire fixture suite](../../packages/kafka/test/unit/admin-partitions.test.ts) pins the protocol
   versions and per-partition results; the
-  [live-broker suite](../../packages/kafka/test/impl/admin.test.ts) covers all three operations.
+  [live-broker suite](../../packages/kafka/test/impl/admin.test.ts) covers KIP-455; ElectLeaders
+  stays mock-covered because CI's Redpanda v24.3 does not expose API 43.
 
 ### Operations
 
