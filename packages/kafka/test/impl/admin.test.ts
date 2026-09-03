@@ -7,9 +7,9 @@ describe("Admin", () => {
     const client = admin();
     try {
       const metadata = await client.metadata();
-      const replicas = metadata.brokers.map((broker) => broker.id);
+      const replicas = [metadata.brokers[0]!.id];
       const created = await client.createTopics(
-        [{ name, numPartitions: 1, assignments: [replicas] }],
+        [{ name, numPartitions: 1, replicationFactor: 1 }],
         { waitForLeaders: true },
       );
       expect(created[0]?.error).toBe(0);
