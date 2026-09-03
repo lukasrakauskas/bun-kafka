@@ -160,6 +160,19 @@ Run this test for a release that changes any of these areas:
 
 Run at 75% of the maximum stable rate. Add the same hourly burst used in the 24-hour test.
 
+Use the dedicated release profile after recording the maximum stable rate:
+
+```bash
+SOAK_MAX_STABLE_RATE=<measured-rate> bun run --cwd packages/kafka test:soak:release:72h
+```
+
+The runner starts the pinned single-node Redpanda broker in `test/impl/soak.compose.yml`, checks
+that at least 5 GiB is free, and stops the broker when the run exits. Topic storage is bounded to a
+one-hour retention window and 256 MiB per partition. Docker uses the `local` logging driver with
+three 10 MiB files, while harness output uses three 5 MiB files and truncates individual lines to
+64 KiB. These limits keep the 72-hour run from exhausting the host filesystem. JSON and Markdown
+result artifacts remain untruncated in `packages/kafka/out/soak/`.
+
 ## Release gates
 
 A performance qualification passes only when all gates pass.
@@ -285,7 +298,11 @@ Commit `72b01a4` plus the blackhole-recovery fix. 18 pass / 0 fail across the de
 
 ## Result artifact
 
-Store one JSON result and one short Markdown report for each qualification run. The JSON result must include:
+Store one JSON result and one short Markdown report for each qualification run. The JSON result must include the start time, commit, Bun version, broker version, measured maximum
+stable rate, exact workload, samples, gate results, and final measurements. At 10-second sampling,
+a 72-hour JSON artifact is expected to remain on the order of tens of MiB.
+
+The JSON result must include:
 
 ```json
 {

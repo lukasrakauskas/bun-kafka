@@ -23,6 +23,8 @@
  *   SOAK_RETENTION_BYTES   topic retention per partition      (default 268435456)
  *   SOAK_SEGMENT_BYTES     topic segment size                  (default 16777216)
  *   SOAK_MAX_MESSAGES      consumer maxMessages per fetch    (default 500)
+ *   SOAK_MAX_STABLE_RATE   measured maximum stable rate      (default 0 = unrecorded)
+ *   SOAK_BROKER_VERSION    broker name and version           (default "unknown")
  *   KAFKA_BROKERS          comma-separated bootstrap brokers (default 127.0.0.1:9092)
  */
 
@@ -61,6 +63,8 @@ const RETENTION_MS = Math.floor(env("SOAK_RETENTION_MS", 3_600_000));
 const RETENTION_BYTES = Math.floor(env("SOAK_RETENTION_BYTES", 256 * 1024 * 1024));
 const SEGMENT_BYTES = Math.floor(env("SOAK_SEGMENT_BYTES", 16 * 1024 * 1024));
 const MAX_MESSAGES = Math.floor(env("SOAK_MAX_MESSAGES", 500));
+const MAX_STABLE_RATE = Math.floor(Number(process.env.SOAK_MAX_STABLE_RATE ?? 0));
+const BROKER_VERSION = process.env.SOAK_BROKER_VERSION ?? "unknown";
 const BROKERS = (process.env.KAFKA_BROKERS ?? "127.0.0.1:9092").split(",");
 const WARMUP_FRACTION = 0.2; // memory gate ignores growth during this fraction of the run
 
@@ -611,6 +615,7 @@ type ArtifactFields = { readonly [key: string]: ArtifactValue };
 
 interface SoakArtifact {
   commit: string;
+  started_at: string;
   duration_seconds: number;
   environment: ArtifactFields;
   workload: ArtifactFields;
@@ -635,12 +640,14 @@ function renderReport(a: SoakArtifact): string {
     `- Started: ${new Date(startedMs).toISOString()}`,
     `- Duration: ${a.duration_seconds} seconds`,
     `- Bun: ${a.environment.bun}`,
+    `- Broker: ${a.environment.broker_version}`,
     "",
     "## Workload",
     "",
     `- Topic partitions: ${a.workload.partitions}`,
     `- Message size: ${a.workload.message_bytes} bytes`,
     `- Base offered rate: ${a.workload.producer_rate} msg/s`,
+    `- Measured maximum stable rate: ${a.workload.maximum_stable_rate || "not recorded"} msg/s`,
     `- Acks: ${a.workload.acks}`,
     `- Burst: ${burstDescription(a.workload)}`,
     `- Retention: ${a.workload.retention_ms} ms / ${a.workload.retention_bytes_per_partition} bytes per partition`,
@@ -718,9 +725,11 @@ async function main(): Promise<number> {
 
   const artifact: SoakArtifact = {
     commit,
+    started_at: new Date(startedMs).toISOString(),
     duration_seconds: round(durationS),
     environment: {
       bun: Bun.version,
+      broker_version: BROKER_VERSION,
       platform: `${process.platform}-${process.arch}`,
       cpus: navigator.hardwareConcurrency,
       brokers: BROKERS.join(","),
@@ -730,6 +739,8 @@ async function main(): Promise<number> {
       message_bytes: MSG_BYTES,
       partitions: PARTITIONS,
       producer_rate: BASE_RATE,
+      maximum_stable_rate: MAX_STABLE_RATE,
+      maximum_stable_rate_fraction: MAX_STABLE_RATE ? round(BASE_RATE / MAX_STABLE_RATE) : 0,
       acks: ACKS,
       tls: false,
       copy: false,
