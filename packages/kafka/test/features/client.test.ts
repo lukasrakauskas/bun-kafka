@@ -39,9 +39,18 @@ function plainAuthBody(key: number, port: number): KafkaEncoder {
     );
 }
 
-function writeClientResponse(socket: Bun.Socket, request: Uint8Array, body: KafkaEncoder): void {
+function writeClientResponse(
+  socket: Bun.Socket,
+  request: Uint8Array,
+  body: KafkaEncoder,
+  flexible = false,
+): void {
   const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
-  const response = encoder().i32(0).i32(view.getInt32(8)).raw(body.result());
+  const response = encoder().i32(0).i32(view.getInt32(8));
+  if (flexible) {
+    response.tags();
+  }
+  response.raw(body.result());
   response.patchI32(0, response.length - 4);
   socket.write(response.result());
 }
@@ -129,6 +138,47 @@ function clientAdminBody(key: number, port: number): KafkaEncoder {
       .string(null)
       .i32(1)
       .array([], () => {});
+  }
+  if (key === 45) {
+    return encoder()
+      .i32(0)
+      .i16(0)
+      .compactString(null)
+      .compactArray(["events"], (topic) =>
+        topic
+          .compactString("events")
+          .compactArray([0], (partition) => partition.i32(0).i16(0).compactString(null).tags())
+          .tags(),
+      )
+      .tags();
+  }
+  if (key === 46) {
+    return encoder()
+      .i32(0)
+      .i16(0)
+      .compactString(null)
+      .compactArray(["events"], (topic) =>
+        topic
+          .compactString("events")
+          .compactArray([0], (partition) =>
+            partition
+              .i32(0)
+              .compactArray([1], (replica, id) => replica.i32(id))
+              .compactArray([], () => {})
+              .compactArray([], () => {})
+              .tags(),
+          )
+          .tags(),
+      )
+      .tags();
+  }
+  if (key === 43) {
+    return encoder()
+      .i32(0)
+      .i16(0)
+      .array(["events"], (topic) =>
+        topic.string("events").array([0], (partition) => partition.i32(0).i16(0).string(null)),
+      );
   }
   if (key === 32) {
     return encoder()
@@ -423,7 +473,13 @@ describe("Bun native Kafka client (mock brokers)", () => {
       socket: {
         data(socket, request) {
           const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
-          writeClientResponse(socket, request, clientAdminBody(view.getInt16(4), listener.port));
+          const key = view.getInt16(4);
+          writeClientResponse(
+            socket,
+            request,
+            clientAdminBody(key, listener.port),
+            key === 45 || key === 46,
+          );
         },
       },
     });
@@ -451,6 +507,21 @@ describe("Bun native Kafka client (mock brokers)", () => {
           ])
         )[0]?.error,
       ).toBe(0);
+      expect(
+        await admin.alterPartitionReassignments([{ topic: "events", partition: 0, replicas: [1] }]),
+      ).toEqual([{ topic: "events", partition: 0, error: 0, message: null }]);
+      expect(await admin.listPartitionReassignments()).toEqual([
+        {
+          topic: "events",
+          partition: 0,
+          replicas: [1],
+          addingReplicas: [],
+          removingReplicas: [],
+        },
+      ]);
+      expect(await admin.electLeaders("preferred", [{ topic: "events", partition: 0 }])).toEqual([
+        { topic: "events", partition: 0, error: 0, message: null },
+      ]);
       expect(events).toContainEqual({ type: "throttle", apiKey: 19, durationMs: 7 });
     } finally {
       await kafka.disconnect();

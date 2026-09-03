@@ -1,11 +1,17 @@
 import {
   readAlterConfigsResponse,
+  readAlterPartitionReassignmentsResponse,
+  readElectLeadersResponse,
+  readListPartitionReassignmentsResponse,
   readCreatePartitionsResponse,
   readCreateTopicsResponse,
   readDeleteTopicsResponse,
   readDescribeConfigsResponse,
   readIncrementalAlterConfigsResponse,
   writeAlterConfigsRequest,
+  writeAlterPartitionReassignmentsRequest,
+  writeElectLeadersRequest,
+  writeListPartitionReassignmentsRequest,
   writeCreatePartitionsRequest,
   writeCreateTopicsRequest,
   writeDeleteTopicsRequest,
@@ -14,20 +20,28 @@ import {
 } from "../../protocol/index.ts";
 import {
   API_ALTER_CONFIGS,
+  API_ALTER_PARTITION_REASSIGNMENTS,
   API_CREATE_PARTITIONS,
   API_CREATE_TOPICS,
   API_DELETE_TOPICS,
   API_DESCRIBE_CONFIGS,
+  API_ELECT_LEADERS,
   API_INCREMENTAL_ALTER_CONFIGS,
+  API_LIST_PARTITION_REASSIGNMENTS,
   CREATE_TOPICS_API_VERSION,
   DEFAULT_ADMIN_POLL_MIN_MS,
   DEFAULT_ADMIN_POLL_SLEEP_MS,
   DEFAULT_ADMIN_TIMEOUT_MS,
+  kafkaError,
   DELETE_TOPICS_API_VERSION,
 } from "../shared.ts";
 import { AdminBase } from "./base.ts";
 import type {
   ConfigResource,
+  OngoingPartitionReassignment,
+  PartitionReassignmentInput,
+  PartitionResult,
+  TopicPartitionInput,
   CreatePartitionsInput,
   CreateTopicInput,
   TopicResult,
@@ -177,6 +191,79 @@ export class AdminTopics extends AdminBase {
     const response = await this.cluster.anyRequest(API_INCREMENTAL_ALTER_CONFIGS, 1, body, true);
     const decoded = readIncrementalAlterConfigsResponse(response);
     this.cluster.throttle(API_INCREMENTAL_ALTER_CONFIGS, decoded.throttleMs);
+    return decoded.results;
+  }
+
+  async alterPartitionReassignments(
+    reassignments: readonly PartitionReassignmentInput[],
+    options: { timeoutMs?: number } = {},
+  ): Promise<PartitionResult[]> {
+    this.open();
+    if (!reassignments.length) {
+      return [];
+    }
+    const decoded = readAlterPartitionReassignmentsResponse(
+      await this.cluster.controllerRequest(
+        API_ALTER_PARTITION_REASSIGNMENTS,
+        0,
+        writeAlterPartitionReassignmentsRequest(
+          reassignments,
+          options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS,
+        ),
+        true,
+      ),
+    );
+    this.cluster.throttle(API_ALTER_PARTITION_REASSIGNMENTS, decoded.throttleMs);
+    if (decoded.error) {
+      throw kafkaError(decoded.error, "Alter partition reassignments", decoded.message);
+    }
+    return decoded.results;
+  }
+
+  async listPartitionReassignments(
+    partitions: readonly TopicPartitionInput[] | null = null,
+    options: { timeoutMs?: number } = {},
+  ): Promise<OngoingPartitionReassignment[]> {
+    this.open();
+    const decoded = readListPartitionReassignmentsResponse(
+      await this.cluster.controllerRequest(
+        API_LIST_PARTITION_REASSIGNMENTS,
+        0,
+        writeListPartitionReassignmentsRequest(
+          partitions,
+          options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS,
+        ),
+        true,
+      ),
+    );
+    this.cluster.throttle(API_LIST_PARTITION_REASSIGNMENTS, decoded.throttleMs);
+    if (decoded.error) {
+      throw kafkaError(decoded.error, "List partition reassignments", decoded.message);
+    }
+    return decoded.reassignments;
+  }
+
+  async electLeaders(
+    electionType: "preferred" | "unclean",
+    partitions: readonly TopicPartitionInput[] | null = null,
+    options: { timeoutMs?: number } = {},
+  ): Promise<PartitionResult[]> {
+    this.open();
+    const decoded = readElectLeadersResponse(
+      await this.cluster.controllerRequest(
+        API_ELECT_LEADERS,
+        1,
+        writeElectLeadersRequest(
+          electionType,
+          partitions,
+          options.timeoutMs ?? DEFAULT_ADMIN_TIMEOUT_MS,
+        ),
+      ),
+    );
+    this.cluster.throttle(API_ELECT_LEADERS, decoded.throttleMs);
+    if (decoded.error) {
+      throw kafkaError(decoded.error, "Elect leaders");
+    }
     return decoded.results;
   }
 

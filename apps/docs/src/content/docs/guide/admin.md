@@ -23,6 +23,24 @@ await admin.deleteTopics(["events"]);
 `createTopics` returns per-topic results (`{ topic, errorCode, errorMessage? }`) so partial
 success is visible.
 
+## Partition operations
+
+```ts
+await admin.alterPartitionReassignments([
+  { topic: "events", partition: 0, replicas: [1, 2, 3] },
+]);
+await admin.alterPartitionReassignments([
+  { topic: "events", partition: 0, replicas: null }, // cancel
+]);
+await admin.listPartitionReassignments(); // all active reassignments
+await admin.listPartitionReassignments([{ topic: "events", partition: 0 }]);
+await admin.electLeaders("preferred", [{ topic: "events", partition: 0 }]);
+```
+
+Alter and election calls return per-partition `{ topic, partition, error, message }` results so
+partial failures remain visible. Passing `null` as the partition list elects leaders for every
+eligible partition.
+
 ## Configs
 
 ```ts

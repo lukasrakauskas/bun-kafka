@@ -37,6 +37,10 @@ export type {
   CreateTopicInput,
   TopicResult,
   CreatePartitionsInput,
+  OngoingPartitionReassignment,
+  PartitionReassignmentInput,
+  PartitionResult,
+  TopicPartitionInput,
   ConfigResource,
 } from "./admin.ts";
 export type { BunKafkaSasl, BunKafkaTls } from "./connection/index.ts";
