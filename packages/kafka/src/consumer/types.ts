@@ -2,6 +2,8 @@ export interface ConsumerOptions<K = Uint8Array | null, V = Uint8Array | null> {
   fromBeginning?: boolean;
   fetchMaxBytes?: number;
   groupId?: string;
+  /** Called before and after each consumer-group join. Listener failures are ignored. */
+  onGroupEvent?: (event: ConsumerGroupEvent) => void;
   /** Static group membership identity (KIP-345); requires a broker that supports JoinGroup v3+. */
   groupInstanceId?: string;
   /**
@@ -61,6 +63,17 @@ export type GroupMember = {
   topics: string[];
   owned: Array<{ topic: string; partition: number }>;
 };
+
+export type ConsumerGroupEvent =
+  | { type: "rebalancing"; groupId: string; memberId: string }
+  | {
+      type: "group_join";
+      groupId: string;
+      memberId: string;
+      generationId: number;
+      memberAssignment: Record<string, number[]>;
+      duration: number;
+    };
 
 export type ConsumerState = {
   groupId?: string;

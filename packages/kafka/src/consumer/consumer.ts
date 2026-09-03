@@ -37,7 +37,7 @@ export type {
   ConsumerAssignment,
   FetchOptions,
 } from "./types.ts";
-export type { DeserializerContext } from "./types.ts";
+export type { ConsumerGroupEvent, DeserializerContext } from "./types.ts";
 
 function isConsumerSubscribe(
   input: ConsumerSubscribe | string | Array<string | RegExp>,
@@ -91,6 +91,7 @@ export class Consumer<K = Uint8Array | null, V = Uint8Array | null> implements A
       positions: this.#positions,
       committed: (assignments) => this.#offsets.committed(assignments),
       assign: (assignments) => this.assign(assignments),
+      onEvent: consumerOptions.onGroupEvent ?? (() => {}),
     });
     this.#heartbeat = new Heartbeat(this.#cluster, consumerOptions, this.#state, () =>
       this.#restartGroup(),

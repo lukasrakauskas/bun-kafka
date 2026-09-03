@@ -16,6 +16,7 @@ function reply(socket: Bun.TcpSocket, correlation: number, body: KafkaEncoder) {
 describe("AlterConfigs (mock broker)", () => {
   test("encodes validateOnly for native and KafkaJS-compatible calls", async () => {
     const requests: Array<{ validateOnly: boolean; remaining: number }> = [];
+    let ignoreAlterConfigs = false;
     const listener = Bun.listen({
       hostname: "127.0.0.1",
       port: 0,
@@ -49,15 +50,17 @@ describe("AlterConfigs (mock broker)", () => {
               });
               const validateOnly = body.bool();
               requests.push({ validateOnly, remaining: body.remaining });
-              reply(
-                socket,
-                correlation,
-                encoder()
-                  .i32(0)
-                  .array(["events"], (writer, name) =>
-                    writer.i16(0).string(null).i8(2).string(name),
-                  ),
-              );
+              if (!ignoreAlterConfigs) {
+                reply(
+                  socket,
+                  correlation,
+                  encoder()
+                    .i32(0)
+                    .array(["events"], (writer, name) =>
+                      writer.i16(0).string(null).i8(2).string(name),
+                    ),
+                );
+              }
             }
             offset += 4 + size;
           }
@@ -70,6 +73,18 @@ describe("AlterConfigs (mock broker)", () => {
     ];
     const kafka = new Kafka({ brokers });
     const compatAdmin = new CompatKafka({ brokers }).admin();
+    const timeoutAdmin = new CompatKafka({
+      brokers,
+      requestTimeout: 50,
+      retry: { retries: 0 },
+    }).admin();
+    const requestEvents: unknown[] = [];
+    const timeoutEvents: unknown[] = [];
+    compatAdmin.on(compatAdmin.events.REQUEST, () => {
+      throw new Error("listener failed");
+    });
+    compatAdmin.on(compatAdmin.events.REQUEST, (event) => requestEvents.push(event));
+    timeoutAdmin.on(timeoutAdmin.events.REQUEST_TIMEOUT, (event) => timeoutEvents.push(event));
     try {
       await kafka.admin().alterConfigs(resources);
       await compatAdmin.connect();
@@ -81,9 +96,20 @@ describe("AlterConfigs (mock broker)", () => {
         { validateOnly: false, remaining: 0 },
         { validateOnly: true, remaining: 0 },
       ]);
+      expect(requestEvents).toContainEqual(expect.objectContaining({ apiKey: 33, apiVersion: 0 }));
+
+      await timeoutAdmin.connect();
+      ignoreAlterConfigs = true;
+      await expect(
+        timeoutAdmin.alterConfigs({
+          resources: [{ type: 2, name: "events", configEntries: {} }],
+        }),
+      ).rejects.toThrow("timed out");
+      expect(timeoutEvents).toContainEqual(expect.objectContaining({ apiKey: 33, apiVersion: 0 }));
     } finally {
       await kafka.disconnect();
       await compatAdmin.disconnect();
+      await timeoutAdmin.disconnect();
       listener.stop(true);
     }
   }, 15_000);

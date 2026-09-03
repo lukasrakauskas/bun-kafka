@@ -1,3 +1,4 @@
+import type { Cluster } from "../bun/cluster.ts";
 import { logLevel } from "./constants.ts";
 import type { LogFields } from "./types.ts";
 
@@ -88,4 +89,15 @@ export class Emitter {
       }
     }
   }
+}
+
+export function observeRequests<T>(
+  cluster: Cluster,
+  emitter: Emitter,
+  events: { REQUEST: string; REQUEST_TIMEOUT: string },
+  request: () => T,
+): T {
+  return cluster.withRequestObserver(({ timeout, ...event }) => {
+    emitter.emit(timeout ? events.REQUEST_TIMEOUT : events.REQUEST, event);
+  }, request);
 }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Kafka } from "../../index.ts";
+import { Kafka as CompatKafka } from "../../src/kafkajs-compat/index.ts";
 import { encoder, type KafkaEncoder } from "../../src/protocol/index.ts";
 
 const UNREACHABLE_BROKER = "127.0.0.1:1";
@@ -353,6 +354,64 @@ describe("Bun native Kafka client (mock brokers)", () => {
       expect(requestKeys).toContain(8);
     } finally {
       await kafka.disconnect();
+      listener.stop(true);
+    }
+  });
+
+  test("compat group events follow real joins and rebalances", async () => {
+    const requestKeys: number[] = [];
+    const listener = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        data(socket, request) {
+          const view = new DataView(request.buffer, request.byteOffset, request.byteLength);
+          requestKeys.push(view.getInt16(4));
+          writeClientResponse(socket, request, clientGroupBody(view.getInt16(4), listener.port));
+        },
+      },
+    });
+    const consumer = new CompatKafka({ brokers: [`127.0.0.1:${listener.port}`] }).consumer({
+      groupId: "workers",
+    });
+    const events: unknown[] = [];
+    consumer.on(consumer.events.REBALANCING, () => {
+      throw new Error("listener failed");
+    });
+    consumer.on(consumer.events.REBALANCING, (event) => events.push(event));
+    consumer.on(consumer.events.GROUP_JOIN, (event) => events.push(event));
+    try {
+      await consumer.subscribe({ topic: "events" });
+      await consumer.subscribe({ topic: "events" });
+      expect(requestKeys.filter((key) => key === 11)).toHaveLength(2);
+      expect(events).toEqual([
+        expect.objectContaining({
+          type: "consumer.rebalancing",
+          groupId: "workers",
+          memberId: "",
+        }),
+        expect.objectContaining({
+          type: "consumer.group_join",
+          groupId: "workers",
+          memberId: "member-1",
+          generationId: 1,
+          memberAssignment: { events: [0] },
+        }),
+        expect.objectContaining({
+          type: "consumer.rebalancing",
+          groupId: "workers",
+          memberId: "member-1",
+        }),
+        expect.objectContaining({
+          type: "consumer.group_join",
+          groupId: "workers",
+          memberId: "member-1",
+          generationId: 1,
+          memberAssignment: { events: [0] },
+        }),
+      ]);
+    } finally {
+      await consumer.disconnect();
       listener.stop(true);
     }
   });

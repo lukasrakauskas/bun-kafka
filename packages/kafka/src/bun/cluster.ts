@@ -3,6 +3,7 @@ import type { ClusterMetadata } from "../types.ts";
 import { Connection, type ConnectionOptions } from "./connection/index.ts";
 import { checkClusterHealth } from "./cluster/health.ts";
 import { resolveClusterOptions } from "./cluster/options.ts";
+import { RequestObserver, type KafkaRequestEvent } from "./cluster/request-observer.ts";
 import { ClusterTelemetry } from "./cluster/telemetry.ts";
 import {
   RequestBody,
@@ -28,6 +29,8 @@ import {
   type TopicMetadata,
 } from "./shared.ts";
 
+export type { KafkaRequestEvent } from "./cluster/request-observer.ts";
+
 export class Cluster {
   #bootstrap: string[];
   #options: ConnectionOptions;
@@ -38,6 +41,7 @@ export class Cluster {
   #controller?: number;
   #clusterId?: string | null;
   #topics = new Map<string, TopicMetadata>();
+  #requestObserver = new RequestObserver();
 
   constructor(options: KafkaOptions) {
     const resolved = resolveClusterOptions(options);
@@ -60,6 +64,10 @@ export class Cluster {
     return connection;
   }
 
+  withRequestObserver<T>(observer: (event: KafkaRequestEvent) => void, request: () => T): T {
+    return this.#requestObserver.run(observer, request);
+  }
+
   async anyRequest(
     apiKey: number,
     apiVersion: number,
@@ -79,12 +87,8 @@ export class Cluster {
     const candidates = [...new Set([...this.#brokers.values(), ...this.#bootstrap])];
     for (const broker of candidates) {
       try {
-        return await this.#connection(broker).request(
-          apiKey,
-          apiVersion,
-          body,
-          undefined,
-          flexible,
+        return await this.#requestObserver.observe(broker, apiKey, apiVersion, () =>
+          this.#connection(broker).request(apiKey, apiVersion, body, undefined, flexible),
         );
       } catch (error) {
         lastError = error;
@@ -173,7 +177,9 @@ export class Cluster {
     if (!broker) {
       throw new KafkaError(-1, `Kafka broker ${brokerId} is not in metadata`, { retriable: true });
     }
-    return this.#connection(broker).request(apiKey, apiVersion, body, timeoutMs, flexible);
+    return this.#requestObserver.observe(broker, apiKey, apiVersion, () =>
+      this.#connection(broker).request(apiKey, apiVersion, body, timeoutMs, flexible),
+    );
   }
 
   async #retryRequest(apiKey: number, attempt: number, error: KafkaError): Promise<void> {
@@ -244,7 +250,9 @@ export class Cluster {
     if (!broker) {
       throw new KafkaError(-1, `Kafka broker ${brokerId} is not in metadata`, { retriable: true });
     }
-    await this.#connection(broker).sendOnly(apiKey, apiVersion, body);
+    await this.#requestObserver.observe(broker, apiKey, apiVersion, () =>
+      this.#connection(broker).sendOnly(apiKey, apiVersion, body),
+    );
   }
 
   /** Cluster id reported by Metadata v2+ responses. */

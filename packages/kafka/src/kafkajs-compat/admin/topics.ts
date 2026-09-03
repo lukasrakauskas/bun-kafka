@@ -7,17 +7,19 @@ export class CompatAdminTopics extends CompatAdminBase {
   async createTopics(input: CompatCreateTopicsInput): Promise<boolean[]> {
     try {
       const { validateOnly = false, waitForLeaders = true, timeout = 5_000, topics } = input;
-      const results = await this.underlying().createTopics(
-        topics.map((item) => ({
-          name: item.topic,
-          numPartitions: item.numPartitions ?? -1,
-          replicationFactor: item.replicationFactor ?? -1,
-          assignments: item.replicaAssignment,
-          configs: item.configEntries
-            ? Object.fromEntries(item.configEntries.map((entry) => [entry.name, entry.value]))
-            : undefined,
-        })),
-        { validateOnly, waitForLeaders, timeoutMs: timeout },
+      const results = await this.observe(() =>
+        this.underlying().createTopics(
+          topics.map((item) => ({
+            name: item.topic,
+            numPartitions: item.numPartitions ?? -1,
+            replicationFactor: item.replicationFactor ?? -1,
+            assignments: item.replicaAssignment,
+            configs: item.configEntries
+              ? Object.fromEntries(item.configEntries.map((entry) => [entry.name, entry.value]))
+              : undefined,
+          })),
+          { validateOnly, waitForLeaders, timeoutMs: timeout },
+        ),
       );
       // TOPIC_ALREADY_EXISTS counts as "not created" rather than a failure.
       return results.map((result) => result.error === 0);
@@ -31,8 +33,10 @@ export class CompatAdminTopics extends CompatAdminBase {
     timeout?: number;
   }): Promise<void> {
     try {
-      await this.underlying().deleteTopics(
-        payload.topics.map((entry) => (isString(entry) ? entry : entry.topic)),
+      await this.observe(() =>
+        this.underlying().deleteTopics(
+          payload.topics.map((entry) => (isString(entry) ? entry : entry.topic)),
+        ),
       );
     } catch (error) {
       throw wrapError(error);
@@ -47,13 +51,15 @@ export class CompatAdminTopics extends CompatAdminBase {
     topicPartitions: Array<{ topic: string; count: number; assignments?: number[][] }>;
   }): Promise<void> {
     try {
-      await this.underlying().createPartitions(
-        topicPartitions.map((item) => ({
-          name: item.topic,
-          count: item.count,
-          assignments: item.assignments,
-        })),
-        { validateOnly },
+      await this.observe(() =>
+        this.underlying().createPartitions(
+          topicPartitions.map((item) => ({
+            name: item.topic,
+            count: item.count,
+            assignments: item.assignments,
+          })),
+          { validateOnly },
+        ),
       );
     } catch (error) {
       throw wrapError(error);
@@ -74,8 +80,8 @@ export class CompatAdminTopics extends CompatAdminBase {
     }>;
   }> {
     try {
-      const metadata = await this.underlying().metadata(
-        topics?.map((entry) => entry.topic) ?? null,
+      const metadata = await this.observe(() =>
+        this.underlying().metadata(topics?.map((entry) => entry.topic) ?? null),
       );
       return {
         brokers: metadata.brokers.map((broker) => ({
@@ -105,7 +111,7 @@ export class CompatAdminTopics extends CompatAdminBase {
     clusterId: string | null;
   }> {
     try {
-      const metadata = await this.underlying().metadata(null);
+      const metadata = await this.observe(() => this.underlying().metadata(null));
       return {
         brokers: metadata.brokers.map((broker) => ({
           nodeId: broker.id,

@@ -1,9 +1,10 @@
+import { Cluster } from "../bun/cluster.ts";
 import { Producer } from "../bun/producer/index.ts";
 import { isNumber, isString } from "../type-guards.ts";
 import { COMPRESSION_NAMES, PRODUCER_EVENTS, CompressionTypes } from "./constants.ts";
 import { wrapError, KafkaJSNonRetriableError } from "./errors.ts";
 import type { ClusterGetter } from "./config.ts";
-import { Emitter, Logger } from "./logger.ts";
+import { Emitter, Logger, observeRequests } from "./logger.ts";
 import type { CompatOptions, LogFields } from "./types.ts";
 import {
   toBunPartitioner,
@@ -93,6 +94,16 @@ export class CompatProducer {
     return this.#producer;
   }
 
+  #observe<T>(request: () => T): T {
+    return observeRequests(this.#getter().sync(), this.#emitter, PRODUCER_EVENTS, request);
+  }
+
+  #emitQueueSize(producer: Producer): void {
+    this.#emitter.emit(PRODUCER_EVENTS.REQUEST_QUEUE_SIZE, {
+      queueSize: producer.queuedMessages,
+    });
+  }
+
   async send({ topic, messages, acks, timeout, compression }: KafkaJsSendRecord): Promise<
     Array<{
       topicName: string;
@@ -106,13 +117,18 @@ export class CompatProducer {
       if (!messages.length) {
         return [];
       }
-      const results = await this.#underlying().send({
-        topic,
-        messages: messages.map(toWireMessage),
-        acks: acksToWire(acks),
-        timeoutMs: timeout,
-        compression: COMPRESSION_NAMES[Number(compression)] ?? undefined,
-      });
+      const producer = this.#underlying();
+      const pending = this.#observe(() =>
+        producer.send({
+          topic,
+          messages: messages.map(toWireMessage),
+          acks: acksToWire(acks),
+          timeoutMs: timeout,
+          compression: COMPRESSION_NAMES[Number(compression)] ?? undefined,
+        }),
+      );
+      this.#emitQueueSize(producer);
+      const results = await pending;
       return results.map((result) => ({
         topicName: result.topic,
         partition: result.partition,
@@ -135,22 +151,30 @@ export class CompatProducer {
     }>
   > {
     try {
+      if (!topicMessages.some((item) => item.messages.length)) {
+        return [];
+      }
       const producer = this.#underlying();
       const compressionName = COMPRESSION_NAMES[Number(compression)] ?? undefined;
-      const results = await Promise.all(
-        topicMessages
-          .filter((item) => item.messages.length)
-          .map((item) =>
-            producer.send({
-              topic: item.topic,
-              messages: item.messages.map(toWireMessage),
-              acks: acksToWire(acks),
-              timeoutMs: timeout,
-              compression: compressionName,
-            }),
-          ),
-      );
-      await producer.flush();
+      const pending = this.#observe(async () => {
+        const results = await Promise.all(
+          topicMessages
+            .filter((item) => item.messages.length)
+            .map((item) =>
+              producer.send({
+                topic: item.topic,
+                messages: item.messages.map(toWireMessage),
+                acks: acksToWire(acks),
+                timeoutMs: timeout,
+                compression: compressionName,
+              }),
+            ),
+        );
+        await producer.flush();
+        return results;
+      });
+      this.#emitQueueSize(producer);
+      const results = await pending;
       return results.flat().map((result) => ({
         topicName: result.topic,
         partition: result.partition,
@@ -180,8 +204,9 @@ export class CompatProducer {
         this.#getter().release,
       );
     }
-    await this.#transaction.beginTransaction();
-    return new CompatTransaction(this.#transaction);
+    const transaction = this.#transaction;
+    await this.#observe(() => transaction.beginTransaction());
+    return new CompatTransaction(transaction, this.#getter().sync(), this.#emitter);
   }
 
   isIdempotent(): boolean {
@@ -190,46 +215,72 @@ export class CompatProducer {
 }
 
 export class CompatTransaction {
-  #producer: Producer;
-  constructor(producer: Producer) {
-    this.#producer = producer;
+  constructor(
+    private producer: Producer,
+    private cluster: Cluster,
+    private emitter: Emitter,
+  ) {}
+
+  #observe<T>(request: () => T): T {
+    return observeRequests(this.cluster, this.emitter, PRODUCER_EVENTS, request);
+  }
+
+  #emitQueueSize(): void {
+    this.emitter.emit(PRODUCER_EVENTS.REQUEST_QUEUE_SIZE, {
+      queueSize: this.producer.queuedMessages,
+    });
   }
   async send(record: KafkaJsSendRecord): Promise<void> {
     try {
-      await this.#producer.send({
-        topic: record.topic,
-        messages: record.messages.map(toWireMessage),
-        acks: "all",
-        timeoutMs: record.timeout,
-      });
+      if (!record.messages.length) {
+        return;
+      }
+      const pending = this.#observe(() =>
+        this.producer.send({
+          topic: record.topic,
+          messages: record.messages.map(toWireMessage),
+          acks: "all",
+          timeoutMs: record.timeout,
+        }),
+      );
+      this.#emitQueueSize();
+      await pending;
     } catch (error) {
       throw wrapError(error);
     }
   }
   async sendBatch({ topicMessages }: KafkaJsSendBatchRecord): Promise<void> {
     try {
-      for (const item of topicMessages) {
-        await this.#producer.send({
-          topic: item.topic,
-          messages: item.messages.map(toWireMessage),
-          acks: "all",
-        });
+      const nonEmpty = topicMessages.filter((item) => item.messages.length);
+      if (!nonEmpty.length) {
+        return;
       }
-      await this.#producer.flush();
+      const pending = this.#observe(async () => {
+        for (const item of nonEmpty) {
+          await this.producer.send({
+            topic: item.topic,
+            messages: item.messages.map(toWireMessage),
+            acks: "all",
+          });
+        }
+        await this.producer.flush();
+      });
+      this.#emitQueueSize();
+      await pending;
     } catch (error) {
       throw wrapError(error);
     }
   }
   async commit(): Promise<void> {
     try {
-      await this.#producer.commitTransaction();
+      await this.#observe(() => this.producer.commitTransaction());
     } catch (error) {
       throw wrapError(error);
     }
   }
   async abort(): Promise<void> {
     try {
-      await this.#producer.abortTransaction();
+      await this.#observe(() => this.producer.abortTransaction());
     } catch (error) {
       throw wrapError(error);
     }
@@ -245,7 +296,7 @@ export class CompatTransaction {
       const flat = offsets.flatMap(({ topic, partitions }) =>
         partitions.map(({ partition, offset }) => ({ topic, partition, offset: BigInt(offset) })),
       );
-      await this.#producer.sendOffsetsToTransaction(flat, consumerGroupId);
+      await this.#observe(() => this.producer.sendOffsetsToTransaction(flat, consumerGroupId));
     } catch (error) {
       throw wrapError(error);
     }
