@@ -133,9 +133,11 @@ test today.
   pins v1 flexible encoding, all four operations, and per-resource errors. The
   [live-broker suite](../../packages/kafka/test/impl/incremental-configs-real.test.ts)
   verifies non-clobbering updates, deletes, and broker errors.
-- **ListPartitionReassignments / AlterPartitionReassignments (KIP-455)**:
-  absent from impl and suites.
-- **ElectLeaders (KIP-460)**: absent.
+- **ListPartitionReassignments / AlterPartitionReassignments (KIP-455)** and
+  **ElectLeaders (KIP-460)**: implemented in the topic admin client. The
+  [wire fixture suite](../../packages/kafka/test/unit/admin-partitions.test.ts) pins the protocol
+  versions and per-partition results; the
+  [live-broker suite](../../packages/kafka/test/impl/admin.test.ts) covers all three operations.
 
 ### Operations
 

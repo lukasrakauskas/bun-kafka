@@ -1,3 +1,24 @@
+export interface TopicPartitionInput {
+  topic: string;
+  partition: number;
+}
+
+export interface PartitionReassignmentInput extends TopicPartitionInput {
+  /** New replica IDs, or null to cancel an active reassignment. */
+  replicas: readonly number[] | null;
+}
+
+export interface PartitionResult extends TopicPartitionInput {
+  error: number;
+  message: string | null;
+}
+
+export interface OngoingPartitionReassignment extends TopicPartitionInput {
+  replicas: number[];
+  addingReplicas: number[];
+  removingReplicas: number[];
+}
+
 export interface CreateTopicInput {
   name: string;
   numPartitions: number;

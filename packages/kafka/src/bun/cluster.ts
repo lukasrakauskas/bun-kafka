@@ -196,6 +196,7 @@ export class Cluster {
     apiKey: number,
     apiVersion: number,
     body: RequestBody,
+    flexible = false,
   ): Promise<ResponseBody> {
     if (this.#controller === undefined) {
       await this.metadata();
@@ -203,7 +204,7 @@ export class Cluster {
     if (this.#controller === undefined) {
       throw new KafkaError(-1, "Kafka metadata has no controller", { retriable: true });
     }
-    return this.request(this.#controller, apiKey, apiVersion, body);
+    return this.request(this.#controller, apiKey, apiVersion, body, undefined, true, flexible);
   }
 
   /**

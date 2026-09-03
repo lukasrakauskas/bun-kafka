@@ -97,6 +97,12 @@ export {
   readOffsetCommitResponse,
   writeAdminListOffsetsRequest,
   readAdminListOffsetsResponse,
+  writeAlterPartitionReassignmentsRequest,
+  readAlterPartitionReassignmentsResponse,
+  writeListPartitionReassignmentsRequest,
+  readListPartitionReassignmentsResponse,
+  writeElectLeadersRequest,
+  readElectLeadersResponse,
 } from "./admin-operations.ts";
 export type { RecordCompression } from "./compression.ts";
 export { crc32c } from "./wire/crc32c.ts";
