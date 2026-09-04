@@ -7,6 +7,7 @@ import {
 } from "../../protocol/index.ts";
 import {
   API_API_VERSIONS,
+  API_CONSUMER_GROUP_HEARTBEAT,
   API_SASL_AUTHENTICATE,
   API_SASL_HANDSHAKE,
   DEFAULT_BROKER_PORT,
@@ -107,6 +108,12 @@ export class Connection {
       await this.#sasl.authenticate(socket, timeoutMs);
     }
     const supported = this.#versions?.get(apiKey);
+    if (apiKey === API_CONSUMER_GROUP_HEARTBEAT && this.#versions && !supported) {
+      throw new KafkaError(
+        KafkaErrorCode.UNSUPPORTED_VERSION,
+        `Kafka broker ${this.address} does not support API ${apiKey}`,
+      );
+    }
     if (supported && (apiVersion < supported.min || apiVersion > supported.max)) {
       throw new KafkaError(
         KafkaErrorCode.UNSUPPORTED_VERSION,

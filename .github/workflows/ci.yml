@@ -86,6 +86,37 @@ jobs:
       # gated suites self-skip without their env (chaos-cluster, TLS-external)
       - run: bun test test/impl
 
+  kafka-4-consumer-groups:
+    needs: static
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        kafka: [4.0.2, 4.3.1]
+    env:
+      KAFKA_BROKERS: 127.0.0.1:9092
+      KAFKA_KIP_848: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - run: bun install --frozen-lockfile
+        working-directory: .
+      - name: Start Kafka ${{ matrix.kafka }}
+        working-directory: .
+        run: docker run -d --name kafka -p 9092:9092 apache/kafka:${{ matrix.kafka }}
+      - name: Wait for Kafka
+        working-directory: .
+        run: |
+          for i in $(seq 1 90); do
+            docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          docker logs kafka
+          exit 1
+      - run: bun test test/impl/consumer-group-protocol-real.test.ts
+
   chaos-mock:
     needs: static
     runs-on: ubuntu-latest

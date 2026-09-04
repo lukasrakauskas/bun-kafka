@@ -57,6 +57,8 @@ Per-request: `acks` (`1` default), `timeoutMs`, `compression` override.
 | --------------------------------------- | ------------------------------------------------------- |
 | `fromBeginning`                         | `false`                                                 |
 | `groupId`                               | — (manual assignment without it)                        |
+| `groupProtocol`                         | `"classic"` (`"consumer"` requires Kafka 4.x)           |
+| `groupRemoteAssignor`                   | — (broker default; consumer protocol only)              |
 | `groupInstanceId`                       | — (static membership, KIP-345)                          |
 | `partitionAssigner`                     | `"range"` (`"cooperative-sticky"` = KIP-429)            |
 | `isolationLevel`                        | `"read_uncommitted"`                                    |
@@ -66,6 +68,8 @@ Per-request: `acks` (`1` default), `timeoutMs`, `compression` override.
 | `autoCommit`                            | `false`                                                 |
 | `fetchMaxBytes`                         | `52428800`                                              |
 | `keyDeserializer` / `valueDeserializer` | raw bytes                                               |
+
+`partitionAssigner`, `sessionTimeoutMs`, and `heartbeatIntervalMs` are classic-protocol options. With `groupProtocol: "consumer"`, the broker performs assignment and controls session and heartbeat intervals; `rebalanceTimeoutMs` and `groupInstanceId` remain client settings. The explicit opt-in prevents an accidental group migration.
 
 ### Fetch options
 
