@@ -138,7 +138,9 @@ export class ConsumerGroupProtocol {
       input.subscribedTopics = state.groupTopics;
       input.serverAssignor = options.groupRemoteAssignor;
     }
-    if (memberEpoch >= 0 && (this.#ackAssignment || (full && this.deps.assigned.size))) {
+    if (memberEpoch === 0) {
+      input.topicPartitions = [];
+    } else if (memberEpoch > 0 && (this.#ackAssignment || (full && this.deps.assigned.size))) {
       input.topicPartitions = this.#ownedTopicPartitions();
     }
     return input;

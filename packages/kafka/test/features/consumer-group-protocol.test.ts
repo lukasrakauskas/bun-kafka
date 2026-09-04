@@ -90,6 +90,18 @@ function metadataV10(port: number): KafkaEncoder {
     .tags();
 }
 
+function heartbeatError(error: number): KafkaEncoder {
+  return encoder()
+    .i32(0)
+    .i16(error)
+    .compactString(null)
+    .compactString(null)
+    .i32(0)
+    .i32(0)
+    .i8(-1)
+    .tags();
+}
+
 function heartbeatResponse(sequence: number): KafkaEncoder {
   const partitions = sequence === 1 ? [0, 1] : sequence === 2 ? [0] : undefined;
   const body = encoder()
@@ -152,6 +164,7 @@ type HeartbeatRequest = {
   rebalanceTimeoutMs: number;
   subscribedTopics: string[];
   serverAssignor: string | null;
+  topicPartitionsLength: number;
   owned: number[];
 };
 
@@ -164,16 +177,22 @@ function readHeartbeatRequest(reader: KafkaDecoder): HeartbeatRequest {
   const rebalanceTimeoutMs = reader.i32();
   const subscribedTopics = reader.compactArray((item) => item.compactString() ?? "");
   const serverAssignor = reader.compactString();
-  const owned = reader
-    .compactArray((topic) => {
-      topic.raw(16);
-      const partitions = topic.compactArray((partition) => partition.i32());
-      topic.skipTags();
-      return partitions;
-    })
-    .flat();
+  const topicPartitionsLength = reader.uvarint();
+  const owned = Array.from({ length: Math.max(0, topicPartitionsLength - 1) }, () => {
+    reader.raw(16);
+    const partitions = reader.compactArray((partition) => partition.i32());
+    reader.skipTags();
+    return partitions;
+  }).flat();
   reader.skipTags();
-  return { memberEpoch, rebalanceTimeoutMs, subscribedTopics, serverAssignor, owned };
+  return {
+    memberEpoch,
+    rebalanceTimeoutMs,
+    subscribedTopics,
+    serverAssignor,
+    topicPartitionsLength,
+    owned,
+  };
 }
 
 describe("KIP-848 consumer group protocol", () => {
@@ -208,6 +227,7 @@ describe("KIP-848 consumer group protocol", () => {
     const requests: HeartbeatRequest[] = [];
     const versions = new Map<number, number[]>();
     let heartbeatSequence = 0;
+    let heartbeatAttempts = 0;
     let coordinatorAttempts = 0;
     const listener = Bun.listen({
       hostname: "127.0.0.1",
@@ -242,7 +262,9 @@ describe("KIP-848 consumer group protocol", () => {
                 .i32(listener.port);
             } else if (key === 68) {
               requests.push(readHeartbeatRequest(reader));
-              body = heartbeatResponse(++heartbeatSequence);
+              body = heartbeatAttempts++
+                ? heartbeatResponse(++heartbeatSequence)
+                : heartbeatError(16);
             } else if (key === 3) {
               body = version === 10 ? metadataV10(listener.port) : metadataV2(listener.port);
             } else if (key === 9) {
@@ -260,7 +282,7 @@ describe("KIP-848 consumer group protocol", () => {
     });
     const kafka = new Kafka({
       brokers: [`127.0.0.1:${listener.port}`],
-      retry: { maxRetries: 1, initialBackoffMs: 0, maxBackoffMs: 0 },
+      retry: { maxRetries: 2, initialBackoffMs: 0, maxBackoffMs: 0 },
     });
     try {
       const consumer = kafka.consumer({
@@ -281,7 +303,7 @@ describe("KIP-848 consumer group protocol", () => {
       );
       await consumer.close();
 
-      expect(coordinatorAttempts).toBe(2);
+      expect(coordinatorAttempts).toBe(3);
       expect(versions.get(68)?.every((version) => version === 0)).toBe(true);
       expect(versions.get(9)).toContain(9);
       expect(versions.get(8)).toContain(9);
@@ -294,9 +316,11 @@ describe("KIP-848 consumer group protocol", () => {
         rebalanceTimeoutMs: 60_000,
         subscribedTopics: ["events"],
         serverAssignor: "uniform",
+        topicPartitionsLength: 1,
         owned: [],
       });
-      expect(requests[1]?.owned).toEqual([0, 1]);
+      expect(requests[1]?.topicPartitionsLength).toBe(1);
+      expect(requests[2]?.owned).toEqual([0, 1]);
       expect(requests.at(-1)?.memberEpoch).toBe(-1);
     } finally {
       await kafka.disconnect();

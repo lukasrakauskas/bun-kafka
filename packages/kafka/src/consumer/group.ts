@@ -1,3 +1,4 @@
+import { KafkaError } from "../errors.ts";
 import {
   API_FIND_COORDINATOR,
   API_JOIN_GROUP,
@@ -56,10 +57,7 @@ export class GroupCoordinator {
       memberId: this.#deps.state.memberId,
     });
     if (this.#deps.options.groupProtocol === "consumer") {
-      const coordinator = await this.#findCoordinator();
-      const assigned = await this.#consumerProtocol.join(coordinator, topics, fromBeginning);
-      this.#joinedEvent(assigned, startedAt);
-      return coordinator;
+      return this.#joinConsumerProtocol(topics, fromBeginning, startedAt);
     }
     const joined = await this.#joinRequest(topics);
     const assignments = await this.#buildAssignments(
@@ -80,6 +78,30 @@ export class GroupCoordinator {
     await this.#deps.assign(withGroupOffsets(assigned, committed, retained, fromBeginning));
     this.#joinedEvent(assigned, startedAt);
     return joined.coordinator;
+  }
+
+  async #joinConsumerProtocol(
+    topics: string[],
+    fromBeginning: boolean,
+    startedAt: number,
+  ): Promise<number> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const coordinator = await this.#findCoordinator();
+        const assigned = await this.#consumerProtocol.join(coordinator, topics, fromBeginning);
+        this.#joinedEvent(assigned, startedAt);
+        return coordinator;
+      } catch (error) {
+        if (
+          !(error instanceof KafkaError && error.retriable) ||
+          attempt === this.#deps.cluster.retryOptions.maxRetries
+        ) {
+          throw error;
+        }
+        this.#deps.state.coordinator = undefined;
+        await Bun.sleep(retryDelay(this.#deps.cluster.retryOptions, attempt));
+      }
+    }
   }
 
   heartbeat(coordinator: number): Promise<void> {
@@ -128,24 +150,17 @@ export class GroupCoordinator {
     if (this.#deps.state.coordinator !== undefined) {
       return this.#deps.state.coordinator;
     }
-    const groupId = this.#requiredGroupId();
-    for (let attempt = 0; ; attempt++) {
-      const response = await this.#deps.cluster.anyRequest(
-        API_FIND_COORDINATOR,
-        0,
-        writeFindCoordinatorRequest(groupId),
-      );
-      const { error, coordinatorId } = readGroupCoordinatorResponse(response);
-      if (!error) {
-        this.#deps.state.coordinator = coordinatorId;
-        return coordinatorId;
-      }
-      const failure = kafkaError(error, `Kafka group ${groupId}`);
-      if (!failure.retriable || attempt === this.#deps.cluster.retryOptions.maxRetries) {
-        throw failure;
-      }
-      await Bun.sleep(retryDelay(this.#deps.cluster.retryOptions, attempt));
+    const response = await this.#deps.cluster.anyRequest(
+      API_FIND_COORDINATOR,
+      0,
+      writeFindCoordinatorRequest(this.#requiredGroupId()),
+    );
+    const { error, coordinatorId } = readGroupCoordinatorResponse(response);
+    if (error) {
+      throw kafkaError(error, `Kafka group ${this.#deps.state.groupId}`);
     }
+    this.#deps.state.coordinator = coordinatorId;
+    return coordinatorId;
   }
 
   async #joinRequest(topics: string[]): Promise<{
