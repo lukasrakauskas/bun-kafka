@@ -8,7 +8,7 @@ kafka4("KIP-848 consumer groups (Kafka 4.x)", () => {
   test("rebalances two members and commits with broker-side assignment", async () => {
     const name = topic("kip-848");
     const groupId = `kip-848-${Date.now()}`;
-    const kafka = new Kafka({ brokers: BROKERS.split(",") });
+    const kafka = new Kafka({ brokers: BROKERS.split(","), retry: { maxRetries: 10 } });
     const first = kafka.consumer({ groupId, groupProtocol: "consumer", fromBeginning: true });
     const second = kafka.consumer({ groupId, groupProtocol: "consumer", fromBeginning: true });
     try {
