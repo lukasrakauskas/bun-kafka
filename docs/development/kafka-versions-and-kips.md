@@ -74,7 +74,7 @@ ships in about five thousand lines total.
 | 2.4     | 2019 | Cooperative-sticky assignment (KIP-429)                                                                              | Second assignor alongside eager range                                                          |
 | 2.6     | 2020 | Client quota admin APIs (KIP-546)                                                                                    | DescribeClientQuotas/AlterClientQuotas v1                                                      |
 | 3.3+    | 2022 | KRaft replaces ZooKeeper (KIP-500)                                                                                   | Broker-side only — invisible to clients. Works unchanged                                       |
-| 4.0     | 2025 | Next-gen consumer protocol GA (KIP-848)                                                                              | Not adopted; see §6                                                                            |
+| 4.0     | 2025 | Next-gen consumer protocol GA (KIP-848)                                                                              | Opt-in ConsumerGroupHeartbeat v0 with broker-side assignment and offset v9                     |
 
 ## 4. KIP catalog: claim → code → verification
 
@@ -100,7 +100,7 @@ or, marked real, against a live broker via `KAFKA_BROKERS=127.0.0.1:9092`.
 | KIP-219         | Brokers may throttle slow clients and signal the delay in responses                                                                                                                | Yes (surfaced)    | throttle durations emitted as `onEvent({type:"throttle"})`                                   | `bun test test/features/observability.test.ts`                                                                                                  |
 | KIP-500 / KRaft | Broker architecture replacing ZooKeeper                                                                                                                                            | N/A               | Broker-side; no client-visible protocol change                                               | Any KRaft cluster (Redpanda dev container qualifies)                                                                                            |
 | KIP-405         | Tiered storage offload to object stores                                                                                                                                            | N/A               | Broker-side; consumers just see normal offsets                                               | —                                                                                                                                               |
-| KIP-848         | Next-generation consumer group protocol (broker-side balancing, much lighter heartbeats)                                                                                           | No                | Client still speaks the classic group protocol every current broker supports                 | Gap tracked in [gap audit](client-gap-audit.md)                                                                                                 |
+| KIP-848         | Next-generation consumer group protocol (broker-side balancing, much lighter heartbeats)                                                                                           | Yes, opt-in       | `groupProtocol: "consumer"`; ConsumerGroupHeartbeat v0, Metadata v10 topic IDs, offset v9    | `bun test test/features/consumer-group-protocol.test.ts`; real Kafka 4 matrix: `test/impl/consumer-group-protocol-real.test.ts`                 |
 | KIP-881         | Rack-aware incremental fetch (prefer replicas in the consumer's rack)                                                                                                              | No                | Consumer sends no rack id                                                                    | Gap tracked in [gap audit](client-gap-audit.md)                                                                                                 |
 
 ## 5. Proposal: full versioned-method support (documented, deferred)
@@ -124,9 +124,9 @@ Estimated cost: the registry is small; the serializer matrix is the bulk — rou
 person-week per ten APIs done properly across encode, decode, error paths, and tests.
 
 **Trigger conditions to start**: (a) a must-support broker deprecates one of the client's fixed
-versions, or (b) a feature lands that only exists at a higher version (e.g. KIP-848-only
-clusters). Neither holds for any broker released since 2017, so the lazy-but-correct choice
-remains: fixed versions, fail-fast validation, clear error text.
+versions, or (b) another feature lands that only exists at a higher version. KIP-848 is handled as
+a focused opt-in version set rather than a speculative all-API registry; the remaining APIs keep
+fixed versions, fail-fast validation, and clear error text.
 
 ## 6. Verifying your own cluster
 

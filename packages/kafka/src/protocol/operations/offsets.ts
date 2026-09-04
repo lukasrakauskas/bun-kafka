@@ -19,6 +19,36 @@ export function writeConsumerGroupRequest(
     );
   });
 }
+export function writeConsumerGroupOffsetCommitRequest(
+  groupId: string,
+  memberEpoch: number,
+  memberId: string,
+  instanceId: string | undefined,
+  offsets: ReadonlyMap<string, readonly { partition: number; offset: bigint }[]>,
+): RequestBody {
+  return encodeRequest((writer) =>
+    writer
+      .compactString(groupId)
+      .i32(memberEpoch)
+      .compactString(memberId)
+      .compactString(instanceId ?? null)
+      .compactArray([...offsets], (topicWriter, [topic, values]) =>
+        topicWriter
+          .compactString(topic)
+          .compactArray(values, (partitionWriter, value) =>
+            partitionWriter
+              .i32(value.partition)
+              .i64(value.offset)
+              .i32(-1)
+              .compactString(null)
+              .tags(),
+          )
+          .tags(),
+      )
+      .tags(),
+  );
+}
+
 export function writeConsumerOffsetFetchRequest(
   groupId: string,
   topics: ReadonlyMap<string, readonly { partition: number }[]>,
@@ -33,6 +63,34 @@ export function writeConsumerOffsetFetchRequest(
       ),
   );
 }
+export function writeConsumerGroupOffsetFetchRequest(
+  groupId: string,
+  memberId: string | null,
+  memberEpoch: number,
+  topics: ReadonlyMap<string, readonly { partition: number }[]>,
+): RequestBody {
+  return encodeRequest((writer) =>
+    writer
+      .compactArray([groupId], (groupWriter) =>
+        groupWriter
+          .compactString(groupId)
+          .compactString(memberId)
+          .i32(memberEpoch)
+          .compactArray([...topics], (topicWriter, [topic, values]) =>
+            topicWriter
+              .compactString(topic)
+              .compactArray(values, (partitionWriter, value) =>
+                partitionWriter.i32(value.partition),
+              )
+              .tags(),
+          )
+          .tags(),
+      )
+      .bool(false)
+      .tags(),
+  );
+}
+
 export function readConsumerOffsetFetchResponse(body: ResponseBody): {
   topics: Array<{
     topic: string;
@@ -57,6 +115,44 @@ export function readConsumerOffsetFetchResponse(body: ResponseBody): {
   }));
   return { topics, error: reader.i16() };
 }
+export function readConsumerGroupOffsetFetchResponse(body: ResponseBody): {
+  topics: Array<{
+    topic: string;
+    partitions: Array<{
+      partition: number;
+      offset: bigint;
+      metadata: string | null;
+      error: number;
+    }>;
+  }>;
+  error: number;
+} {
+  const reader = decodeResponse(body);
+  reader.i32();
+  const [group] = reader.compactArray((groupReader) => {
+    groupReader.compactString();
+    const topics = groupReader.compactArray((topicReader) => {
+      const topic = topicReader.compactString() ?? "";
+      const partitions = topicReader.compactArray((partitionReader) => {
+        const partition = partitionReader.i32();
+        const offset = partitionReader.i64();
+        partitionReader.i32();
+        const metadata = partitionReader.compactString();
+        const error = partitionReader.i16();
+        partitionReader.skipTags();
+        return { partition, offset, metadata, error };
+      });
+      topicReader.skipTags();
+      return { topic, partitions };
+    });
+    const error = groupReader.i16();
+    groupReader.skipTags();
+    return { topics, error };
+  });
+  reader.skipTags();
+  return group ?? { topics: [], error: 0 };
+}
+
 export function writeListOffsetsRequest(
   topics: ReadonlyMap<string, readonly { partition: number; timestamp: bigint }[]>,
 ): RequestBody {
@@ -88,6 +184,24 @@ export function readListOffsetsResponse(
       });
     })
     .flat();
+}
+
+export function readConsumerGroupOffsetCommitResponse(body: ResponseBody) {
+  const reader = decodeResponse(body);
+  reader.i32();
+  const topics = reader.compactArray((topicReader) => {
+    const topic = topicReader.compactString() ?? "";
+    const partitions = topicReader.compactArray((partitionReader) => {
+      const partition = partitionReader.i32();
+      const error = partitionReader.i16();
+      partitionReader.skipTags();
+      return { partition, error };
+    });
+    topicReader.skipTags();
+    return { topic, partitions };
+  });
+  reader.skipTags();
+  return topics;
 }
 
 export function readConsumerOffsetCommitResponse(body: ResponseBody) {

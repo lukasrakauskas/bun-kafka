@@ -1,12 +1,12 @@
-import type { Cluster } from "../bun/cluster.ts";
 import {
+  API_FIND_COORDINATOR,
+  API_JOIN_GROUP,
+  API_LEAVE_GROUP,
+  API_SYNC_GROUP,
   DEFAULT_REBALANCE_TIMEOUT_MS,
   DEFAULT_SESSION_TIMEOUT_MS,
   GROUP_INSTANCE_API_VERSION,
   JOIN_GROUP_BASE_VERSION,
-  API_FIND_COORDINATOR,
-  API_JOIN_GROUP,
-  API_SYNC_GROUP,
   kafkaError,
   partitionKey,
 } from "../bun/shared.ts";
@@ -15,38 +15,36 @@ import {
   readConsumerSyncResponse,
   readGroupCoordinatorResponse,
   writeConsumerJoinRequest,
-  writeFindCoordinatorRequest,
   writeConsumerSubscription,
   writeConsumerSyncRequest,
+  writeFindCoordinatorRequest,
+  writeLeaveGroupRequest,
 } from "../protocol/index.ts";
 import type {
-  Assigned,
   ConsumerAssignment,
-  ConsumerSettings,
   ConsumerGroupEvent,
-  ConsumerState,
   GroupAssignment,
   GroupMember,
 } from "./types.ts";
-
-type GroupDependencies = {
-  cluster: Cluster;
-  options: ConsumerSettings;
-  state: ConsumerState;
-  assigned: Map<string, Assigned>;
-  positions: Map<string, bigint>;
-  committed(
-    assignments: readonly ConsumerAssignment[],
-  ): Promise<Array<{ offset: bigint; topic: string; partition: number }>>;
-  assign(assignments: ConsumerAssignment[]): Promise<void>;
-  onEvent(event: ConsumerGroupEvent): void;
-};
+import { ConsumerGroupProtocol, type GroupDependencies } from "./group/consumer-protocol.ts";
+import { assignGroupPartitions, withGroupOffsets } from "./group/assignor.ts";
 
 export class GroupCoordinator {
   readonly #deps: GroupDependencies;
+  readonly #consumerProtocol: ConsumerGroupProtocol;
 
   constructor(deps: GroupDependencies) {
     this.#deps = deps;
+    this.#consumerProtocol = new ConsumerGroupProtocol(
+      deps,
+      () =>
+        this.#event({
+          type: "rebalancing",
+          groupId: deps.state.groupId ?? "",
+          memberId: deps.state.memberId,
+        }),
+      (assigned, startedAt) => this.#joinedEvent(assigned, startedAt),
+    );
   }
 
   async join(topics: string[], fromBeginning: boolean): Promise<number> {
@@ -56,6 +54,12 @@ export class GroupCoordinator {
       groupId: this.#deps.state.groupId ?? "",
       memberId: this.#deps.state.memberId,
     });
+    if (this.#deps.options.groupProtocol === "consumer") {
+      const coordinator = await this.#findCoordinator();
+      const assigned = await this.#consumerProtocol.join(coordinator, topics, fromBeginning);
+      this.#joinedEvent(assigned, startedAt);
+      return coordinator;
+    }
     const joined = await this.#joinRequest(topics);
     const assignments = await this.#buildAssignments(
       joined.leader,
@@ -73,6 +77,37 @@ export class GroupCoordinator {
       ? this.#retainedPositions(assigned)
       : new Map<string, bigint>();
     await this.#deps.assign(withGroupOffsets(assigned, committed, retained, fromBeginning));
+    this.#joinedEvent(assigned, startedAt);
+    return joined.coordinator;
+  }
+
+  heartbeat(coordinator: number): Promise<void> {
+    return this.#consumerProtocol.heartbeat(coordinator);
+  }
+
+  async leave(coordinator: number): Promise<void> {
+    if (this.#deps.options.groupProtocol === "consumer") {
+      await this.#consumerProtocol.leave(coordinator);
+      return;
+    }
+    const instanceId = this.#deps.options.groupInstanceId;
+    await this.#deps.cluster.request(
+      coordinator,
+      API_LEAVE_GROUP,
+      instanceId === undefined ? 0 : GROUP_INSTANCE_API_VERSION,
+      writeLeaveGroupRequest(this.#requiredGroupId(), this.#deps.state.memberId, instanceId),
+    );
+  }
+
+  #event(event: ConsumerGroupEvent): void {
+    try {
+      this.#deps.onEvent(event);
+    } catch {
+      // Lifecycle listeners must not change consumer behavior.
+    }
+  }
+
+  #joinedEvent(assigned: ConsumerAssignment[], startedAt: number): void {
     this.#event({
       type: "group_join",
       groupId: this.#deps.state.groupId ?? "",
@@ -86,15 +121,6 @@ export class GroupCoordinator {
       ),
       duration: performance.now() - startedAt,
     });
-    return joined.coordinator;
-  }
-
-  #event(event: ConsumerGroupEvent): void {
-    try {
-      this.#deps.onEvent(event);
-    } catch {
-      // Lifecycle listeners must not change consumer behavior.
-    }
   }
 
   async #findCoordinator(): Promise<number> {
@@ -210,4 +236,3 @@ export class GroupCoordinator {
 }
 
 export { assignGroupPartitions, withGroupOffsets } from "./group/assignor.ts";
-import { assignGroupPartitions, withGroupOffsets } from "./group/assignor.ts";

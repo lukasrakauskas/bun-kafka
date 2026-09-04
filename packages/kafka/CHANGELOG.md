@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- Opt-in KIP-848 consumer groups for Kafka 4.x via `groupProtocol: "consumer"`, including broker-side assignment, member-epoch heartbeats, offset v9, protocol fixtures, rebalance coverage, and a live Kafka 4 matrix
 - Incremental config updates: `admin.incrementalAlterConfigs()` (IncrementalAlterConfigs v1,
   set/delete/append/subtract individual entries with validate-only support), mock and real-broker
   verified

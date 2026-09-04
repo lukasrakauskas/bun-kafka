@@ -72,13 +72,25 @@ await consumer.close();
 
 ## Consumer groups and rebalancing
 
-Group members coordinate through the broker: join → assignment → heartbeat → leave. Two
-assignment strategies are available via `partitionAssigner`:
+The default `groupProtocol: "classic"` flow is join → assignment → heartbeat → leave. Two
+client-side assignment strategies are available via `partitionAssigner`:
 
 - `"range"` (default): eager. Every rebalance revokes everything and reassigns.
 - `"cooperative-sticky"`: incremental (KIP-429). Members keep their partitions across
   rebalances; only partitions that must move change hands. Prefer this for fleets with many
   partitions or frequent deploys.
+
+Kafka 4.x also supports KIP-848 broker-side assignment:
+
+```ts
+const grouped = kafka.consumer({
+  groupId: "workers",
+  groupProtocol: "consumer",
+  groupRemoteAssignor: "uniform", // optional; omit for the broker default
+});
+```
+
+The consumer protocol uses ConsumerGroupHeartbeat and member epochs; the broker controls heartbeat and session intervals. Classic remains the default, so migration is explicit and older brokers continue to use JoinGroup/SyncGroup/Heartbeat. A broker without ConsumerGroupHeartbeat v0 rejects the opt-in during API negotiation.
 
 Static membership (`groupInstanceId`) prevents rebalance storms during rolling restarts:
 members with the same identity rejoin without triggering reassignment.

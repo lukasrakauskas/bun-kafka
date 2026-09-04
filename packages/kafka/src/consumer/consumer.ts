@@ -6,6 +6,7 @@ import { OffsetStore } from "./offsets.ts";
 import { Heartbeat } from "./heartbeat.ts";
 import { Fetcher } from "./fetch.ts";
 import { MessageDecoder } from "./message-decoder.ts";
+import { validateConsumerOptions } from "./options.ts";
 import {
   expandPartitions,
   fetchWatermarks,
@@ -20,16 +21,7 @@ import type {
   ConsumerSubscribe,
   FetchOptions,
 } from "./types.ts";
-import {
-  API_LEAVE_GROUP,
-  GROUP_INSTANCE_API_VERSION,
-  DEFAULT_HEARTBEAT_INTERVAL_MS,
-  DEFAULT_REBALANCE_TIMEOUT_MS,
-  DEFAULT_SESSION_TIMEOUT_MS,
-  partitionKey,
-  type KafkaOptions,
-} from "../bun/shared.ts";
-import { writeLeaveGroupRequest } from "../protocol/index.ts";
+import { partitionKey, type KafkaOptions } from "../bun/shared.ts";
 
 export type {
   ConsumerOptions,
@@ -71,15 +63,7 @@ export class Consumer<K = Uint8Array | null, V = Uint8Array | null> implements A
     this.#ownsCluster = !(options instanceof Cluster);
     this.#cluster = options instanceof Cluster ? options : new Cluster(options);
     this.#options = consumerOptions;
-    const session = consumerOptions.sessionTimeoutMs ?? DEFAULT_SESSION_TIMEOUT_MS;
-    const rebalance = consumerOptions.rebalanceTimeoutMs ?? DEFAULT_REBALANCE_TIMEOUT_MS;
-    const heartbeat = consumerOptions.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
-    if (
-      ![session, rebalance, heartbeat].every((value) => Number.isSafeInteger(value) && value > 0) ||
-      heartbeat >= session
-    ) {
-      throw new RangeError("Invalid consumer group timeout options");
-    }
+    validateConsumerOptions(consumerOptions);
     this.#onClose = onClose;
     this.#decoder = new MessageDecoder(consumerOptions, this.#positions);
     this.#offsets = new OffsetStore(this.#cluster, consumerOptions, this.#positions, this.#state);
@@ -93,8 +77,12 @@ export class Consumer<K = Uint8Array | null, V = Uint8Array | null> implements A
       assign: (assignments) => this.assign(assignments),
       onEvent: consumerOptions.onGroupEvent ?? (() => {}),
     });
-    this.#heartbeat = new Heartbeat(this.#cluster, consumerOptions, this.#state, () =>
-      this.#restartGroup(),
+    this.#heartbeat = new Heartbeat(
+      this.#cluster,
+      consumerOptions,
+      this.#state,
+      () => this.#restartGroup(),
+      (coordinator) => this.#group.heartbeat(coordinator),
     );
     this.#fetcher = new Fetcher(
       this.#cluster,
@@ -292,13 +280,7 @@ export class Consumer<K = Uint8Array | null, V = Uint8Array | null> implements A
       this.#state.generationId >= 0
     ) {
       try {
-        const instanceId = this.#options.groupInstanceId;
-        await this.#cluster.request(
-          this.#state.coordinator,
-          API_LEAVE_GROUP,
-          instanceId === undefined ? 0 : GROUP_INSTANCE_API_VERSION,
-          writeLeaveGroupRequest(this.#state.groupId, this.#state.memberId, instanceId),
-        );
+        await this.#group.leave(this.#state.coordinator);
       } catch {
         // The broker may already be unavailable during shutdown.
       }

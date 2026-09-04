@@ -66,6 +66,8 @@ await grouped.commitOffsets();
 
 Set `partitionAssigner: "cooperative-sticky"` for KIP-429 incremental rebalancing: members retain owned partitions across rebalances and only moved partitions change hands.
 
+Kafka 4.x broker-side assignment (KIP-848) is opt-in with `groupProtocol: "consumer"`. Set `groupRemoteAssignor` to a broker assignor name such as `uniform`, or omit it to use the broker default. The classic protocol remains the default for migration safety and older brokers.
+
 ### Transactions
 
 ```ts
@@ -129,6 +131,7 @@ const kafka = new Kafka({
 | Topic and config administration                                      | Yes     |
 | Consumer groups with static membership (KIP-345)                     | Yes     |
 | Cooperative-sticky rebalancing (KIP-429)                             | Yes     |
+| Next-generation consumer groups (KIP-848, Kafka 4.x)                 | Yes     |
 | Incremental fetch sessions (KIP-227)                                 | Yes     |
 | Read-committed isolation                                             | Yes     |
 | SASL/PLAIN and SCRAM-SHA-256/512                                     | Yes     |
