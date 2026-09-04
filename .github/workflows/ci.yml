@@ -16,6 +16,24 @@ jobs:
   static:
     runs-on: ubuntu-latest
     steps:
+      - name: Check PR conventions
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BRANCH: ${{ github.head_ref }}
+        working-directory: .
+        run: |
+          commit_pattern='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: .+'
+          branch_pattern='^((feat|feature|fix|bugfix|hotfix|docs|style|refactor|perf|test|build|ci|chore|revert|release)/[a-z0-9]+([._-][a-z0-9]+)*|issue-[0-9]+-[a-z0-9]+([._-][a-z0-9]+)*|dependabot/.+|release-please--.+)$'
+
+          [[ "$PR_TITLE" =~ $commit_pattern ]] || {
+            echo "PR title must follow Conventional Commits: type(optional-scope): description" >&2
+            exit 1
+          }
+          [[ "$BRANCH" =~ $branch_pattern ]] || {
+            echo "Branch must use type/lowercase-slug or issue-number-lowercase-slug" >&2
+            exit 1
+          }
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
