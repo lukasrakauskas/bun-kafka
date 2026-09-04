@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-09-04
 
 ### Added
 
@@ -20,16 +20,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   support
 - `docs/client-gap-audit.md`: feature-by-feature gap audit versus kafkajs, node-rdkafka, and
   franz-go with explicit dispositions
-
-### Fixed
-
-- npm packaging: `files` whitelist plus repository/keywords metadata keep the published tarball
-  to source and docs
-
-## [0.2.0] - 2026-08-24
-
-### Added
-
 - Transactions: coordinator resolution, transactional produce, EndTxn/TxnOffsetCommit, and control-batch filtering
 - Incremental fetch sessions (KIP-227), cooperative-sticky assignment (KIP-429), static membership (KIP-345), and timed SASL/OAUTHBEARER reauthentication (KIP-368)
 - Client quotas, delegation tokens, group admin, deleteRecords, ACLs, and cluster id via Metadata v2
@@ -42,6 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- npm packaging: `files` whitelist plus repository/keywords metadata keep the published tarball
+  to source and docs
 - OffsetCommit v2 wire format: INT64 retention period and no v2 response throttle
 
 ### Changed
@@ -59,6 +51,5 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Test coverage across the listed feature set and performance improvements
 - Missing-feature notes and partial chaos testing
 
-[Unreleased]: https://github.com/lukasrakauskas/bun-kafka/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/lukasrakauskas/bun-kafka/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lukasrakauskas/bun-kafka/releases/tag/v0.1.0
