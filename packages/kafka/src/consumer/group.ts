@@ -9,6 +9,7 @@ import {
   JOIN_GROUP_BASE_VERSION,
   kafkaError,
   partitionKey,
+  retryDelay,
 } from "../bun/shared.ts";
 import {
   readConsumerJoinResponse,
@@ -127,17 +128,24 @@ export class GroupCoordinator {
     if (this.#deps.state.coordinator !== undefined) {
       return this.#deps.state.coordinator;
     }
-    const response = await this.#deps.cluster.anyRequest(
-      API_FIND_COORDINATOR,
-      0,
-      writeFindCoordinatorRequest(this.#requiredGroupId()),
-    );
-    const { error, coordinatorId } = readGroupCoordinatorResponse(response);
-    if (error) {
-      throw kafkaError(error, `Kafka group ${this.#deps.state.groupId}`);
+    const groupId = this.#requiredGroupId();
+    for (let attempt = 0; ; attempt++) {
+      const response = await this.#deps.cluster.anyRequest(
+        API_FIND_COORDINATOR,
+        0,
+        writeFindCoordinatorRequest(groupId),
+      );
+      const { error, coordinatorId } = readGroupCoordinatorResponse(response);
+      if (!error) {
+        this.#deps.state.coordinator = coordinatorId;
+        return coordinatorId;
+      }
+      const failure = kafkaError(error, `Kafka group ${groupId}`);
+      if (!failure.retriable || attempt === this.#deps.cluster.retryOptions.maxRetries) {
+        throw failure;
+      }
+      await Bun.sleep(retryDelay(this.#deps.cluster.retryOptions, attempt));
     }
-    this.#deps.state.coordinator = coordinatorId;
-    return coordinatorId;
   }
 
   async #joinRequest(topics: string[]): Promise<{

@@ -208,6 +208,7 @@ describe("KIP-848 consumer group protocol", () => {
     const requests: HeartbeatRequest[] = [];
     const versions = new Map<number, number[]>();
     let heartbeatSequence = 0;
+    let coordinatorAttempts = 0;
     const listener = Bun.listen({
       hostname: "127.0.0.1",
       port: 0,
@@ -234,7 +235,11 @@ describe("KIP-848 consumer group protocol", () => {
             if (key === 18) {
               body = apiVersions();
             } else if (key === 10) {
-              body = encoder().i16(0).i32(1).string("127.0.0.1").i32(listener.port);
+              body = encoder()
+                .i16(coordinatorAttempts++ ? 0 : 15)
+                .i32(1)
+                .string("127.0.0.1")
+                .i32(listener.port);
             } else if (key === 68) {
               requests.push(readHeartbeatRequest(reader));
               body = heartbeatResponse(++heartbeatSequence);
@@ -253,7 +258,10 @@ describe("KIP-848 consumer group protocol", () => {
         },
       },
     });
-    const kafka = new Kafka({ brokers: [`127.0.0.1:${listener.port}`] });
+    const kafka = new Kafka({
+      brokers: [`127.0.0.1:${listener.port}`],
+      retry: { maxRetries: 1, initialBackoffMs: 0, maxBackoffMs: 0 },
+    });
     try {
       const consumer = kafka.consumer({
         groupId: "workers",
@@ -273,6 +281,7 @@ describe("KIP-848 consumer group protocol", () => {
       );
       await consumer.close();
 
+      expect(coordinatorAttempts).toBe(2);
       expect(versions.get(68)?.every((version) => version === 0)).toBe(true);
       expect(versions.get(9)).toContain(9);
       expect(versions.get(8)).toContain(9);
