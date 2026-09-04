@@ -34,7 +34,10 @@ kafka4("KIP-848 consumer groups (Kafka 4.x)", () => {
         () => {
           const left = first.assignment().map(({ partition }) => partition);
           const right = second.assignment().map(({ partition }) => partition);
-          return left.length > 0 && right.length > 0 && new Set([...left, ...right]).size === 2
+          return left.length > 0 &&
+            right.length > 0 &&
+            left.length + right.length === 2 &&
+            new Set([...left, ...right]).size === 2
             ? true
             : undefined;
         },
