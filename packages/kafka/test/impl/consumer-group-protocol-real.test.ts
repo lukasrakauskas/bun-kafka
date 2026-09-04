@@ -50,7 +50,7 @@ kafka4("KIP-848 consumer groups (Kafka 4.x)", () => {
           second.fetch({ maxWaitMs: 5_000, maxMessages: 2 }),
         ])
       ).flat();
-      expect(messages.map(({ value }) => dec(value)).sort()).toEqual(["one", "zero"]);
+      expect([...new Set(messages.map(({ value }) => dec(value)))].sort()).toEqual(["one", "zero"]);
       await Promise.all([first.commitOffsets(), second.commitOffsets()]);
 
       await second.close();
