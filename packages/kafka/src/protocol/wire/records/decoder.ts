@@ -138,9 +138,7 @@ export class RecordSetDecoder {
     if (header.compression) {
       const records = arrayBufferBytes(this.#reader.raw(this.#batchEnd - this.#reader.offset));
       this.#outerReader = this.#reader;
-      this.#reader = new Reader(
-        new Uint8Array(decompressBatchRecords(header.compression, records)),
-      );
+      this.#reader = new Reader(decompressBatchRecords(header.compression, records));
       this.#batchEnd = this.#reader.data.byteLength;
     }
   }
