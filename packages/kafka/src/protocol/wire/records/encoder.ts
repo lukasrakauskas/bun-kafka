@@ -3,7 +3,7 @@ import {
   RECORD_ATTR_TRANSACTIONAL,
   RECORD_BATCH_HEADER_SIZE,
 } from "../../../bun/shared.ts";
-import { arrayBufferBytes, requiredValue } from "../../../type-guards.ts";
+import { requiredValue } from "../../../type-guards.ts";
 import type { Bytes, MessageHeaders } from "../../../types.ts";
 import { getCompressionStrategy, type RecordCompression } from "../../compression.ts";
 import { crc32c } from "../crc32c.ts";
@@ -159,7 +159,8 @@ export function encodeRecordBatch(
   prepared.forEach((record, offset) =>
     writeRecord(recordsWriter, record, offset, baseTimestamp, recordAttributes),
   );
-  const recordBytes = strategy.compress(new Uint8Array(arrayBufferBytes(recordsWriter.result())));
+  const recordBytes =
+    compression === "none" ? recordsWriter.view() : strategy.compress(recordsWriter.view());
   const writer = new Writer(RECORD_BATCH_HEADER_SIZE + recordBytes.byteLength);
   writer
     .i64(baseOffset)
@@ -178,5 +179,6 @@ export function encodeRecordBatch(
     .raw(recordBytes);
   writer.patchI32(RECORD_BATCH_LENGTH_OFFSET, writer.length - RECORD_BATCH_LENGTH_ADJUST);
   writer.patchU32(RECORD_BATCH_CRC_OFFSET, crc32c(writer.view().subarray(RECORD_BATCH_CRC_START)));
-  return writer.result();
+  // The writer is local and never reused; transfer its exact-sized buffer to the caller.
+  return writer.view();
 }
