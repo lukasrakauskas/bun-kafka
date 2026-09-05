@@ -45,6 +45,7 @@ export class Producer {
   #queuedMessages = 0;
   #timer?: ReturnType<typeof setTimeout>;
   #flushing?: Promise<void>;
+  #flushScheduled = false;
   #sender: ProducerSender;
 
   constructor(
@@ -104,7 +105,13 @@ export class Producer {
       this.#pending.push({ input, resolve, reject });
       this.#queuedMessages += input.messages.length;
       if (this.#queuedMessages >= this.#options.batchMaxMessages || this.#options.lingerMs === 0) {
-        queueMicrotask(() => void this.flush().catch(() => {}));
+        if (!this.#flushScheduled) {
+          this.#flushScheduled = true;
+          queueMicrotask(() => {
+            this.#flushScheduled = false;
+            void this.flush().catch(() => {});
+          });
+        }
       } else if (!this.#timer) {
         this.#timer = setTimeout(() => void this.flush().catch(() => {}), this.#options.lingerMs);
       }
