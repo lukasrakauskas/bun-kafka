@@ -151,6 +151,29 @@ describe("record batch compression codecs", () => {
     }
   });
 
+  test("encoded batches own exact-sized buffers independent of inputs and later encodes", () => {
+    for (const codec of ["none", "gzip", "snappy", "lz4", "zstd"] as const) {
+      const input = new Uint8Array([0xff, 1, 2, 3, 0xff]);
+      const bytes = input.subarray(1, 4);
+      const records = [{ key: bytes, value: bytes, headers: { trace: bytes } }];
+      const batch = encodeRecordBatch(records, 1000, codec);
+      const snapshot = batch.slice();
+      expect(batch.byteOffset).toBe(0);
+      expect(batch.buffer.byteLength).toBe(batch.byteLength);
+      input.fill(0);
+      const next = encodeRecordBatch(records, 1000, codec);
+      next.fill(0);
+      expect(batch).toEqual(snapshot);
+      const [message] = decodeRecordSet(batch, "t", 0, 1);
+      expect(message.key).toEqual(new Uint8Array([1, 2, 3]));
+      expect(message.value).toEqual(message.key);
+      expect(message.headers.trace).toEqual(message.key);
+      batch.fill(0);
+      expect(input).toEqual(new Uint8Array(5));
+      expect(message.value).toEqual(new Uint8Array([1, 2, 3]));
+    }
+  });
+
   test("rejects unknown compression names", () => {
     expect(() => encodeRecordBatch(records, Date.now(), "brotli" as never)).toThrow(RangeError);
   });
