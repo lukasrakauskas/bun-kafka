@@ -155,7 +155,8 @@ export class Connection {
       port,
       tls: this.options.tls,
       socket: {
-        data: (_socket, data) => this.#onData(new Uint8Array(data)),
+        binaryType: "uint8array",
+        data: (_socket, data) => this.#onData(data),
         close: (socket) =>
           this.#fail(
             new KafkaError(-1, `Kafka broker ${this.address} closed the connection`, {
