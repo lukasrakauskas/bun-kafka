@@ -4,10 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-09-04
+## [0.1.0] - 2026-09-04
 
 ### Added
 
+- Initial Kafka client implementation with produce, batch consume, and documentation
+- Test coverage across the listed feature set and performance improvements
+- Missing-feature notes and partial chaos testing
 - Opt-in KIP-848 consumer groups for Kafka 4.x via `groupProtocol: "consumer"`, including broker-side assignment, member-epoch heartbeats, offset v9, protocol fixtures, rebalance coverage, and a live Kafka 4 matrix
 - Incremental config updates: `admin.incrementalAlterConfigs()` (IncrementalAlterConfigs v1,
   set/delete/append/subtract individual entries with validate-only support), mock and real-broker
@@ -43,13 +46,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Split the client god class into cluster/producer/consumer/admin modules
 - Reorganized tests into unit/features/impl scopes with coverage tracking
 
-## [0.1.0] - 2026-08-24
-
-### Added
-
-- Initial Kafka client implementation with produce, batch consume, and documentation
-- Test coverage across the listed feature set and performance improvements
-- Missing-feature notes and partial chaos testing
-
-[0.2.0]: https://github.com/lukasrakauskas/bun-kafka/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/lukasrakauskas/bun-kafka/releases/tag/v0.1.0
