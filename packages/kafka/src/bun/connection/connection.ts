@@ -163,9 +163,10 @@ export class Connection {
       port,
       tls: this.options.tls,
       socket: {
+        binaryType: "uint8array",
         data: (socket, data) => {
           if (!this.#ignoredSockets.has(socket)) {
-            this.#onData(new Uint8Array(data));
+            this.#onData(data);
           }
         },
         drain: (socket) => {
