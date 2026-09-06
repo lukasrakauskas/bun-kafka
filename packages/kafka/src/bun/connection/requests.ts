@@ -13,16 +13,19 @@ type PendingRequest = {
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
   flexible: boolean;
+  sent?: () => void;
 };
 
 export class RequestTracker {
   #correlation = 0;
   #pending = new Map<number, PendingRequest>();
+  #writes = new Map<number, Uint8Array>();
 
   constructor(
     readonly address: string,
     readonly clientId: string,
     readonly metrics: ConnectionMetrics,
+    readonly onFailure: (error: Error, socket: Bun.Socket) => void = () => {},
   ) {}
 
   request(
@@ -35,27 +38,54 @@ export class RequestTracker {
   ): Promise<ResponseBody> {
     const { correlation, frame } = this.#createFrame(apiKey, apiVersion, body, flexible);
     return new Promise<ResponseBody>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(correlation);
-        reject(
-          new KafkaError(-1, `Kafka request ${apiKey} timed out after ${timeoutMs}ms`, {
-            retriable: true,
-          }),
-        );
-      }, timeoutMs);
+      const timer = this.#timer(socket, correlation, apiKey, timeoutMs);
       this.#pending.set(correlation, { resolve, reject, timer, flexible });
-      if (socket.write(frame) < 0) {
-        clearTimeout(timer);
-        this.#pending.delete(correlation);
-        reject(this.#writeError());
-      }
+      this.#enqueue(socket, correlation, frame);
     });
   }
 
-  sendOnly(socket: Bun.Socket, apiKey: number, apiVersion: number, body: RequestBody): void {
-    const { frame } = this.#createFrame(apiKey, apiVersion, body, false);
-    if (socket.write(frame) < 0) {
-      throw this.#writeError();
+  sendOnly(
+    socket: Bun.Socket,
+    apiKey: number,
+    apiVersion: number,
+    body: RequestBody,
+    timeoutMs: number,
+  ): Promise<void> {
+    const { correlation, frame } = this.#createFrame(apiKey, apiVersion, body, false);
+    return new Promise<void>((resolve, reject) => {
+      const timer = this.#timer(socket, correlation, apiKey, timeoutMs);
+      this.#pending.set(correlation, {
+        resolve: () => resolve(),
+        reject,
+        timer,
+        flexible: false,
+        sent: resolve,
+      });
+      this.#enqueue(socket, correlation, frame);
+    });
+  }
+
+  drain(socket: Bun.Socket): void {
+    try {
+      for (const [correlation, frame] of this.#writes) {
+        const written = socket.write(frame);
+        if (written < 0) {
+          throw this.#writeError();
+        }
+        if (written < frame.byteLength) {
+          this.#writes.set(correlation, frame.subarray(written));
+          return;
+        }
+        this.#writes.delete(correlation);
+        const pending = this.#pending.get(correlation);
+        if (pending?.sent) {
+          clearTimeout(pending.timer);
+          this.#pending.delete(correlation);
+          pending.sent();
+        }
+      }
+    } catch (error) {
+      this.#abort(error instanceof Error ? error : new Error(String(error)), socket);
     }
   }
 
@@ -63,7 +93,7 @@ export class RequestTracker {
     this.metrics.recordResponse(frame.byteLength);
     const correlation = new DataView(frame.buffer, frame.byteOffset, SIZE_I32).getInt32(0);
     const pending = this.#pending.get(correlation);
-    if (!pending) {
+    if (!pending || pending.sent) {
       return;
     }
     clearTimeout(pending.timer);
@@ -77,11 +107,41 @@ export class RequestTracker {
   }
 
   fail(error: Error): void {
+    this.#writes.clear();
     for (const pending of this.#pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(error);
     }
     this.#pending.clear();
+  }
+
+  #enqueue(socket: Bun.Socket, correlation: number, frame: Uint8Array): void {
+    const blocked = this.#writes.size > 0;
+    this.#writes.set(correlation, frame);
+    if (!blocked) {
+      this.drain(socket);
+    }
+  }
+
+  #timer(socket: Bun.Socket, correlation: number, apiKey: number, timeoutMs: number) {
+    return setTimeout(() => {
+      const error = new KafkaError(-1, `Kafka request ${apiKey} timed out after ${timeoutMs}ms`, {
+        retriable: true,
+      });
+      // Never drop a queued remainder and reuse the stream: that corrupts Kafka framing.
+      if (this.#writes.has(correlation)) {
+        this.#abort(error, socket);
+      } else {
+        this.#pending.get(correlation)?.reject(error);
+        this.#pending.delete(correlation);
+      }
+    }, timeoutMs);
+  }
+
+  #abort(error: Error, socket: Bun.Socket): void {
+    this.fail(error);
+    this.onFailure(error, socket);
+    socket.end();
   }
 
   #createFrame(apiKey: number, apiVersion: number, body: RequestBody, flexible: boolean) {
