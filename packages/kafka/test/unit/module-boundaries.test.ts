@@ -84,7 +84,13 @@ describe("Module boundaries", () => {
 
     const tracker = new RequestTracker("127.0.0.1:1", "test", new ConnectionMetrics());
     await expect(
-      tracker.request({ write: () => 1 } as unknown as Bun.Socket, 3, 0, emptyRequestBody(), 1),
+      tracker.request(
+        { write: (frame: Uint8Array) => frame.byteLength } as unknown as Bun.Socket,
+        3,
+        0,
+        emptyRequestBody(),
+        1,
+      ),
     ).rejects.toThrow("Kafka request 3 timed out");
 
     const metadata = { name: "events", err: KafkaErrorCode.LEADER_NOT_AVAILABLE, partitions: [] };
