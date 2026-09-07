@@ -2,11 +2,11 @@
 
 ## Status
 
-**Current status: benchmarked, short soak qualified, and 24-hour soak-proven for the recorded workload.**
+**Current status: benchmarked, short soak qualified, and 24-hour and 72-hour soak-proven for the recorded workload.**
 
 The repository has short hyperfine tests and a real-broker integration test, plus a long-running soak harness (`bun run test:soak`, implemented in `scripts/soak.ts`). The harness runs one Bun process for the configured duration, produces at a fixed offered rate with periodic bursts, drains with a consumer, samples every metric listed under [required measurements](#required-measurements) each interval, validates a per-partition sequence oracle (order, duplicates, missing records), evaluates automated release gates, and writes JSON and Markdown artifacts to `out/soak/`.
 
-The recorded 30-minute and 24-hour soaks pass all applicable gates. The 72-hour release soak remains outstanding before making performance claims for releases that require that additional duration.
+The recorded 30-minute, 24-hour, and 72-hour soaks pass all applicable gates for their recorded workloads.
 
 ## Current baseline
 
@@ -292,6 +292,32 @@ Environment: Bun 1.4.0, Linux x64, single-node Redpanda 25.2.1 dev container, pl
 
 All release gates passed. Throughput was 1,080 msg/s in the first quarter and 1,086 msg/s in the final quarter; worst post-burst lag overshoot was 50 records and recovered within 30 seconds. The maximum latency values were rare tail spikes; percentile latency and drift gates remained within limits. The full JSON and Markdown artifacts are `packages/kafka/out/soak/2026-08-26T18-19-58.734Z.{json,md}`.
 
+### Soak: 72-hour release profile (2026-09-03 to 2026-09-06)
+
+Environment: Bun 1.4.0, Linux x64, 4 CPUs, single-node Redpanda 25.2.1, plaintext,
+commit `ad8a0bb5a919125a98a9f8b1a4520e18376b34fd`. The base rate was 750 msg/s,
+75% of the highest recorded stable rate of 1,000 msg/s. Bounded one-hour topic retention,
+256 MiB per partition, three 10 MiB Docker log files, and three 5 MiB harness log files
+kept storage finite; the final harness log was 91,763 bytes and 106 GiB remained free.
+
+| Measurement                                           |                                                                                     Result |
+| ----------------------------------------------------- | -----------------------------------------------------------------------------------------: |
+| Duration                                              |                                                                     259,207.5 s (~72 hours) |
+| Workload                                              | 1 KiB values, 6 partitions, acks=all, 750 msg/s base rate, 1.5x/600 s bursts every 3,600 s |
+| Offered / acknowledged / consumed                     |                                                       213,751,038 / 213,751,038 / 213,751,038 |
+| Failed acks / duplicates / order violations / missing |                                                                              0 / 0 / 0 / 0 |
+| Send latency p50/p95/p99/max                          |                                                                        10 / 20 / 20 / 108 ms |
+| Fetch latency p50/p95/p99/max                         |                                                                      50 / 100 / 100 / 251 ms |
+| RSS start -> end, post-warmup range                   |                                                             53 MiB -> 66 MiB, 13.7 MiB range |
+| Requests / retries / throttles                        |                                                                          5,213,413 / 0 / 0 |
+
+All gates passed. Throughput was 822 msg/s in the first quarter and 825 msg/s in the final
+quarter. Send p95 drift was -3.2%, p99 drift was 0%, and the worst post-burst lag overshoot
+was 38 records with recovery within 30 seconds. There were no failed acknowledgements,
+duplicates, ordering violations, missing records, retries, throttles, or unhandled rejections.
+The preserved artifacts are
+`packages/kafka/out/soak/2026-09-03T19-33-10.132Z.{json,md}`.
+
 ### Chaos: three-broker suite (2026-08-25)
 
 Commit `72b01a4` plus the blackhole-recovery fix. 18 pass / 0 fail across the deterministic mock suite, TLS chaos, and three-broker Docker scenarios (leader kill, blackholed leader pause/resume, rolling restart, leader transfer, topic deletion/recreation, netem delay and loss profiles), with 1,000 socket-leak fault cycles. Raw JSON and Markdown artifacts are written to `out/chaos/` on each run; `bun run test:chaos` reproduces them.
@@ -340,7 +366,7 @@ Replace all example zero values with measured values.
 - [ ] Maximum stable rate is measured.
 - [ ] Two-hour qualification passes.
 - [x] Twenty-four-hour soak passes.
-- [ ] Seventy-two-hour soak passes for lifecycle or buffer changes.
+- [x] Seventy-two-hour soak passes for lifecycle or buffer changes.
 - [ ] TLS profile passes when production uses TLS.
 - [ ] `copy: false` and `copy: true` memory behavior is recorded.
 - [ ] Large-history bounded decode passes.

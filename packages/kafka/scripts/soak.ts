@@ -740,7 +740,9 @@ async function main(): Promise<number> {
       partitions: PARTITIONS,
       producer_rate: BASE_RATE,
       maximum_stable_rate: MAX_STABLE_RATE,
-      maximum_stable_rate_fraction: MAX_STABLE_RATE ? round(BASE_RATE / MAX_STABLE_RATE) : 0,
+      maximum_stable_rate_fraction: MAX_STABLE_RATE
+        ? Math.round((BASE_RATE / MAX_STABLE_RATE) * 100) / 100
+        : 0,
       acks: ACKS,
       tls: false,
       copy: false,
