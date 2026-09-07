@@ -64,7 +64,7 @@ The repository needs this setup before automation can run:
 - An npm [trusted publisher](https://docs.npmjs.com/trusted-publishers/) for `bun-kafka`, configured
   for GitHub Actions: owner `lukasrakauskas`, repository `bun-kafka`, workflow `release.yml`, and
   environment `npm`. Allow `npm stage publish`; direct publishing is not needed.
-  The package must already exist on npm. No `NPM_TOKEN` secret is required.
+  The bootstrap `bun-kafka@0.1.0` package already exists on npm. No `NPM_TOKEN` secret is required.
 
 The publish job grants `id-token: write` for OIDC authentication and uses npm CLI `12.0.2` on Node
 24 (24.15.0 or newer). Bun remains the project runtime/package manager; npm is used only for its
