@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "58e3891329ee11a7b923752a293a70cde8340925",
+  "packages": {
+    "packages/kafka": {
+      "include-component-in-tag": false
+    }
+  }
+}
