@@ -5,16 +5,21 @@ import {
   API_LIST_OFFSETS,
   API_OFFSET_COMMIT,
   API_OFFSET_FETCH,
+  CONSUMER_GROUP_OFFSET_API_VERSION,
   EARLIEST_OFFSET,
   kafkaError,
   partitionKey,
 } from "../bun/shared.ts";
 import {
+  readConsumerGroupOffsetCommitResponse,
+  readConsumerGroupOffsetFetchResponse,
   readConsumerOffsetFetchResponse,
   readConsumerOffsetCommitResponse,
   readListOffsetsResponse,
   readGroupCoordinatorResponse,
   writeFindCoordinatorRequest,
+  writeConsumerGroupOffsetCommitRequest,
+  writeConsumerGroupOffsetFetchRequest,
   writeConsumerGroupRequest,
   writeConsumerOffsetFetchRequest,
   writeListOffsetsRequest,
@@ -33,25 +38,40 @@ export class OffsetStore {
   async commit(assignments: readonly ConsumerAssignment[]): Promise<void> {
     const groupId = this.requireGroupId("offset commits");
     const coordinator = await this.findCoordinator();
-    const topics = Map.groupBy(assignments, (assignment) => assignment.topic);
-    const body = writeConsumerGroupRequest(
-      groupId,
-      this.state.generationId,
-      this.state.memberId,
-      new Map(
-        [...topics].map(([topic, values]) => [
-          topic,
-          values.map((value) => ({
-            partition: value.partition,
-            offset: isBigInt(value.offset)
-              ? value.offset
-              : (this.positions.get(partitionKey(topic, value.partition)) ?? 0n),
-          })),
-        ]),
-      ),
+    const topics = new Map(
+      [...Map.groupBy(assignments, (assignment) => assignment.topic)].map(([topic, values]) => [
+        topic,
+        values.map((value) => ({
+          partition: value.partition,
+          offset: isBigInt(value.offset)
+            ? value.offset
+            : (this.positions.get(partitionKey(topic, value.partition)) ?? 0n),
+        })),
+      ]),
     );
-    const response = await this.cluster.request(coordinator, API_OFFSET_COMMIT, 2, body);
-    for (const result of readConsumerOffsetCommitResponse(response)) {
+    const consumerProtocol = this.options.groupProtocol === "consumer";
+    const body = consumerProtocol
+      ? writeConsumerGroupOffsetCommitRequest(
+          groupId,
+          this.state.generationId,
+          this.state.memberId,
+          this.options.groupInstanceId,
+          topics,
+        )
+      : writeConsumerGroupRequest(groupId, this.state.generationId, this.state.memberId, topics);
+    const response = await this.cluster.request(
+      coordinator,
+      API_OFFSET_COMMIT,
+      consumerProtocol ? CONSUMER_GROUP_OFFSET_API_VERSION : 2,
+      body,
+      undefined,
+      true,
+      consumerProtocol,
+    );
+    const results = consumerProtocol
+      ? readConsumerGroupOffsetCommitResponse(response)
+      : readConsumerOffsetCommitResponse(response);
+    for (const result of results) {
       for (const partition of result.partitions) {
         if (partition.error) {
           throw kafkaError(partition.error, `${result.topic}[${partition.partition}]`);
@@ -63,22 +83,32 @@ export class OffsetStore {
   async committed(assignments: readonly ConsumerAssignment[]): Promise<CommittedOffset[]> {
     const groupId = this.requireGroupId("offset fetch");
     const coordinator = await this.findCoordinator();
-    const topics = Map.groupBy(assignments, (assignment) => assignment.topic);
+    const topics = new Map(
+      [...Map.groupBy(assignments, (assignment) => assignment.topic)].map(([topic, values]) => [
+        topic,
+        values.map((value) => ({ partition: value.partition })),
+      ]),
+    );
+    const consumerProtocol = this.options.groupProtocol === "consumer";
     const response = await this.cluster.request(
       coordinator,
       API_OFFSET_FETCH,
-      2,
-      writeConsumerOffsetFetchRequest(
-        groupId,
-        new Map(
-          [...topics].map(([topic, values]) => [
-            topic,
-            values.map((value) => ({ partition: value.partition })),
-          ]),
-        ),
-      ),
+      consumerProtocol ? CONSUMER_GROUP_OFFSET_API_VERSION : 2,
+      consumerProtocol
+        ? writeConsumerGroupOffsetFetchRequest(
+            groupId,
+            this.state.generationId < 0 ? null : this.state.memberId,
+            this.state.generationId,
+            topics,
+          )
+        : writeConsumerOffsetFetchRequest(groupId, topics),
+      undefined,
+      true,
+      consumerProtocol,
     );
-    const decoded = readConsumerOffsetFetchResponse(response);
+    const decoded = consumerProtocol
+      ? readConsumerGroupOffsetFetchResponse(response)
+      : readConsumerOffsetFetchResponse(response);
     if (decoded.error) {
       throw kafkaError(decoded.error, `Kafka group ${groupId}`);
     }

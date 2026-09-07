@@ -7,6 +7,7 @@ import {
 } from "../../protocol/index.ts";
 import {
   API_API_VERSIONS,
+  API_CONSUMER_GROUP_HEARTBEAT,
   API_SASL_AUTHENTICATE,
   API_SASL_HANDSHAKE,
   DEFAULT_BROKER_PORT,
@@ -49,15 +50,19 @@ export class Connection {
   ) {
     parseAddress(address);
     this.address = address;
-    this.#requests = new RequestTracker(address, options.clientId, this.#metrics);
+    this.#requests = new RequestTracker(address, options.clientId, this.#metrics, (error, socket) =>
+      this.#fail(error, socket),
+    );
     this.#framer = new ResponseFramer(options.maxResponseBytes);
     if (options.sasl) {
       this.#sasl = new SaslSession(
         address,
         options.sasl,
         options.requestTimeoutMs,
-        (socket, apiKey, apiVersion, body, timeoutMs) =>
-          this.#requests.request(socket, apiKey, apiVersion, body, timeoutMs),
+        (socket, apiKey, apiVersion, body, timeoutMs) => {
+          this.#assertOpen(socket);
+          return this.#requests.request(socket, apiKey, apiVersion, body, timeoutMs);
+        },
         (error, socket) => this.#fail(error, socket),
       );
     }
@@ -73,6 +78,7 @@ export class Connection {
     this.#assertOpen();
     const socket = await this.#connect();
     await this.#prepare(socket, apiKey, apiVersion, timeoutMs);
+    this.#assertOpen(socket);
     return this.#requests.request(socket, apiKey, apiVersion, body, timeoutMs, flexible);
   }
 
@@ -86,7 +92,8 @@ export class Connection {
     this.#assertOpen();
     const socket = await this.#connect();
     await this.#prepare(socket, apiKey, apiVersion, timeoutMs);
-    this.#requests.sendOnly(socket, apiKey, apiVersion, body);
+    this.#assertOpen(socket);
+    return this.#requests.sendOnly(socket, apiKey, apiVersion, body, timeoutMs);
   }
 
   /** Counters for statistics reporting. */
@@ -100,13 +107,21 @@ export class Connection {
     apiVersion: number,
     timeoutMs: number,
   ): Promise<void> {
+    this.#assertOpen(socket);
     if (apiKey !== API_API_VERSIONS) {
       await this.#negotiate(socket, timeoutMs);
     }
+    this.#assertOpen(socket);
     if (this.#sasl && apiKey !== API_SASL_HANDSHAKE && apiKey !== API_SASL_AUTHENTICATE) {
       await this.#sasl.authenticate(socket, timeoutMs);
     }
     const supported = this.#versions?.get(apiKey);
+    if (apiKey === API_CONSUMER_GROUP_HEARTBEAT && this.#versions && !supported) {
+      throw new KafkaError(
+        KafkaErrorCode.UNSUPPORTED_VERSION,
+        `Kafka broker ${this.address} does not support API ${apiKey}`,
+      );
+    }
     if (supported && (apiVersion < supported.min || apiVersion > supported.max)) {
       throw new KafkaError(
         KafkaErrorCode.UNSUPPORTED_VERSION,
@@ -148,7 +163,17 @@ export class Connection {
       port,
       tls: this.options.tls,
       socket: {
-        data: (_socket, data) => this.#onData(new Uint8Array(data)),
+        binaryType: "uint8array",
+        data: (socket, data) => {
+          if (!this.#ignoredSockets.has(socket)) {
+            this.#onData(data);
+          }
+        },
+        drain: (socket) => {
+          if (socket === this.#socket) {
+            this.#requests.drain(socket);
+          }
+        },
         close: (socket) =>
           this.#fail(
             new KafkaError(-1, `Kafka broker ${this.address} closed the connection`, {
@@ -215,6 +240,11 @@ export class Connection {
     if (socket && (this.#ignoredSockets.has(socket) || (this.#socket && socket !== this.#socket))) {
       return;
     }
+    const failedSocket = socket ?? this.#socket;
+    if (failedSocket) {
+      this.#ignoredSockets.add(failedSocket);
+      failedSocket.end();
+    }
     this.#socket = undefined;
     this.#connecting = undefined;
     this.#versions = undefined;
@@ -224,7 +254,10 @@ export class Connection {
     this.#requests.fail(error);
   }
 
-  #assertOpen(): void {
+  #assertOpen(socket?: Bun.Socket): void {
+    if (socket && socket !== this.#socket) {
+      throw new KafkaError(-1, CLOSED_MESSAGE, { retriable: true });
+    }
     if (this.#closed) {
       throw new Error(CLOSED_MESSAGE);
     }
@@ -235,7 +268,6 @@ export class Connection {
       return;
     }
     this.#closed = true;
-    this.#socket?.end();
     this.#fail(new Error(CLOSED_MESSAGE));
   }
 }

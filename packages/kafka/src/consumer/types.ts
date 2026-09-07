@@ -2,6 +2,10 @@ export interface ConsumerOptions<K = Uint8Array | null, V = Uint8Array | null> {
   fromBeginning?: boolean;
   fetchMaxBytes?: number;
   groupId?: string;
+  /** Group membership protocol. "classic" remains the default; "consumer" requires Kafka 4.x. */
+  groupProtocol?: "classic" | "consumer";
+  /** Broker-side assignor name for the consumer group protocol. */
+  groupRemoteAssignor?: string;
   /** Called before and after each consumer-group join. Listener failures are ignored. */
   onGroupEvent?: (event: ConsumerGroupEvent) => void;
   /** Static group membership identity (KIP-345); requires a broker that supports JoinGroup v3+. */
@@ -81,5 +85,6 @@ export type ConsumerState = {
   generationId: number;
   coordinator?: number;
   groupTopics: string[];
+  heartbeatIntervalMs?: number;
   rejoining?: Promise<void>;
 };

@@ -6,7 +6,7 @@ description: Supported Kafka and Redpanda versions, with a quick cluster compati
 ## Supported brokers
 
 bun-kafka supports Apache Kafka 0.11 or newer and current Kafka-compatible Redpanda releases. It
-uses stable Kafka protocol versions that have been available since Kafka 0.11.
+uses stable Kafka protocol versions that have been available since Kafka 0.11. The opt-in KIP-848 consumer group protocol requires Kafka 4.x.
 
 The client checks each broker when it connects. If the broker does not support a required API,
 the request fails with a typed error instead of sending an incompatible frame.
@@ -33,8 +33,12 @@ A successful connection and health check confirm that bun-kafka can negotiate wi
 Run a produce and consume smoke test as well to verify authentication, authorization, and topic
 configuration.
 
+## Consumer group migration
+
+`groupProtocol: "classic"` is the default and works with the full broker support range. Choose `groupProtocol: "consumer"` only after every member of that group is ready to migrate and the brokers advertise ConsumerGroupHeartbeat v0 (Kafka 4.x). The client does not silently fall back because mixing group protocols would hide a deployment mistake.
+
 ## Compatibility limits
 
 Broker compatibility does not mean that every Kafka feature is implemented. Review
-[Supported features](supported-features.md), especially if you need Kerberos, proxies, KIP-848,
+[Supported features](supported-features.md), especially if you need Kerberos, proxies,
 or rack-aware fetching.

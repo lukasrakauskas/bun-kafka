@@ -2,6 +2,8 @@
 import { RequestBody, ResponseBody } from "../body.ts";
 import { decodeBytes, decodeResponse, encodeRequest, type KafkaDecoder } from "../codec.ts";
 
+const UUID_BYTES = 16;
+
 function readConsumerGroupMemberFromDecoder(reader: KafkaDecoder): {
   memberId: string;
   topics: string[];
@@ -168,6 +170,83 @@ export function readConsumerHeartbeatResponse(
   }
   return reader.i16();
 }
+export type ConsumerGroupTopicPartitions = {
+  topicId: Uint8Array;
+  partitions: number[];
+};
+
+export function writeConsumerGroupHeartbeatRequest(input: {
+  groupId: string;
+  memberId: string;
+  memberEpoch: number;
+  instanceId?: string;
+  rackId?: string;
+  rebalanceTimeoutMs?: number;
+  subscribedTopics?: readonly string[];
+  serverAssignor?: string;
+  topicPartitions?: readonly ConsumerGroupTopicPartitions[];
+}): RequestBody {
+  return encodeRequest((writer) => {
+    writer
+      .compactString(input.groupId)
+      .compactString(input.memberId)
+      .i32(input.memberEpoch)
+      .compactString(input.instanceId ?? null)
+      .compactString(input.rackId ?? null)
+      .i32(input.rebalanceTimeoutMs ?? -1)
+      .compactArray(input.subscribedTopics ?? null, (topicWriter, topic) =>
+        topicWriter.compactString(topic),
+      )
+      .compactString(input.serverAssignor ?? null)
+      .compactArray(input.topicPartitions ?? null, (topicWriter, topic) =>
+        topicWriter
+          .raw(topic.topicId)
+          .compactArray(topic.partitions, (partitionWriter, partition) =>
+            partitionWriter.i32(partition),
+          )
+          .tags(),
+      )
+      .tags();
+  });
+}
+
+export function readConsumerGroupHeartbeatResponse(body: ResponseBody): {
+  throttleMs: number;
+  error: number;
+  message: string | null;
+  memberId: string | null;
+  memberEpoch: number;
+  heartbeatIntervalMs: number;
+  assignment?: ConsumerGroupTopicPartitions[];
+} {
+  const reader = decodeResponse(body);
+  const throttleMs = reader.i32();
+  const error = reader.i16();
+  const message = reader.compactString();
+  const memberId = reader.compactString();
+  const memberEpoch = reader.i32();
+  const heartbeatIntervalMs = reader.i32();
+  const assignment =
+    reader.i8() < 0
+      ? undefined
+      : reader.compactArray((topicReader) => {
+          const topicId = topicReader.raw(UUID_BYTES);
+          const partitions = topicReader.compactArray((partitionReader) => partitionReader.i32());
+          topicReader.skipTags();
+          return { topicId, partitions };
+        });
+  reader.skipTags();
+  return {
+    throttleMs,
+    error,
+    message,
+    memberId,
+    memberEpoch,
+    heartbeatIntervalMs,
+    assignment,
+  };
+}
+
 export function readGroupCoordinatorResponse(body: ResponseBody): {
   error: number;
   coordinatorId: number;

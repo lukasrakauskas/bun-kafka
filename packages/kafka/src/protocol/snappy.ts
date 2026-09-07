@@ -1,5 +1,6 @@
 /* oxlint-disable no-magic-numbers -- codec bit math */
 import { requiredValue } from "../type-guards.ts";
+import { copyMatch } from "./copy-match.ts";
 
 /**
  * Pure-TypeScript Snappy raw-block codec used for Kafka record batches.
@@ -71,13 +72,6 @@ function readCopy(input: Uint8Array, offset: number, tag: number): SnappyCopy {
   };
 }
 
-function copyBytes(output: Uint8Array, pos: number, back: number, length: number): void {
-  let from = pos - back;
-  for (let i = 0; i < length; i++) {
-    output[pos + i] = requiredValue(output[from++], INVALID_COPY);
-  }
-}
-
 function findSnappyMatch(
   input: Uint8Array,
   pos: number,
@@ -132,7 +126,7 @@ function decodeSnappyTag(
   if (copy.back <= 0 || copy.back > pos || pos + copy.length > length) {
     throw new RangeError(INVALID_COPY);
   }
-  copyBytes(output, pos, copy.back, copy.length);
+  copyMatch(output, pos, copy.back, copy.length);
   return { offset: copy.offset, pos: pos + copy.length };
 }
 

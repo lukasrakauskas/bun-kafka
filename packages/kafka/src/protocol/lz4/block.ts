@@ -1,5 +1,6 @@
 /* oxlint-disable no-magic-numbers -- codec bit math */
 import { requiredValue } from "../../type-guards.ts";
+import { copyMatch } from "../copy-match.ts";
 
 const XX_PRIME1 = 0x9e37_79b1;
 
@@ -31,13 +32,6 @@ function readLz4Length(input: Uint8Array, offset: number, length: number): Lz4Le
     if (byte !== 255) {
       return { offset, length };
     }
-  }
-}
-
-function copyLz4Match(output: Uint8Array, pos: number, back: number, length: number): void {
-  let from = pos - back;
-  for (let i = 0; i < length; i++) {
-    output[pos + i] = requiredValue(output[from++], "Invalid LZ4 match");
   }
 }
 
@@ -169,7 +163,7 @@ function decodeLz4Sequence(
   const match = readLz4Length(input, offset, token & 15);
   offset = match.offset;
   output = growLz4Output(output, pos + match.length + 4);
-  copyLz4Match(output, pos, back, match.length + 4);
+  copyMatch(output, pos, back, match.length + 4);
   return { output, offset, pos: pos + match.length + 4, done: false };
 }
 
