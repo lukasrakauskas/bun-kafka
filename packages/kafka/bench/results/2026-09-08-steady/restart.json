@@ -1,0 +1,356 @@
+{
+  "brokers": "127.0.0.1:19092",
+  "samples": [
+    {
+      "profile": {
+        "name": "large-response",
+        "size": 65536,
+        "batch": 8,
+        "windows": 200
+      },
+      "repeat": 0,
+      "lib": "bun-kafka",
+      "mode": "individual",
+      "topic": "steady-57-d615e047-a95e-4b9f-8a94-9bd482a35f63",
+      "fault": {
+        "fault": "restart",
+        "restart_and_health_ms": 2514.071112
+      },
+      "exit_code": 1,
+      "stderr": "174 |             this.#requests.drain(socket);\n175 |           }\n176 |         },\n177 |         close: (socket) =>\n178 |           this.#fail(\n179 |             new KafkaError(-1, `Kafka broker ${this.address} closed the connection`, {\n                  ^\nKafkaError: Kafka broker 127.0.0.1:19092 closed the connection\n      code: -1,\n     fatal: false,\n retriable: true,\n\n      at close (/home/rake/dev/bun-kafka/packages/kafka/src/bun/connection/connection.ts:179:13)\n\nBun v1.4.2 (Linux x64)\n",
+      "sampled_peak_rss_kib": 75212
+    },
+    {
+      "profile": {
+        "name": "large-response",
+        "size": 65536,
+        "batch": 8,
+        "windows": 200
+      },
+      "repeat": 0,
+      "lib": "bun-kafka",
+      "mode": "bulk",
+      "topic": "steady-57-0ae2ed71-d0ba-4dd2-8041-35fac921a13b",
+      "fault": {
+        "fault": "restart",
+        "restart_and_health_ms": 2522.273946
+      },
+      "exit_code": 1,
+      "stderr": "174 |             this.#requests.drain(socket);\n175 |           }\n176 |         },\n177 |         close: (socket) =>\n178 |           this.#fail(\n179 |             new KafkaError(-1, `Kafka broker ${this.address} closed the connection`, {\n                  ^\nKafkaError: Kafka broker 127.0.0.1:19092 closed the connection\n      code: -1,\n     fatal: false,\n retriable: true,\n\n      at close (/home/rake/dev/bun-kafka/packages/kafka/src/bun/connection/connection.ts:179:13)\n\nBun v1.4.2 (Linux x64)\n",
+      "sampled_peak_rss_kib": 98856
+    },
+    {
+      "profile": {
+        "name": "large-response",
+        "size": 65536,
+        "batch": 8,
+        "windows": 200
+      },
+      "repeat": 0,
+      "lib": "franz-go",
+      "mode": "individual",
+      "topic": "steady-57-31f9be91-1459-4393-ad41-c6f1c30b9b41",
+      "fault": {
+        "fault": "restart",
+        "restart_and_health_ms": 2534.924014
+      },
+      "consume_count": 1592,
+      "consume_ms": 50.906923,
+      "count": 1600,
+      "phase": "result",
+      "produce_ms": 4966.616059,
+      "resume_ms": 688.965061,
+      "validated": 2400,
+      "window_ack_ms": [
+        1.736941, 1.1757980000000001, 1.221449, 0.918822, 0.87883, 0.8399399999999999,
+        0.7182170000000001, 0.617555, 0.8930210000000001, 0.893871, 2.172641, 0.804219, 1.432804,
+        3.2213160000000003, 1.197629, 0.695076, 0.699467, 1.538406, 1.126297, 0.830009, 1.521026,
+        0.748878, 1.015844, 1.081155, 0.9166620000000001, 0.956533, 0.539362, 1.912046, 1.016384,
+        0.6201139999999999, 0.617955, 0.725437, 1.090026, 0.540853, 0.588843, 1.1134870000000001,
+        1.0237740000000002, 0.770848, 1.104916, 1.230059, 1.185238, 1.5309869999999999,
+        1.5758969999999999, 1.208868, 1.023595, 0.789778, 1.4114740000000001, 2.621642, 1.078135,
+        1.053345, 1.069955, 0.759978, 0.582644, 1.398663, 0.5948439999999999, 0.696437,
+        0.5345420000000001, 0.921322, 0.650155, 1.030795, 0.818569, 1.326201, 0.723317, 0.772629,
+        1.2406590000000002, 1.27083, 0.690036, 1.163898, 0.576724, 0.46164, 1.3272119999999998,
+        0.7269369999999999, 0.682426, 1.047445, 1.0586849999999999, 3.016541, 2.186742,
+        1.6753989999999999, 1.629109, 0.7822779999999999, 0.595525, 1.120606, 1.035125, 1.384442,
+        0.49237200000000003, 0.47829099999999997, 1.057905, 1.087996, 1.1411170000000002,
+        4729.69104, 1.723401, 1.6779989999999998, 0.9840840000000001, 1.385322, 1.157718, 1.432113,
+        1.128957, 0.747998, 0.9954930000000001, 1.124527, 1.1476870000000001, 1.9229850000000002,
+        1.763882, 1.808523, 0.8405100000000001, 1.234359, 1.618438, 0.900241, 0.83028, 0.798139,
+        0.927612, 1.2015179999999999, 1.498526, 1.629438, 1.6654, 0.800358, 1.469475, 1.209769,
+        1.210198, 1.110667, 1.153527, 1.0594350000000001, 0.9884229999999999, 1.400833, 0.798819,
+        2.0668689999999996, 1.501946, 2.015737, 2.077729, 1.339612, 1.491145, 1.298201,
+        1.0156340000000001, 1.195668, 1.588818, 1.039504, 0.83023, 1.150047, 1.3491119999999999,
+        1.595858, 1.71806, 1.4852260000000002, 1.386072, 1.618108, 1.1332270000000002,
+        0.8956310000000001, 1.4523949999999999, 1.4221430000000002, 1.362292, 1.2381,
+        2.2877639999999997, 1.330121, 1.569187, 1.9375760000000002, 1.0056640000000001, 0.908031,
+        0.947603, 0.87586, 0.992314, 1.146447, 1.360982, 1.427604, 0.910531, 1.004474, 1.184528,
+        0.872331, 1.28633, 0.754258, 0.6262350000000001, 1.7597209999999999, 1.837474, 0.801259,
+        0.766408, 0.745768, 1.376712, 1.245889, 2.034999, 2.182261, 2.269474, 1.521096,
+        1.5083950000000002, 0.8139, 0.915401, 0.85638, 0.84424, 1.370023, 1.119936,
+        1.3990529999999999, 1.747222, 1.389673, 1.025454, 0.778248, 0.7907689999999999, 1.198338,
+        1.928066, 1.612688, 0.85997, 1.342772, 0.971393, 0.8165089999999999
+      ],
+      "cpu_ms": 270,
+      "start_rss_kib": 19956,
+      "end_rss_kib": 19444,
+      "sampled_peak_rss_kib": 21988,
+      "p50_ms": 1.120606,
+      "p95_ms": 2.0668689999999996,
+      "p99_ms": 3.016541
+    },
+    {
+      "profile": {
+        "name": "large-response",
+        "size": 65536,
+        "batch": 8,
+        "windows": 200
+      },
+      "repeat": 0,
+      "lib": "rdkafka-rust",
+      "mode": "individual",
+      "topic": "steady-57-ddf81766-2d7a-427a-8b4f-08d5e1727805",
+      "fault": {
+        "fault": "restart",
+        "restart_and_health_ms": 2535.6148109999995
+      },
+      "exit_code": 101,
+      "stderr": "\nthread 'main' (67625) panicked at src/bin/steady.rs:101:38:\nfetch failure: KafkaError (Message consumption error: AllBrokersDown (Local: All broker connections are down))\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n",
+      "sampled_peak_rss_kib": 10904
+    },
+    {
+      "profile": {
+        "name": "large-response",
+        "size": 65536,
+        "batch": 8,
+        "windows": 200
+      },
+      "repeat": 1,
+      "lib": "bun-kafka",
+      "mode": "bulk",
+      "topic": "steady-57-d8e627a1-47de-4d4a-a55e-fe6fa59a6105",
+      "fault": {
+        "fault": "restart",
+        "restart_and_health_ms": 2528.7633690000002
+      },
+      "exit_code": 1,
+      "stderr": "174 |             this.#requests.drain(socket);\n175 |           }\n176 |         },\n177 |         close: (socket) =>\n178 |           this.#fail(\n179 |             new KafkaError(-1, `Kafka broker ${this.address} closed the connection`, {\n                  ^\nKafkaError: Kafka broker 127.0.0.1:19092 closed the connection\n      code: -1,\n     fatal: false,\n retriable: true,\n\n      at close (/home/rake/dev/bun-kafka/packages/kafka/src/bun/connection/connection.ts:179:13)\n\nBun v1.4.2 (Linux x64)\n",
+      "sampled_peak_rss_kib": 97196
+    },
+    {
+      "profile": {
+        "name": "large-response",
+        "size": 65536,
+        "batch": 8,
+        "windows": 200
+      },
+      "repeat": 1,
+      "lib": "franz-go",
+      "mode": "individual",
+      "topic": "steady-57-09b0c051-dfaa-4937-97c7-661dad8ad3d1",
+      "fault": {
+        "fault": "restart",
+        "restart_and_health_ms": 2530.859268
+      },
+      "consume_count": 1592,
+      "consume_ms": 80.37496900000001,
+      "count": 1600,
+      "phase": "result",
+      "produce_ms": 5012.126694,
+      "resume_ms": 795.227723,
+      "validated": 2400,
+      "window_ack_ms": [
+        2.434637, 1.4624149999999998, 1.307131, 0.6705059999999999, 0.6581049999999999,
+        0.8913709999999999, 1.123527, 1.6141180000000002, 1.5172759999999998, 1.26004, 1.045034,
+        1.201139, 0.948602, 1.3307010000000001, 1.223839, 1.153058, 0.644405, 0.899601, 1.094136,
+        1.69766, 0.745788, 0.656585, 0.980624, 0.629454, 1.544777, 3.756879, 1.945406, 3.570054,
+        1.464995, 1.755351, 0.987133, 1.371723, 1.238159, 0.712577, 0.633215, 0.667436,
+        0.5418219999999999, 1.233919, 1.213368, 1.163698, 1.601758, 1.237239, 0.934932, 1.27738,
+        0.646766, 1.1023459999999998, 0.753697, 1.105537, 1.2079879999999998, 2.623622, 1.630439,
+        1.257179, 1.310151, 2.267004, 2.457858, 1.106316, 1.411523, 1.1381970000000001, 1.034185,
+        1.2602799999999998, 1.173667, 1.222319, 1.3848829999999999, 1.140637, 0.822589, 1.307221,
+        0.882551, 1.062545, 1.26045, 0.85921, 1.1024660000000002, 1.489696, 4740.217938, 0.883741,
+        1.24936, 1.780852, 2.3366350000000002, 0.931512, 1.396773, 0.9101619999999999, 1.559576,
+        1.233449, 1.649899, 1.820864, 1.684409, 0.8001590000000001, 1.1278869999999999,
+        1.4777150000000001, 1.328291, 0.861751, 2.1510700000000003, 1.503046, 2.028158, 1.25547,
+        1.346021, 1.082386, 0.8931209999999999, 1.1825780000000001, 1.322461, 1.67527, 1.815253,
+        0.798809, 1.055015, 1.523696, 1.2468990000000002, 1.666039, 1.506946, 0.7924289999999999,
+        0.8253689999999999, 0.911062, 1.143197, 1.469805, 0.791678, 0.8259, 0.931602, 1.141407,
+        1.69303, 3.130874, 2.837227, 2.1578209999999998, 1.079545, 1.26606, 1.67748, 1.907565,
+        1.103776, 1.116776, 1.2008590000000001, 1.506065, 1.24437, 1.5428359999999999, 1.133747,
+        0.803339, 1.448724, 1.547567, 1.659419, 1.867854, 0.81633, 1.407923, 2.281384, 2.524499,
+        1.476255, 2.017738, 0.928612, 0.753568, 1.072765, 1.116056, 1.5872080000000002, 0.8599,
+        1.541537, 1.340501, 1.814793, 0.686617, 0.803468, 0.963703, 1.233319, 2.11245, 1.094146,
+        1.507706, 2.024148, 1.788352, 1.424764, 2.212742, 2.5518300000000003, 1.466745, 1.332031,
+        1.129567, 1.317581, 1.911275, 1.772102, 1.137087, 2.057199, 1.395673, 1.409983, 1.666579,
+        0.961833, 0.940132, 1.126377, 0.897861, 1.023294, 0.956383, 1.928115, 1.3163420000000001,
+        0.996903, 1.5945580000000001, 2.275104, 1.935805, 1.831834, 2.189151, 1.892255,
+        0.9361820000000001, 1.478675, 0.749028, 1.5041760000000002, 0.958622, 1.742591, 1.557307,
+        0.7628780000000001, 1.060425, 1.005574, 1.825953
+      ],
+      "cpu_ms": 390,
+      "start_rss_kib": 20184,
+      "end_rss_kib": 20208,
+      "sampled_peak_rss_kib": 24484,
+      "p50_ms": 1.257179,
+      "p95_ms": 2.3366350000000002,
+      "p99_ms": 3.570054
+    },
+    {
+      "profile": {
+        "name": "large-response",
+        "size": 65536,
+        "batch": 8,
+        "windows": 200
+      },
+      "repeat": 1,
+      "lib": "rdkafka-rust",
+      "mode": "individual",
+      "topic": "steady-57-d047f7cb-f6bf-44c3-8433-a137bdc07ba3",
+      "fault": {
+        "fault": "restart",
+        "restart_and_health_ms": 2544.058000000001
+      },
+      "exit_code": 101,
+      "stderr": "\nthread 'main' (68674) panicked at src/bin/steady.rs:101:38:\nfetch failure: KafkaError (Message consumption error: AllBrokersDown (Local: All broker connections are down))\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n",
+      "sampled_peak_rss_kib": 10872
+    },
+    {
+      "profile": {
+        "name": "large-response",
+        "size": 65536,
+        "batch": 8,
+        "windows": 200
+      },
+      "repeat": 1,
+      "lib": "bun-kafka",
+      "mode": "individual",
+      "topic": "steady-57-6089af16-aae5-4583-8201-fa1d0f133102",
+      "fault": {
+        "fault": "restart",
+        "restart_and_health_ms": 2533.979872
+      },
+      "exit_code": 1,
+      "stderr": "193 |         }\n194 |         this.#socket = socket;\n195 |         return socket;\n196 |       },\n197 |       (error) => {\n198 |         throw new KafkaError(-1, `Could not connect to Kafka broker ${this.address}: ${error}`, {\n                    ^\nKafkaError: Could not connect to Kafka broker 127.0.0.1:19092: Error: Failed to connect\n      code: -1,\n     fatal: false,\n retriable: true,\n\n      at <anonymous> (/home/rake/dev/bun-kafka/packages/kafka/src/bun/connection/connection.ts:198:15)\n\nBun v1.4.2 (Linux x64)\n",
+      "sampled_peak_rss_kib": 79504
+    },
+    {
+      "profile": {
+        "name": "large-response",
+        "size": 65536,
+        "batch": 8,
+        "windows": 200
+      },
+      "repeat": 2,
+      "lib": "franz-go",
+      "mode": "individual",
+      "topic": "steady-57-bafbde7b-44c9-4807-a02a-3ad880d4fd63",
+      "fault": {
+        "fault": "restart",
+        "restart_and_health_ms": 2531.9779849999977
+      },
+      "consume_count": 1592,
+      "consume_ms": 51.018256,
+      "count": 1600,
+      "phase": "result",
+      "produce_ms": 4984.531402,
+      "resume_ms": 620.556924,
+      "validated": 2400,
+      "window_ack_ms": [
+        1.720291, 1.27709, 1.8129229999999998, 1.317971, 0.8501500000000001, 1.409663, 1.340652,
+        1.0659750000000001, 1.926216, 1.462564, 0.893361, 1.753872, 2.851847, 1.614298, 2.987171,
+        2.285574, 1.111936, 1.048415, 1.788642, 1.532716, 1.597928, 1.221289, 1.503605,
+        1.0109139999999999, 1.282341, 1.9804169999999999, 1.6305779999999999, 1.69013, 1.983897,
+        1.1244370000000001, 1.3980620000000001, 1.8519940000000001, 2.293884, 1.162977, 5.542791,
+        1.786452, 2.234383, 1.327411, 0.872711, 0.479061, 1.102086, 1.556307, 0.916362, 0.939032,
+        2.080339, 0.871571, 1.811472, 1.804163, 1.25887, 1.834993, 1.502686, 2.268313,
+        1.3998929999999998, 1.6079379999999999, 2.021198, 3.866002, 2.531289, 1.144648, 1.095205,
+        4701.978934999999, 1.9914669999999999, 1.479845, 1.210909, 1.437014, 1.083245, 1.609988,
+        1.586408, 2.56618, 1.853964, 1.6518089999999999, 1.053825, 0.973083, 1.1084770000000002,
+        0.812129, 0.970263, 1.973566, 1.448304, 1.637449, 0.872091, 0.819819, 1.287411, 1.020594,
+        1.117116, 1.854484, 1.4418440000000001, 1.25153, 1.148617, 1.2689000000000001, 1.047255,
+        0.762607, 1.1919089999999999, 0.960932, 1.2562, 1.205269, 1.323811, 1.211249,
+        3.2123749999999998, 1.729001, 1.554417, 0.5380429999999999, 1.057475, 1.198778,
+        1.2542499999999999, 1.199138, 1.3193510000000002, 1.207739, 0.9141009999999999,
+        1.0660159999999999, 1.072335, 1.245789, 1.080756, 0.8400000000000001, 0.86987,
+        0.9076620000000001, 1.28867, 1.418994, 1.443684, 1.439514, 1.5150059999999999, 1.133456,
+        1.354452, 1.721981, 1.2339989999999998, 3.482643, 1.573217, 1.29128, 1.282061, 0.803929,
+        0.794918, 0.906332, 0.891821, 1.216719, 1.557526, 1.760262, 0.938152, 1.054815,
+        0.8482299999999999, 1.017874, 1.24009, 0.4502, 1.861004, 0.911872, 1.000503, 0.871501,
+        1.362722, 1.70567, 3.225267, 1.546946, 1.865344, 1.502246, 0.8889009999999999, 0.827609,
+        0.8232400000000001, 0.968993, 1.229889, 1.403673, 1.152967, 1.0847859999999998, 1.568817,
+        0.7937690000000001, 0.792118, 1.0486849999999999, 1.374803, 1.467144, 1.161558, 0.902411,
+        1.317131, 0.768708, 0.8257199999999999, 1.9698670000000003, 2.854577, 1.3785729999999998,
+        1.480905, 1.860484, 1.895424, 1.637709, 1.6445489999999998, 1.372252, 1.1631879999999999,
+        1.009404, 0.84383, 0.963302, 1.24091, 1.158867, 1.039925, 1.475334, 1.129767, 1.809913,
+        0.763078, 0.974963, 0.796899, 0.85865, 1.0900459999999998, 1.662379, 1.8890149999999999,
+        2.1144100000000003, 1.908025, 1.9712269999999998, 1.70991, 1.556037
+      ],
+      "cpu_ms": 300,
+      "start_rss_kib": 21020,
+      "end_rss_kib": 20988,
+      "sampled_peak_rss_kib": 25532,
+      "p50_ms": 1.287411,
+      "p95_ms": 2.531289,
+      "p99_ms": 3.866002
+    },
+    {
+      "profile": {
+        "name": "large-response",
+        "size": 65536,
+        "batch": 8,
+        "windows": 200
+      },
+      "repeat": 2,
+      "lib": "rdkafka-rust",
+      "mode": "individual",
+      "topic": "steady-57-0e3b515f-a794-42e2-aa3a-9520077efd53",
+      "fault": {
+        "fault": "restart",
+        "restart_and_health_ms": 2526.327550999995
+      },
+      "exit_code": 101,
+      "stderr": "\nthread 'main' (69801) panicked at src/bin/steady.rs:101:38:\nfetch failure: KafkaError (Message consumption error: AllBrokersDown (Local: All broker connections are down))\nnote: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n",
+      "sampled_peak_rss_kib": 10920
+    },
+    {
+      "profile": {
+        "name": "large-response",
+        "size": 65536,
+        "batch": 8,
+        "windows": 200
+      },
+      "repeat": 2,
+      "lib": "bun-kafka",
+      "mode": "individual",
+      "topic": "steady-57-87f84a91-57ab-4667-8cf1-3c8752c61eca",
+      "fault": {
+        "fault": "restart",
+        "restart_and_health_ms": 2512.654448000001
+      },
+      "exit_code": 1,
+      "stderr": "174 |             this.#requests.drain(socket);\n175 |           }\n176 |         },\n177 |         close: (socket) =>\n178 |           this.#fail(\n179 |             new KafkaError(-1, `Kafka broker ${this.address} closed the connection`, {\n                  ^\nKafkaError: Kafka broker 127.0.0.1:19092 closed the connection\n      code: -1,\n     fatal: false,\n retriable: true,\n\n      at close (/home/rake/dev/bun-kafka/packages/kafka/src/bun/connection/connection.ts:179:13)\n\nBun v1.4.2 (Linux x64)\n",
+      "sampled_peak_rss_kib": 73572
+    },
+    {
+      "profile": {
+        "name": "large-response",
+        "size": 65536,
+        "batch": 8,
+        "windows": 200
+      },
+      "repeat": 2,
+      "lib": "bun-kafka",
+      "mode": "bulk",
+      "topic": "steady-57-2b3004b6-ae7e-428b-8325-6a77a8955fab",
+      "fault": {
+        "fault": "restart",
+        "restart_and_health_ms": 2517.4428899999984
+      },
+      "exit_code": 1,
+      "stderr": "174 |             this.#requests.drain(socket);\n175 |           }\n176 |         },\n177 |         close: (socket) =>\n178 |           this.#fail(\n179 |             new KafkaError(-1, `Kafka broker ${this.address} closed the connection`, {\n                  ^\nKafkaError: Kafka broker 127.0.0.1:19092 closed the connection\n      code: -1,\n     fatal: false,\n retriable: true,\n\n      at close (/home/rake/dev/bun-kafka/packages/kafka/src/bun/connection/connection.ts:179:13)\n\nBun v1.4.2 (Linux x64)\n",
+      "sampled_peak_rss_kib": 100248
+    }
+  ]
+}
