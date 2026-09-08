@@ -101,21 +101,21 @@ export class Producer {
     if (!input.messages.length) {
       return Promise.resolve([]);
     }
-    return new Promise((resolve, reject) => {
-      this.#pending.push({ input, resolve, reject });
-      this.#queuedMessages += input.messages.length;
-      if (this.#queuedMessages >= this.#options.batchMaxMessages || this.#options.lingerMs === 0) {
-        if (!this.#flushScheduled) {
-          this.#flushScheduled = true;
-          queueMicrotask(() => {
-            this.#flushScheduled = false;
-            void this.flush().catch(() => {});
-          });
-        }
-      } else if (!this.#timer) {
-        this.#timer = setTimeout(() => void this.flush().catch(() => {}), this.#options.lingerMs);
+    const { promise, resolve, reject } = Promise.withResolvers<ProduceResult[]>();
+    this.#pending.push({ input, resolve, reject });
+    this.#queuedMessages += input.messages.length;
+    if (this.#queuedMessages >= this.#options.batchMaxMessages || this.#options.lingerMs === 0) {
+      if (!this.#flushScheduled) {
+        this.#flushScheduled = true;
+        queueMicrotask(() => {
+          this.#flushScheduled = false;
+          void this.flush().catch(() => {});
+        });
       }
-    });
+    } else if (!this.#timer) {
+      this.#timer = setTimeout(() => void this.flush().catch(() => {}), this.#options.lingerMs);
+    }
+    return promise;
   }
 
   async sendBatch(input: ProducerBatch): Promise<ProduceResult[]> {

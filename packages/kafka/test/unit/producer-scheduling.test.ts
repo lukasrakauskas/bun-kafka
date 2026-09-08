@@ -55,6 +55,41 @@ test("linger and explicit flush still drain a below-threshold burst", async () =
   }
 });
 
+test("settled send promises do not retain payloads", async () => {
+  const sender = spyOn(ProducerSender.prototype, "producePendingGroup").mockImplementation(
+    async () => {
+      await Bun.sleep(1);
+      return response;
+    },
+  );
+  const producer = new Producer({ brokers: ["127.0.0.1:1"] }, { lingerMs: 0 });
+  function send() {
+    const value = new Uint8Array(1024);
+    return {
+      reference: new WeakRef(value),
+      promise: producer.send({ topic: "events", messages: [{ value }] }),
+    };
+  }
+  try {
+    const sends: ReturnType<typeof send>[] = [];
+    for (let i = 0; i < 10; i++) {
+      const sent = send();
+      sends.push(sent);
+      await sent.promise;
+    }
+    sender.mockClear(); // Mock call arguments otherwise own the inputs.
+    Bun.gc(true);
+    // The last send's flush is still completing; older payloads must be released.
+    expect(sends.slice(0, -1).every(({ reference }) => reference.deref() === undefined)).toBe(true);
+    expect(await Promise.all(sends.map(({ promise }) => promise))).toEqual(
+      Array.from({ length: 10 }, () => [result]),
+    );
+  } finally {
+    await producer.close();
+    sender.mockRestore();
+  }
+});
+
 test("a failed burst does not prevent scheduling the next one", async () => {
   const sender = spyOn(ProducerSender.prototype, "producePendingGroup")
     .mockRejectedValueOnce(new Error("failed burst"))
