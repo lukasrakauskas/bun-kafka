@@ -58,6 +58,42 @@ sends batches of 1,000 with KafkaJS's default all-replica acknowledgements, and 
 group with `eachMessage`. It is not an equivalent comparison with the manual-assignment,
 leader-acknowledgement lanes above.
 
+## Warmed client comparison (separate host)
+
+A separate 2026-09-08 run used the merged library at `235cb5b`, an AMD Ryzen 7 5700X3D,
+31.3 GiB RAM, Bun 1.4.2, Go 1.27.0, Rust 1.93.1, and local Redpanda 25.2.1. Do not
+compare these numbers directly with the Intel-host startup results above.
+
+Topics and clients are prepared before timing. Each persistent client produces and consumes
+100 warmup windows, then runs the measured workload. Settings match at the application level:
+one partition, leader acknowledgements, no idempotence or compression, zero linger, bounded
+send windows, and 1 MiB fetch limits. Native wire batch boundaries can differ. These are finite
+workloads with content validation, not maximum sustainable capacity measurements.
+
+For 1,000 windows of 100 records × 100 bytes, medians of three processes were:
+
+| Client / send API         | Produce [msg/s] | Consume [msg/s] | Window ack p99 [ms] | Peak RSS [MiB] |
+| ------------------------- | --------------: | --------------: | ------------------: | -------------: |
+| bun-kafka / individual    |         256,111 |       1,126,038 |               1.344 |           93.0 |
+| bun-kafka / bulk          |         249,416 |       1,173,956 |               1.804 |          199.8 |
+| franz-go / individual     |         456,746 |       3,723,650 |               0.484 |           21.7 |
+| rdkafka-rust / individual |         289,149 |       1,972,433 |               0.607 |           12.4 |
+
+Consumer resume and one priming window are outside the consume timer. Ack percentiles measure
+window enqueue-through-final-ack duration, not per-record end-to-end latency. RSS is sampled
+client-process memory. Bun did not beat either native lane on throughput in these workloads.
+
+[Full settings, p50/p95/p99, CPU/RSS, small-message and large-response results, and raw samples](https://github.com/lukasrakauskas/bun-kafka/tree/main/packages/kafka/bench/results/2026-09-08-steady)
+also record these limits:
+
+- All 12 one-second broker-pause trials completed with exact record validation. After hard restart,
+  Go completed three trials; Bun surfaced connection errors and the Rust benchmark stopped on
+  `AllBrokersDown`. Retry policies and fail-fast error handling differ, so this is not an inherent
+  client recovery ranking.
+- Retaining 8 MiB of sparse payloads referenced 128.05 MiB of backing allocations with
+  `copy: false`, versus 8 MiB with `copy: true`. This is an ownership measurement on the merged
+  code, not an isolated regression attributed to the response-framing change.
+
 ## Codec comparison
 
 Both lanes process 20,000 records through encode and decode; timings include process startup.
