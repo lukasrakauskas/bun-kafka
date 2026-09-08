@@ -1,0 +1,2522 @@
+{
+  "date": "2026-09-08",
+  "commit": "4b88c455f611d32b86b26b014d733d741a6c210d",
+  "warmups": 2,
+  "runs": 10,
+  "results": [
+    {
+      "name": "codec-1",
+      "command": ["bun", "bench/bun-codec.ts", "1", "20000"],
+      "samples": [
+        {
+          "wallMs": 142.313243,
+          "measurement": {
+            "recordsPerBatch": 1,
+            "total": 20000,
+            "checksum": "20000"
+          }
+        },
+        {
+          "wallMs": 140.32065999999998,
+          "measurement": {
+            "recordsPerBatch": 1,
+            "total": 20000,
+            "checksum": "20000"
+          }
+        },
+        {
+          "wallMs": 144.60412300000007,
+          "measurement": {
+            "recordsPerBatch": 1,
+            "total": 20000,
+            "checksum": "20000"
+          }
+        },
+        {
+          "wallMs": 148.57014800000002,
+          "measurement": {
+            "recordsPerBatch": 1,
+            "total": 20000,
+            "checksum": "20000"
+          }
+        },
+        {
+          "wallMs": 146.4950369999999,
+          "measurement": {
+            "recordsPerBatch": 1,
+            "total": 20000,
+            "checksum": "20000"
+          }
+        },
+        {
+          "wallMs": 138.2430149999998,
+          "measurement": {
+            "recordsPerBatch": 1,
+            "total": 20000,
+            "checksum": "20000"
+          }
+        },
+        {
+          "wallMs": 148.03311299999996,
+          "measurement": {
+            "recordsPerBatch": 1,
+            "total": 20000,
+            "checksum": "20000"
+          }
+        },
+        {
+          "wallMs": 145.65028699999993,
+          "measurement": {
+            "recordsPerBatch": 1,
+            "total": 20000,
+            "checksum": "20000"
+          }
+        },
+        {
+          "wallMs": 137.91287999999986,
+          "measurement": {
+            "recordsPerBatch": 1,
+            "total": 20000,
+            "checksum": "20000"
+          }
+        },
+        {
+          "wallMs": 138.00764200000003,
+          "measurement": {
+            "recordsPerBatch": 1,
+            "total": 20000,
+            "checksum": "20000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "codec-100",
+      "command": ["bun", "bench/bun-codec.ts", "100", "20000"],
+      "samples": [
+        {
+          "wallMs": 84.28521699999988,
+          "measurement": {
+            "recordsPerBatch": 100,
+            "total": 20000,
+            "checksum": "39800"
+          }
+        },
+        {
+          "wallMs": 78.58945200000016,
+          "measurement": {
+            "recordsPerBatch": 100,
+            "total": 20000,
+            "checksum": "39800"
+          }
+        },
+        {
+          "wallMs": 89.35352899999998,
+          "measurement": {
+            "recordsPerBatch": 100,
+            "total": 20000,
+            "checksum": "39800"
+          }
+        },
+        {
+          "wallMs": 77.82176600000003,
+          "measurement": {
+            "recordsPerBatch": 100,
+            "total": 20000,
+            "checksum": "39800"
+          }
+        },
+        {
+          "wallMs": 79.443307,
+          "measurement": {
+            "recordsPerBatch": 100,
+            "total": 20000,
+            "checksum": "39800"
+          }
+        },
+        {
+          "wallMs": 78.3681529999999,
+          "measurement": {
+            "recordsPerBatch": 100,
+            "total": 20000,
+            "checksum": "39800"
+          }
+        },
+        {
+          "wallMs": 77.9540390000002,
+          "measurement": {
+            "recordsPerBatch": 100,
+            "total": 20000,
+            "checksum": "39800"
+          }
+        },
+        {
+          "wallMs": 75.95808499999976,
+          "measurement": {
+            "recordsPerBatch": 100,
+            "total": 20000,
+            "checksum": "39800"
+          }
+        },
+        {
+          "wallMs": 78.92548500000021,
+          "measurement": {
+            "recordsPerBatch": 100,
+            "total": 20000,
+            "checksum": "39800"
+          }
+        },
+        {
+          "wallMs": 78.6467389999998,
+          "measurement": {
+            "recordsPerBatch": 100,
+            "total": 20000,
+            "checksum": "39800"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode-gzip-0",
+      "command": ["bun", "bench/bun-decode.ts", "gzip", "0"],
+      "samples": [
+        {
+          "wallMs": 626.1730189999998,
+          "measurement": {
+            "codec": "gzip",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 517.954557,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 618.8327179999997,
+          "measurement": {
+            "codec": "gzip",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 524.387919,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 612.27405,
+          "measurement": {
+            "codec": "gzip",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 521.452676,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 622.5715099999998,
+          "measurement": {
+            "codec": "gzip",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 526.171855,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 613.8354520000003,
+          "measurement": {
+            "codec": "gzip",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 521.426205,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 612.853924,
+          "measurement": {
+            "codec": "gzip",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 518.839595,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 610.7041199999994,
+          "measurement": {
+            "codec": "gzip",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 519.5930539999999,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 615.8102050000016,
+          "measurement": {
+            "codec": "gzip",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 517.7333249999999,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 609.6982879999996,
+          "measurement": {
+            "codec": "gzip",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 519.147805,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 615.2094749999997,
+          "measurement": {
+            "codec": "gzip",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 524.230631,
+            "checksum": "199000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode-gzip-1",
+      "command": ["bun", "bench/bun-decode.ts", "gzip", "1"],
+      "samples": [
+        {
+          "wallMs": 162.48488800000086,
+          "measurement": {
+            "codec": "gzip",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 118.69633100000001,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 171.6003729999993,
+          "measurement": {
+            "codec": "gzip",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 124.18267399999999,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 164.0340789999991,
+          "measurement": {
+            "codec": "gzip",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 115.63248200000001,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 157.40252099999998,
+          "measurement": {
+            "codec": "gzip",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 114.28197,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 160.3372990000007,
+          "measurement": {
+            "codec": "gzip",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 118.074139,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 158.833842,
+          "measurement": {
+            "codec": "gzip",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 114.309421,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 158.49969299999975,
+          "measurement": {
+            "codec": "gzip",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 114.737131,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 162.88397000000077,
+          "measurement": {
+            "codec": "gzip",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 118.52612200000002,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 157.88088699999935,
+          "measurement": {
+            "codec": "gzip",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 114.87577999999999,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 154.95603200000005,
+          "measurement": {
+            "codec": "gzip",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 113.410007,
+            "checksum": "199000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode-gzip-8",
+      "command": ["bun", "bench/bun-decode.ts", "gzip", "8"],
+      "samples": [
+        {
+          "wallMs": 168.85442400000102,
+          "measurement": {
+            "codec": "gzip",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 120.47057099999999,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 161.58009500000117,
+          "measurement": {
+            "codec": "gzip",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 117.01557600000001,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 173.22614599999906,
+          "measurement": {
+            "codec": "gzip",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 117.48366099999998,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 174.5838079999994,
+          "measurement": {
+            "codec": "gzip",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 123.638703,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 166.84331300000122,
+          "measurement": {
+            "codec": "gzip",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 120.73020700000001,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 160.92195700000048,
+          "measurement": {
+            "codec": "gzip",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 112.177402,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 174.48052899999857,
+          "measurement": {
+            "codec": "gzip",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 130.619624,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 176.1064529999985,
+          "measurement": {
+            "codec": "gzip",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 127.408402,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 173.87641799999983,
+          "measurement": {
+            "codec": "gzip",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 121.55773299999998,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 176.6953279999998,
+          "measurement": {
+            "codec": "gzip",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 127.101177,
+            "checksum": "199000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode-snappy-0",
+      "command": ["bun", "bench/bun-decode.ts", "snappy", "0"],
+      "samples": [
+        {
+          "wallMs": 469.2798330000005,
+          "measurement": {
+            "codec": "snappy",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 378.598051,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 462.62437300000056,
+          "measurement": {
+            "codec": "snappy",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 379.424526,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 466.641834,
+          "measurement": {
+            "codec": "snappy",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 383.93455800000004,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 473.84860800000024,
+          "measurement": {
+            "codec": "snappy",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 382.46529899999996,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 465.5477269999974,
+          "measurement": {
+            "codec": "snappy",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 384.157826,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 468.89444100000037,
+          "measurement": {
+            "codec": "snappy",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 387.949423,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 480.58511999999973,
+          "measurement": {
+            "codec": "snappy",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 389.699528,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 478.61683000000266,
+          "measurement": {
+            "codec": "snappy",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 395.24676100000005,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 461.9002839999994,
+          "measurement": {
+            "codec": "snappy",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 381.10281399999997,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 465.1714119999997,
+          "measurement": {
+            "codec": "snappy",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 383.07148900000004,
+            "checksum": "199000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode-snappy-1",
+      "command": ["bun", "bench/bun-decode.ts", "snappy", "1"],
+      "samples": [
+        {
+          "wallMs": 270.35019600000305,
+          "measurement": {
+            "codec": "snappy",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 196.160707,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 268.6341990000001,
+          "measurement": {
+            "codec": "snappy",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 201.380452,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 266.38153500000044,
+          "measurement": {
+            "codec": "snappy",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 198.869305,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 268.9620299999988,
+          "measurement": {
+            "codec": "snappy",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 200.40540099999998,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 265.9863039999982,
+          "measurement": {
+            "codec": "snappy",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 196.66171000000003,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 260.83768599999894,
+          "measurement": {
+            "codec": "snappy",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 195.127972,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 279.56730400000015,
+          "measurement": {
+            "codec": "snappy",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 213.43320599999998,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 258.15841,
+          "measurement": {
+            "codec": "snappy",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 190.16349100000002,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 267.4184239999995,
+          "measurement": {
+            "codec": "snappy",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 196.37363,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 262.0343090000024,
+          "measurement": {
+            "codec": "snappy",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 194.34949199999997,
+            "checksum": "199000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode-snappy-8",
+      "command": ["bun", "bench/bun-decode.ts", "snappy", "8"],
+      "samples": [
+        {
+          "wallMs": 417.1236199999985,
+          "measurement": {
+            "codec": "snappy",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 320.724016,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 388.080114999997,
+          "measurement": {
+            "codec": "snappy",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 309.639363,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 407.8383009999998,
+          "measurement": {
+            "codec": "snappy",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 328.651067,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 422.0890380000019,
+          "measurement": {
+            "codec": "snappy",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 324.94152399999996,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 385.314026,
+          "measurement": {
+            "codec": "snappy",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 309.528568,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 388.90771099999984,
+          "measurement": {
+            "codec": "snappy",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 313.63200800000004,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 398.827322000001,
+          "measurement": {
+            "codec": "snappy",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 316.67142,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 388.27122999999847,
+          "measurement": {
+            "codec": "snappy",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 314.680526,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 404.0559549999998,
+          "measurement": {
+            "codec": "snappy",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 322.309653,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 423.0976359999986,
+          "measurement": {
+            "codec": "snappy",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 323.226537,
+            "checksum": "199000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode-lz4-0",
+      "command": ["bun", "bench/bun-decode.ts", "lz4", "0"],
+      "samples": [
+        {
+          "wallMs": 466.72209600000133,
+          "measurement": {
+            "codec": "lz4",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 385.944913,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 463.72283099999913,
+          "measurement": {
+            "codec": "lz4",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 378.290643,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 458.10006700000304,
+          "measurement": {
+            "codec": "lz4",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 377.524821,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 465.5568579999999,
+          "measurement": {
+            "codec": "lz4",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 384.17977499999995,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 446.42731300000014,
+          "measurement": {
+            "codec": "lz4",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 365.20559000000003,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 466.549965000002,
+          "measurement": {
+            "codec": "lz4",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 383.903612,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 462.9061709999987,
+          "measurement": {
+            "codec": "lz4",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 379.636792,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 455.50752600000123,
+          "measurement": {
+            "codec": "lz4",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 374.044191,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 448.64915700000347,
+          "measurement": {
+            "codec": "lz4",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 367.792502,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 463.5661379999947,
+          "measurement": {
+            "codec": "lz4",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 381.96371800000003,
+            "checksum": "199000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode-lz4-1",
+      "command": ["bun", "bench/bun-decode.ts", "lz4", "1"],
+      "samples": [
+        {
+          "wallMs": 249.58842800000275,
+          "measurement": {
+            "codec": "lz4",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 187.94262600000002,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 261.1229749999984,
+          "measurement": {
+            "codec": "lz4",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 198.45218999999997,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 263.9278340000019,
+          "measurement": {
+            "codec": "lz4",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 199.452236,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 267.4456649999993,
+          "measurement": {
+            "codec": "lz4",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 207.74854799999997,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 272.8912510000009,
+          "measurement": {
+            "codec": "lz4",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 201.804625,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 287.11358999999356,
+          "measurement": {
+            "codec": "lz4",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 224.37540700000002,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 271.3897699999943,
+          "measurement": {
+            "codec": "lz4",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 203.56583500000002,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 265.91235900000174,
+          "measurement": {
+            "codec": "lz4",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 203.002946,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 256.1428939999969,
+          "measurement": {
+            "codec": "lz4",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 195.312164,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 270.29509900000266,
+          "measurement": {
+            "codec": "lz4",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 199.588246,
+            "checksum": "199000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode-lz4-8",
+      "command": ["bun", "bench/bun-decode.ts", "lz4", "8"],
+      "samples": [
+        {
+          "wallMs": 300.3064430000013,
+          "measurement": {
+            "codec": "lz4",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 236.698891,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 324.44387200000347,
+          "measurement": {
+            "codec": "lz4",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 254.02531,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 295.4798729999966,
+          "measurement": {
+            "codec": "lz4",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 228.950377,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 299.6619490000012,
+          "measurement": {
+            "codec": "lz4",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 234.42384,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 306.8928289999967,
+          "measurement": {
+            "codec": "lz4",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 244.47309399999997,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 313.10154799999873,
+          "measurement": {
+            "codec": "lz4",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 249.32043000000002,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 296.0554859999975,
+          "measurement": {
+            "codec": "lz4",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 234.65165,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 304.53850900000543,
+          "measurement": {
+            "codec": "lz4",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 242.130109,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 336.3030280000021,
+          "measurement": {
+            "codec": "lz4",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 254.12850100000003,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 303.6472680000006,
+          "measurement": {
+            "codec": "lz4",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 240.325672,
+            "checksum": "199000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode-zstd-0",
+      "command": ["bun", "bench/bun-decode.ts", "zstd", "0"],
+      "samples": [
+        {
+          "wallMs": 461.029472000002,
+          "measurement": {
+            "codec": "zstd",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 378.00847,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 453.610861000001,
+          "measurement": {
+            "codec": "zstd",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 374.684662,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 444.534083999999,
+          "measurement": {
+            "codec": "zstd",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 370.589427,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 462.3612939999948,
+          "measurement": {
+            "codec": "zstd",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 375.06522399999994,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 451.67510899999616,
+          "measurement": {
+            "codec": "zstd",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 375.729332,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 453.79808700000285,
+          "measurement": {
+            "codec": "zstd",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 373.357833,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 455.2375030000039,
+          "measurement": {
+            "codec": "zstd",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 372.12322700000004,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 462.9106909999973,
+          "measurement": {
+            "codec": "zstd",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 384.56167500000004,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 484.06612600000517,
+          "measurement": {
+            "codec": "zstd",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 391.389458,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 479.7387999999992,
+          "measurement": {
+            "codec": "zstd",
+            "period": 0,
+            "total": 100000,
+            "decodeMs": 376.71984000000003,
+            "checksum": "199000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode-zstd-1",
+      "command": ["bun", "bench/bun-decode.ts", "zstd", "1"],
+      "samples": [
+        {
+          "wallMs": 161.71102300000348,
+          "measurement": {
+            "codec": "zstd",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 116.58502899999999,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 171.06549999999697,
+          "measurement": {
+            "codec": "zstd",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 125.86185600000002,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 157.67636299999867,
+          "measurement": {
+            "codec": "zstd",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 114.58161700000001,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 178.95968799999537,
+          "measurement": {
+            "codec": "zstd",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 135.611127,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 158.86271500000294,
+          "measurement": {
+            "codec": "zstd",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 113.93027900000001,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 168.87194699999964,
+          "measurement": {
+            "codec": "zstd",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 121.56197900000001,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 168.6566129999992,
+          "measurement": {
+            "codec": "zstd",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 121.201992,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 158.8724349999975,
+          "measurement": {
+            "codec": "zstd",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 115.107747,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 160.49167699999816,
+          "measurement": {
+            "codec": "zstd",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 115.57244299999999,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 169.18991300000198,
+          "measurement": {
+            "codec": "zstd",
+            "period": 1,
+            "total": 100000,
+            "decodeMs": 125.89053399999999,
+            "checksum": "199000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "decode-zstd-8",
+      "command": ["bun", "bench/bun-decode.ts", "zstd", "8"],
+      "samples": [
+        {
+          "wallMs": 243.0429159999985,
+          "measurement": {
+            "codec": "zstd",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 181.694905,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 232.13463500000216,
+          "measurement": {
+            "codec": "zstd",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 177.295517,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 236.37158099999942,
+          "measurement": {
+            "codec": "zstd",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 183.979575,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 240.73619399999734,
+          "measurement": {
+            "codec": "zstd",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 187.12385799999998,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 233.94025500000134,
+          "measurement": {
+            "codec": "zstd",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 181.104649,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 239.286755000001,
+          "measurement": {
+            "codec": "zstd",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 184.80219599999998,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 244.27662100000452,
+          "measurement": {
+            "codec": "zstd",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 191.478164,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 241.1973960000032,
+          "measurement": {
+            "codec": "zstd",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 186.92960300000001,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 231.95425200000318,
+          "measurement": {
+            "codec": "zstd",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 180.003264,
+            "checksum": "199000"
+          }
+        },
+        {
+          "wallMs": 245.27858500000002,
+          "measurement": {
+            "codec": "zstd",
+            "period": 8,
+            "total": 100000,
+            "decodeMs": 189.05843399999998,
+            "checksum": "199000"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dispatch-0",
+      "command": ["bun", "bench/bun-producer-dispatch.ts", "10000", "0"],
+      "samples": [
+        {
+          "wallMs": 296.0899169999975,
+          "measurement": {
+            "dispatchMs": 191.54394999999997,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 282.45384000000195,
+          "measurement": {
+            "dispatchMs": 175.50733300000002,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 289.80118299999594,
+          "measurement": {
+            "dispatchMs": 186.23540699999998,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 299.6646049999981,
+          "measurement": {
+            "dispatchMs": 179.22015199999998,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 287.1065479999961,
+          "measurement": {
+            "dispatchMs": 183.068099,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 284.50865100000374,
+          "measurement": {
+            "dispatchMs": 178.157383,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 289.02793300000485,
+          "measurement": {
+            "dispatchMs": 183.14364100000003,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 305.0788010000033,
+          "measurement": {
+            "dispatchMs": 193.233339,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 286.61928700000135,
+          "measurement": {
+            "dispatchMs": 168.731179,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 304.8179630000013,
+          "measurement": {
+            "dispatchMs": 183.69642899999997,
+            "requests": 10,
+            "records": 100000
+          }
+        }
+      ]
+    },
+    {
+      "name": "dispatch-5",
+      "command": ["bun", "bench/bun-producer-dispatch.ts", "10000", "5"],
+      "samples": [
+        {
+          "wallMs": 289.0290920000043,
+          "measurement": {
+            "dispatchMs": 178.00340000000003,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 286.04256700000406,
+          "measurement": {
+            "dispatchMs": 175.74949200000003,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 295.33391799999663,
+          "measurement": {
+            "dispatchMs": 183.72429100000002,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 279.5627680000034,
+          "measurement": {
+            "dispatchMs": 184.919224,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 286.51936399999977,
+          "measurement": {
+            "dispatchMs": 180.02714799999995,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 322.9823200000028,
+          "measurement": {
+            "dispatchMs": 199.01599900000002,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 293.8306780000057,
+          "measurement": {
+            "dispatchMs": 179.81055300000003,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 286.8129939999999,
+          "measurement": {
+            "dispatchMs": 170.906758,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 287.47997499999474,
+          "measurement": {
+            "dispatchMs": 180.31602800000002,
+            "requests": 10,
+            "records": 100000
+          }
+        },
+        {
+          "wallMs": 276.91027100000065,
+          "measurement": {
+            "dispatchMs": 182.08362799999998,
+            "requests": 10,
+            "records": 100000
+          }
+        }
+      ]
+    },
+    {
+      "name": "transport-1024",
+      "command": ["bun", "bench/bun-transport.ts", "1024", "10000"],
+      "samples": [
+        {
+          "wallMs": 349.153502000001,
+          "measurement": {
+            "size": 1024,
+            "count": 10000,
+            "transportMs": 324.193818,
+            "checksum": 10240000
+          }
+        },
+        {
+          "wallMs": 346.15955300000496,
+          "measurement": {
+            "size": 1024,
+            "count": 10000,
+            "transportMs": 319.53164000000004,
+            "checksum": 10240000
+          }
+        },
+        {
+          "wallMs": 354.26690500000404,
+          "measurement": {
+            "size": 1024,
+            "count": 10000,
+            "transportMs": 325.94783700000005,
+            "checksum": 10240000
+          }
+        },
+        {
+          "wallMs": 350.4453229999999,
+          "measurement": {
+            "size": 1024,
+            "count": 10000,
+            "transportMs": 324.785787,
+            "checksum": 10240000
+          }
+        },
+        {
+          "wallMs": 348.54288899999665,
+          "measurement": {
+            "size": 1024,
+            "count": 10000,
+            "transportMs": 322.818019,
+            "checksum": 10240000
+          }
+        },
+        {
+          "wallMs": 341.22960999999486,
+          "measurement": {
+            "size": 1024,
+            "count": 10000,
+            "transportMs": 316.796736,
+            "checksum": 10240000
+          }
+        },
+        {
+          "wallMs": 375.45529000000533,
+          "measurement": {
+            "size": 1024,
+            "count": 10000,
+            "transportMs": 349.380729,
+            "checksum": 10240000
+          }
+        },
+        {
+          "wallMs": 344.35221399999864,
+          "measurement": {
+            "size": 1024,
+            "count": 10000,
+            "transportMs": 319.239264,
+            "checksum": 10240000
+          }
+        },
+        {
+          "wallMs": 346.12534899999446,
+          "measurement": {
+            "size": 1024,
+            "count": 10000,
+            "transportMs": 322.05706,
+            "checksum": 10240000
+          }
+        },
+        {
+          "wallMs": 345.90073900000425,
+          "measurement": {
+            "size": 1024,
+            "count": 10000,
+            "transportMs": 320.02418600000004,
+            "checksum": 10240000
+          }
+        }
+      ]
+    },
+    {
+      "name": "transport-65536",
+      "command": ["bun", "bench/bun-transport.ts", "65536", "10000"],
+      "samples": [
+        {
+          "wallMs": 689.0818359999976,
+          "measurement": {
+            "size": 65536,
+            "count": 10000,
+            "transportMs": 657.359294,
+            "checksum": 655360000
+          }
+        },
+        {
+          "wallMs": 683.7243469999958,
+          "measurement": {
+            "size": 65536,
+            "count": 10000,
+            "transportMs": 648.0257839999999,
+            "checksum": 655360000
+          }
+        },
+        {
+          "wallMs": 679.6248479999995,
+          "measurement": {
+            "size": 65536,
+            "count": 10000,
+            "transportMs": 647.358847,
+            "checksum": 655360000
+          }
+        },
+        {
+          "wallMs": 671.740466999996,
+          "measurement": {
+            "size": 65536,
+            "count": 10000,
+            "transportMs": 640.0915219999999,
+            "checksum": 655360000
+          }
+        },
+        {
+          "wallMs": 670.6147819999896,
+          "measurement": {
+            "size": 65536,
+            "count": 10000,
+            "transportMs": 638.289164,
+            "checksum": 655360000
+          }
+        },
+        {
+          "wallMs": 675.2613629999978,
+          "measurement": {
+            "size": 65536,
+            "count": 10000,
+            "transportMs": 642.738001,
+            "checksum": 655360000
+          }
+        },
+        {
+          "wallMs": 712.6927710000018,
+          "measurement": {
+            "size": 65536,
+            "count": 10000,
+            "transportMs": 682.134997,
+            "checksum": 655360000
+          }
+        },
+        {
+          "wallMs": 688.7373789999983,
+          "measurement": {
+            "size": 65536,
+            "count": 10000,
+            "transportMs": 658.038083,
+            "checksum": 655360000
+          }
+        },
+        {
+          "wallMs": 697.2382250000082,
+          "measurement": {
+            "size": 65536,
+            "count": 10000,
+            "transportMs": 666.419415,
+            "checksum": 655360000
+          }
+        },
+        {
+          "wallMs": 678.577449999997,
+          "measurement": {
+            "size": 65536,
+            "count": 10000,
+            "transportMs": 642.090338,
+            "checksum": 655360000
+          }
+        }
+      ]
+    },
+    {
+      "name": "transport-1048576",
+      "command": ["bun", "bench/bun-transport.ts", "1048576", "10000"],
+      "samples": [
+        {
+          "wallMs": 9978.323260000005,
+          "measurement": {
+            "size": 1048576,
+            "count": 10000,
+            "transportMs": 9841.811318,
+            "checksum": 10485760000
+          }
+        },
+        {
+          "wallMs": 10091.526545,
+          "measurement": {
+            "size": 1048576,
+            "count": 10000,
+            "transportMs": 9953.299542,
+            "checksum": 10485760000
+          }
+        },
+        {
+          "wallMs": 9912.621767000004,
+          "measurement": {
+            "size": 1048576,
+            "count": 10000,
+            "transportMs": 9777.320443,
+            "checksum": 10485760000
+          }
+        },
+        {
+          "wallMs": 9864.366403000007,
+          "measurement": {
+            "size": 1048576,
+            "count": 10000,
+            "transportMs": 9730.654285999999,
+            "checksum": 10485760000
+          }
+        },
+        {
+          "wallMs": 10005.141092999998,
+          "measurement": {
+            "size": 1048576,
+            "count": 10000,
+            "transportMs": 9864.876219,
+            "checksum": 10485760000
+          }
+        },
+        {
+          "wallMs": 9966.20014999999,
+          "measurement": {
+            "size": 1048576,
+            "count": 10000,
+            "transportMs": 9815.072191,
+            "checksum": 10485760000
+          }
+        },
+        {
+          "wallMs": 9955.099168999994,
+          "measurement": {
+            "size": 1048576,
+            "count": 10000,
+            "transportMs": 9816.588865999998,
+            "checksum": 10485760000
+          }
+        },
+        {
+          "wallMs": 10070.39358199999,
+          "measurement": {
+            "size": 1048576,
+            "count": 10000,
+            "transportMs": 9928.535032,
+            "checksum": 10485760000
+          }
+        },
+        {
+          "wallMs": 9872.448653,
+          "measurement": {
+            "size": 1048576,
+            "count": 10000,
+            "transportMs": 9741.468644,
+            "checksum": 10485760000
+          }
+        },
+        {
+          "wallMs": 9881.52266799999,
+          "measurement": {
+            "size": 1048576,
+            "count": 10000,
+            "transportMs": 9724.871366,
+            "checksum": 10485760000
+          }
+        }
+      ]
+    },
+    {
+      "name": "bun-kafka",
+      "command": ["bun", "bench/bun-produce-consume.ts"],
+      "samples": [
+        {
+          "wallMs": 279.36832399998093,
+          "measurement": {
+            "lib": "bun-kafka/native",
+            "count": 5000,
+            "produce_ms": 241.77,
+            "consume_ms": 13.03,
+            "produce_msg_s": 20681,
+            "consume_msg_s": 383861
+          }
+        },
+        {
+          "wallMs": 276.8121439999959,
+          "measurement": {
+            "lib": "bun-kafka/native",
+            "count": 5000,
+            "produce_ms": 238.77,
+            "consume_ms": 13.41,
+            "produce_msg_s": 20940,
+            "consume_msg_s": 372780
+          }
+        },
+        {
+          "wallMs": 285.5589069999987,
+          "measurement": {
+            "lib": "bun-kafka/native",
+            "count": 5000,
+            "produce_ms": 245.39,
+            "consume_ms": 14.19,
+            "produce_msg_s": 20376,
+            "consume_msg_s": 352461
+          }
+        },
+        {
+          "wallMs": 285.5828470000124,
+          "measurement": {
+            "lib": "bun-kafka/native",
+            "count": 5000,
+            "produce_ms": 247,
+            "consume_ms": 13.48,
+            "produce_msg_s": 20243,
+            "consume_msg_s": 371045
+          }
+        },
+        {
+          "wallMs": 276.9076510000159,
+          "measurement": {
+            "lib": "bun-kafka/native",
+            "count": 5000,
+            "produce_ms": 237.46,
+            "consume_ms": 13.61,
+            "produce_msg_s": 21056,
+            "consume_msg_s": 367395
+          }
+        },
+        {
+          "wallMs": 275.51158799999394,
+          "measurement": {
+            "lib": "bun-kafka/native",
+            "count": 5000,
+            "produce_ms": 238.58,
+            "consume_ms": 13.24,
+            "produce_msg_s": 20957,
+            "consume_msg_s": 377664
+          }
+        },
+        {
+          "wallMs": 278.15986499999417,
+          "measurement": {
+            "lib": "bun-kafka/native",
+            "count": 5000,
+            "produce_ms": 238.61,
+            "consume_ms": 14.46,
+            "produce_msg_s": 20954,
+            "consume_msg_s": 345832
+          }
+        },
+        {
+          "wallMs": 280.3999849999964,
+          "measurement": {
+            "lib": "bun-kafka/native",
+            "count": 5000,
+            "produce_ms": 242.09,
+            "consume_ms": 13.43,
+            "produce_msg_s": 20653,
+            "consume_msg_s": 372430
+          }
+        },
+        {
+          "wallMs": 274.5900149999943,
+          "measurement": {
+            "lib": "bun-kafka/native",
+            "count": 5000,
+            "produce_ms": 236.95,
+            "consume_ms": 13.56,
+            "produce_msg_s": 21101,
+            "consume_msg_s": 368747
+          }
+        },
+        {
+          "wallMs": 275.6966529999918,
+          "measurement": {
+            "lib": "bun-kafka/native",
+            "count": 5000,
+            "produce_ms": 237.31,
+            "consume_ms": 12.88,
+            "produce_msg_s": 21069,
+            "consume_msg_s": 388154
+          }
+        }
+      ]
+    },
+    {
+      "name": "bun-kafka-alternate",
+      "command": ["bun", "bench/produce_consume.ts"],
+      "samples": [
+        {
+          "wallMs": 274.8415180000011,
+          "measurement": {
+            "lib": "bun-kafka",
+            "count": 5000,
+            "produce_ms": 234.56,
+            "consume_ms": 14.02,
+            "produce_msg_s": 21317,
+            "consume_msg_s": 356717
+          }
+        },
+        {
+          "wallMs": 276.86806499998784,
+          "measurement": {
+            "lib": "bun-kafka",
+            "count": 5000,
+            "produce_ms": 238.94,
+            "consume_ms": 13.2,
+            "produce_msg_s": 20925,
+            "consume_msg_s": 378708
+          }
+        },
+        {
+          "wallMs": 274.68200500000967,
+          "measurement": {
+            "lib": "bun-kafka",
+            "count": 5000,
+            "produce_ms": 237.04,
+            "consume_ms": 12.86,
+            "produce_msg_s": 21093,
+            "consume_msg_s": 388723
+          }
+        },
+        {
+          "wallMs": 274.8064210000157,
+          "measurement": {
+            "lib": "bun-kafka",
+            "count": 5000,
+            "produce_ms": 236.9,
+            "consume_ms": 13.05,
+            "produce_msg_s": 21106,
+            "consume_msg_s": 383049
+          }
+        },
+        {
+          "wallMs": 284.74068799999077,
+          "measurement": {
+            "lib": "bun-kafka",
+            "count": 5000,
+            "produce_ms": 243.11,
+            "consume_ms": 13.4,
+            "produce_msg_s": 20567,
+            "consume_msg_s": 373221
+          }
+        },
+        {
+          "wallMs": 276.10921400002553,
+          "measurement": {
+            "lib": "bun-kafka",
+            "count": 5000,
+            "produce_ms": 235.39,
+            "consume_ms": 15.93,
+            "produce_msg_s": 21242,
+            "consume_msg_s": 313803
+          }
+        },
+        {
+          "wallMs": 279.9399470000062,
+          "measurement": {
+            "lib": "bun-kafka",
+            "count": 5000,
+            "produce_ms": 240.28,
+            "consume_ms": 13.64,
+            "produce_msg_s": 20809,
+            "consume_msg_s": 366524
+          }
+        },
+        {
+          "wallMs": 275.8875490000064,
+          "measurement": {
+            "lib": "bun-kafka",
+            "count": 5000,
+            "produce_ms": 237.52,
+            "consume_ms": 13.17,
+            "produce_msg_s": 21051,
+            "consume_msg_s": 379562
+          }
+        },
+        {
+          "wallMs": 285.9946249999921,
+          "measurement": {
+            "lib": "bun-kafka",
+            "count": 5000,
+            "produce_ms": 246.64,
+            "consume_ms": 14.06,
+            "produce_msg_s": 20273,
+            "consume_msg_s": 355578
+          }
+        },
+        {
+          "wallMs": 276.7608140000084,
+          "measurement": {
+            "lib": "bun-kafka",
+            "count": 5000,
+            "produce_ms": 239.23,
+            "consume_ms": 13.39,
+            "produce_msg_s": 20900,
+            "consume_msg_s": 373354
+          }
+        }
+      ]
+    },
+    {
+      "name": "franz-go",
+      "command": ["native/build/bench-go"],
+      "samples": [
+        {
+          "wallMs": 216.15846199999214,
+          "measurement": {
+            "consume_ms": 3.64,
+            "consume_msg_s": 1373874.73,
+            "count": 5000,
+            "lib": "franz-go",
+            "produce_ms": 207.91,
+            "produce_msg_s": 24048.78,
+            "topic": "refresh-franz-go-ecc58b41-5a89-4cbf-bf68-e2a9dce2b5e7"
+          }
+        },
+        {
+          "wallMs": 217.310891000001,
+          "measurement": {
+            "consume_ms": 3.76,
+            "consume_msg_s": 1328791.35,
+            "count": 5000,
+            "lib": "franz-go",
+            "produce_ms": 209.45,
+            "produce_msg_s": 23871.56,
+            "topic": "refresh-franz-go-b1258a40-8716-4f76-85c2-0d787bc7d3f9"
+          }
+        },
+        {
+          "wallMs": 214.07728500000667,
+          "measurement": {
+            "consume_ms": 3.38,
+            "consume_msg_s": 1480847.9,
+            "count": 5000,
+            "lib": "franz-go",
+            "produce_ms": 206.6,
+            "produce_msg_s": 24201.21,
+            "topic": "refresh-franz-go-352b6f60-4bf4-449e-ad9d-c40ce68fbd71"
+          }
+        },
+        {
+          "wallMs": 216.94619200000307,
+          "measurement": {
+            "consume_ms": 5.46,
+            "consume_msg_s": 915428.84,
+            "count": 5000,
+            "lib": "franz-go",
+            "produce_ms": 207.03,
+            "produce_msg_s": 24151.25,
+            "topic": "refresh-franz-go-b9b1932f-a633-46fb-bb45-894d7c471b24"
+          }
+        },
+        {
+          "wallMs": 221.08357000001706,
+          "measurement": {
+            "consume_ms": 3.57,
+            "consume_msg_s": 1399302.81,
+            "count": 5000,
+            "lib": "franz-go",
+            "produce_ms": 213.23,
+            "produce_msg_s": 23448.69,
+            "topic": "refresh-franz-go-eedc7ab2-c5e3-402a-bd84-6f92bc44e24f"
+          }
+        },
+        {
+          "wallMs": 221.48554900000454,
+          "measurement": {
+            "consume_ms": 7.24,
+            "consume_msg_s": 691006.69,
+            "count": 5000,
+            "lib": "franz-go",
+            "produce_ms": 208.76,
+            "produce_msg_s": 23950.5,
+            "topic": "refresh-franz-go-d4236fea-b748-4709-a403-bed2f540a9bb"
+          }
+        },
+        {
+          "wallMs": 216.69542699999874,
+          "measurement": {
+            "consume_ms": 3.48,
+            "consume_msg_s": 1438269.89,
+            "count": 5000,
+            "lib": "franz-go",
+            "produce_ms": 208.44,
+            "produce_msg_s": 23988.16,
+            "topic": "refresh-franz-go-06a67a80-0653-4cca-b248-79fc369d4c66"
+          }
+        },
+        {
+          "wallMs": 215.07331100001466,
+          "measurement": {
+            "consume_ms": 3.19,
+            "consume_msg_s": 1567815.88,
+            "count": 5000,
+            "lib": "franz-go",
+            "produce_ms": 208.29,
+            "produce_msg_s": 24005.38,
+            "topic": "refresh-franz-go-c50c2601-9a58-4f18-862f-9e91b9640d7b"
+          }
+        },
+        {
+          "wallMs": 214.39729800002533,
+          "measurement": {
+            "consume_ms": 3.12,
+            "consume_msg_s": 1604094.16,
+            "count": 5000,
+            "lib": "franz-go",
+            "produce_ms": 207.71,
+            "produce_msg_s": 24072.26,
+            "topic": "refresh-franz-go-f68ce872-b771-4825-875f-64e46a427fcb"
+          }
+        },
+        {
+          "wallMs": 219.12810999999056,
+          "measurement": {
+            "consume_ms": 6.91,
+            "consume_msg_s": 723509.11,
+            "count": 5000,
+            "lib": "franz-go",
+            "produce_ms": 206.46,
+            "produce_msg_s": 24217.85,
+            "topic": "refresh-franz-go-7ad178b0-026d-4b50-bcde-e52cd0c2388a"
+          }
+        }
+      ]
+    },
+    {
+      "name": "rdkafka-rust",
+      "command": ["native/build/bench-rust"],
+      "samples": [
+        {
+          "wallMs": 725.840465,
+          "measurement": {
+            "consume_ms": 509.51,
+            "consume_msg_s": 9813,
+            "count": 5000,
+            "lib": "rdkafka-rust",
+            "produce_ms": 207.28,
+            "produce_msg_s": 24122,
+            "topic": "refresh-rdkafka-rust-44f5c6dc-5e80-4141-9c1b-9389a2920e23"
+          }
+        },
+        {
+          "wallMs": 725.6624689999999,
+          "measurement": {
+            "consume_ms": 509.63,
+            "consume_msg_s": 9811,
+            "count": 5000,
+            "lib": "rdkafka-rust",
+            "produce_ms": 206.91,
+            "produce_msg_s": 24165,
+            "topic": "refresh-rdkafka-rust-cef58eeb-bde4-400a-af0e-eab813fb6d34"
+          }
+        },
+        {
+          "wallMs": 723.829221,
+          "measurement": {
+            "consume_ms": 506.53,
+            "consume_msg_s": 9871,
+            "count": 5000,
+            "lib": "rdkafka-rust",
+            "produce_ms": 208.01,
+            "produce_msg_s": 24037,
+            "topic": "refresh-rdkafka-rust-534f8c6e-0431-4d01-9b97-bd9cee87d311"
+          }
+        },
+        {
+          "wallMs": 725.2196370000001,
+          "measurement": {
+            "consume_ms": 509.65,
+            "consume_msg_s": 9811,
+            "count": 5000,
+            "lib": "rdkafka-rust",
+            "produce_ms": 206.2,
+            "produce_msg_s": 24248,
+            "topic": "refresh-rdkafka-rust-307e5d84-d7a6-4c49-aac8-4fd96d5b0d17"
+          }
+        },
+        {
+          "wallMs": 724.0334649999995,
+          "measurement": {
+            "consume_ms": 505.04,
+            "consume_msg_s": 9900,
+            "count": 5000,
+            "lib": "rdkafka-rust",
+            "produce_ms": 209.78,
+            "produce_msg_s": 23835,
+            "topic": "refresh-rdkafka-rust-258d37f7-8b54-40b7-9fb1-c0d9b3f01c77"
+          }
+        },
+        {
+          "wallMs": 725.3033210000003,
+          "measurement": {
+            "consume_ms": 508.76,
+            "consume_msg_s": 9828,
+            "count": 5000,
+            "lib": "rdkafka-rust",
+            "produce_ms": 208.35,
+            "produce_msg_s": 23998,
+            "topic": "refresh-rdkafka-rust-74550686-ac40-47e9-9968-be83d20f1444"
+          }
+        },
+        {
+          "wallMs": 724.5144629999995,
+          "measurement": {
+            "consume_ms": 505.93,
+            "consume_msg_s": 9883,
+            "count": 5000,
+            "lib": "rdkafka-rust",
+            "produce_ms": 209.6,
+            "produce_msg_s": 23855,
+            "topic": "refresh-rdkafka-rust-faca55c7-2740-409f-9638-1aaadb473237"
+          }
+        },
+        {
+          "wallMs": 719.1497960000006,
+          "measurement": {
+            "consume_ms": 505.02,
+            "consume_msg_s": 9901,
+            "count": 5000,
+            "lib": "rdkafka-rust",
+            "produce_ms": 205.94,
+            "produce_msg_s": 24279,
+            "topic": "refresh-rdkafka-rust-e4ed83d5-ac7d-48ba-be26-3627d12507e1"
+          }
+        },
+        {
+          "wallMs": 726.0181199999997,
+          "measurement": {
+            "consume_ms": 510.13,
+            "consume_msg_s": 9801,
+            "count": 5000,
+            "lib": "rdkafka-rust",
+            "produce_ms": 206.84,
+            "produce_msg_s": 24173,
+            "topic": "refresh-rdkafka-rust-b0109ee4-eb52-4cdc-b129-05c63e68effa"
+          }
+        },
+        {
+          "wallMs": 727.8856610000003,
+          "measurement": {
+            "consume_ms": 507.58,
+            "consume_msg_s": 9851,
+            "count": 5000,
+            "lib": "rdkafka-rust",
+            "produce_ms": 207.97,
+            "produce_msg_s": 24042,
+            "topic": "refresh-rdkafka-rust-6316efa4-ad4f-4c62-aa83-a9a5ce3a5d17"
+          }
+        }
+      ]
+    },
+    {
+      "name": "kafkajs",
+      "command": ["bun", "bench/kafkajs.ts"],
+      "samples": [
+        {
+          "wallMs": 538.6872150000017,
+          "measurement": {
+            "lib": "kafkajs",
+            "topic": "refresh-kafkajs-35177f6f-523e-4d18-a6c1-a3efb436213f",
+            "count": 5000,
+            "produce_ms": 83.25,
+            "consume_ms": 53.87,
+            "produce_msg_s": 60062,
+            "consume_msg_s": 92824
+          }
+        },
+        {
+          "wallMs": 546.8616110000003,
+          "measurement": {
+            "lib": "kafkajs",
+            "topic": "refresh-kafkajs-84a1d93e-f957-49fe-bb67-8ea8a282171a",
+            "count": 5000,
+            "produce_ms": 85.63,
+            "consume_ms": 59.38,
+            "produce_msg_s": 58392,
+            "consume_msg_s": 84200
+          }
+        },
+        {
+          "wallMs": 550.2224339999993,
+          "measurement": {
+            "lib": "kafkajs",
+            "topic": "refresh-kafkajs-76d34e47-65cd-42cb-b64f-7b55b1cc9ed3",
+            "count": 5000,
+            "produce_ms": 87.65,
+            "consume_ms": 52.69,
+            "produce_msg_s": 57044,
+            "consume_msg_s": 94889
+          }
+        },
+        {
+          "wallMs": 545.5456969999996,
+          "measurement": {
+            "lib": "kafkajs",
+            "topic": "refresh-kafkajs-23bb5186-96be-487f-abfd-0af1935ce318",
+            "count": 5000,
+            "produce_ms": 89.67,
+            "consume_ms": 55.48,
+            "produce_msg_s": 55758,
+            "consume_msg_s": 90118
+          }
+        },
+        {
+          "wallMs": 542.1335450000006,
+          "measurement": {
+            "lib": "kafkajs",
+            "topic": "refresh-kafkajs-9a407b7f-9c1f-44ae-a077-bbce5c8c3ed6",
+            "count": 5000,
+            "produce_ms": 83.67,
+            "consume_ms": 53.45,
+            "produce_msg_s": 59761,
+            "consume_msg_s": 93547
+          }
+        },
+        {
+          "wallMs": 569.2218140000004,
+          "measurement": {
+            "lib": "kafkajs",
+            "topic": "refresh-kafkajs-e8c2013e-6bd2-467f-a5cd-047add165624",
+            "count": 5000,
+            "produce_ms": 105.66,
+            "consume_ms": 60.37,
+            "produce_msg_s": 47323,
+            "consume_msg_s": 82826
+          }
+        },
+        {
+          "wallMs": 547.5347060000004,
+          "measurement": {
+            "lib": "kafkajs",
+            "topic": "refresh-kafkajs-2414ede4-5083-4f00-b250-0bef089b6da7",
+            "count": 5000,
+            "produce_ms": 87.07,
+            "consume_ms": 53.9,
+            "produce_msg_s": 57428,
+            "consume_msg_s": 92763
+          }
+        },
+        {
+          "wallMs": 549.5527750000001,
+          "measurement": {
+            "lib": "kafkajs",
+            "topic": "refresh-kafkajs-f9aa4732-0e46-475d-8116-4c2fd29e68ae",
+            "count": 5000,
+            "produce_ms": 89.24,
+            "consume_ms": 54.54,
+            "produce_msg_s": 56027,
+            "consume_msg_s": 91676
+          }
+        },
+        {
+          "wallMs": 539.8502600000011,
+          "measurement": {
+            "lib": "kafkajs",
+            "topic": "refresh-kafkajs-2c22f022-363c-43ee-8010-e1bd6bea74ec",
+            "count": 5000,
+            "produce_ms": 79.26,
+            "consume_ms": 51.13,
+            "produce_msg_s": 63087,
+            "consume_msg_s": 97791
+          }
+        },
+        {
+          "wallMs": 550.3152570000002,
+          "measurement": {
+            "lib": "kafkajs",
+            "topic": "refresh-kafkajs-e1979004-9b13-452e-9dd6-4e6f66158e6a",
+            "count": 5000,
+            "produce_ms": 92.14,
+            "consume_ms": 54.36,
+            "produce_msg_s": 54264,
+            "consume_msg_s": 91981
+          }
+        }
+      ]
+    }
+  ]
+}
