@@ -1,4 +1,4 @@
-import { SIZE_I32 } from "../bun/shared.ts";
+import { INT16_MAX, SIZE_I32 } from "../bun/shared.ts";
 import { RequestBody, ResponseBody, requestFromWriter, responseFromReader } from "./body.ts";
 import { Reader } from "./wire/reader.ts";
 import { Writer } from "./wire/writer.ts";
@@ -12,20 +12,32 @@ export type RequestFrameInput = {
   flexible?: boolean;
 };
 
+const REQUEST_HEADER_SIZE = 14;
+const textEncoder = new TextEncoder();
+
 export function writeRequestFrame(input: RequestFrameInput): Uint8Array {
-  const frame = new Writer();
+  const clientId = textEncoder.encode(input.clientId);
+  if (clientId.byteLength > INT16_MAX) {
+    throw new RangeError("Kafka string is too long");
+  }
+  const body = input.body.toBytes();
+  const frame = new Writer(
+    REQUEST_HEADER_SIZE + clientId.byteLength + (input.flexible ? 1 : 0) + body.byteLength,
+  );
   frame
     .i32(0)
     .i16(input.apiKey)
     .i16(input.apiVersion)
     .i32(input.correlationId)
-    .string(input.clientId);
+    .i16(clientId.byteLength)
+    .raw(clientId);
   if (input.flexible) {
     frame.uvarint(0);
   }
-  frame.raw(input.body.toBytes());
+  frame.raw(body);
   frame.patchI32(0, frame.length - SIZE_I32);
-  return frame.result();
+  // The local writer is never reused; return its exact-sized, owned allocation.
+  return frame.view();
 }
 
 export function writeResponseFrame(correlationId: number, bodyBytes: Uint8Array): Uint8Array {
